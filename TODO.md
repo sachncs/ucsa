@@ -77,8 +77,8 @@ update `CHANGELOG.md` `[Unreleased]` and pass `ruff`, `mypy --strict`, and
 
 ## Phase 7 — Projection heads
 
-- [ ] feat(heads): add Language/Planning/Tool/Memory heads over working memory
-- [ ] test(heads): cover independent forward, gradient isolation, output shapes
+- [x] feat(heads): add Language/Planning/Tool/Memory heads over working memory
+- [x] test(heads): cover independent forward, gradient isolation, output shapes
 
 ## Phase 8 — Training pipeline
 
