@@ -20,3 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `retention_score`, `resolve_bank_sizes`, `build_bank_specs`. Six token
   banks (working/long_term/goal/episode/task/memory_index), retention
   metadata buffers, recycle policy.
+- `ucsa.models.transition_operator`: abstract `StateTransitionOperator`
+  base class with `forward`, `reset`, `initialize`, and `name` contract.
+- `ucsa.models.transformer_operator`: `TransformerOperator` with RMSNorm,
+  rotary embeddings, grouped-query attention, sliding-window KV cache,
+  `memory_index` cross-attention, gated FFN, and `MoEConfig` (FFN-only
+  blocks in this commit; MoE swap-in is added in the next feat commit).
