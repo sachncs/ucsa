@@ -40,4 +40,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ucsa.models.memory`: `Memory`, `MemoryUpdate`. Hierarchical memory
   facade wrapping the PCS: scratch / working / episode / long-term.
   Includes candidate proposal, long-term acceptance with capacity
-  enforcement, episode snapshotting, and recycle-by-bottom-k.
+  enforcement, episode snapshotting, recycle-by-bottom-k, retention-
+  score access, FIFO recycle, and threshold-based recycle.

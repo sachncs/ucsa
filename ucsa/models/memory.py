@@ -256,5 +256,98 @@ class Memory:
         """Return the fraction of long-term capacity in use."""
         return self.long_term_usage() / max(1, self.long_term_capacity)
 
+    def get_retention_scores(self, bank: str = "long_term") -> Tensor:
+        """Return the retention scores of every slot in ``bank``.
+
+        Args:
+            bank: Bank identifier.
+
+        Returns:
+            Tensor of shape ``(num_tokens,)`` with retention scores.
+        """
+        if bank not in self.cstate.bank_specs:
+            raise KeyError(f"Unknown bank '{bank}'.")
+        self.cstate.update_retention()
+        return getattr(self.cstate, f"meta_retention_{bank}").clone()
+
+    def recycle_fifo(self, k: int) -> list[int]:
+        """Recycle the ``k`` oldest (highest-age) slots in long-term.
+
+        Recycles by age, regardless of retention score. Used when a FIFO
+        policy is preferred over retention-based recycling.
+
+        Args:
+            k: Number of slots to recycle.
+
+        Returns:
+            Indices of recycled slots, oldest first.
+        """
+        if k <= 0:
+            return []
+        age = getattr(self.cstate, "meta_age_long_term")
+        num_tokens = age.shape[0]
+        k_eff = min(k, num_tokens)
+        _, indices = torch.topk(age.float(), k_eff, largest=True)
+        target = self.cstate.get_bank("long_term")
+        replacement = torch.zeros(
+            k_eff,
+            self.cstate.config.hidden_size,
+            device=target.device,
+            dtype=target.dtype,
+        )
+        with torch.no_grad():
+            target[indices] = replacement
+            for field in ("importance", "usage", "age", "retention"):
+                buffer = getattr(self.cstate, f"meta_{field}_long_term")
+                buffer[indices] = 0.0 if field != "age" else 0
+        return [int(i) for i in indices.tolist()]
+
+    def get_low_retention_threshold(self, percentile: float) -> float:
+        """Return the retention-score percentile used as recycle cutoff.
+
+        Args:
+            percentile: Percentile in ``[0, 1]``.
+
+        Returns:
+            Scalar threshold.
+        """
+        if not 0.0 <= percentile <= 1.0:
+            raise ValueError(
+                f"percentile must be in [0, 1], got {percentile}."
+            )
+        scores = self.get_retention_scores("long_term")
+        if scores.numel() == 0:
+            return 0.0
+        return float(torch.quantile(scores, percentile).item())
+
+    def recycle_below(self, threshold: float) -> list[int]:
+        """Recycle every long-term slot whose retention score is below
+        ``threshold``.
+
+        Args:
+            threshold: Retention score cutoff.
+
+        Returns:
+            Indices of recycled slots.
+        """
+        scores = self.get_retention_scores("long_term")
+        mask = scores < threshold
+        if not mask.any():
+            return []
+        indices = torch.nonzero(mask, as_tuple=False).squeeze(-1)
+        target = self.cstate.get_bank("long_term")
+        replacement = torch.zeros(
+            indices.shape[0],
+            self.cstate.config.hidden_size,
+            device=target.device,
+            dtype=target.dtype,
+        )
+        with torch.no_grad():
+            target[indices] = replacement
+            for field in ("importance", "usage", "age", "retention"):
+                buffer = getattr(self.cstate, f"meta_{field}_long_term")
+                buffer[indices] = 0.0 if field != "age" else 0
+        return [int(i) for i in indices.tolist()]
+
 
 __all__ = ["Memory", "MemoryUpdate"]
