@@ -201,9 +201,9 @@ class MemoryService:
         Args:
             task: The task payload.
         """
+        self.stats.verified += 1
         score, accepted = self.verifier.verify(task.candidate, task.cstate)
         self.last_verification_signal.append(score)
-        self.stats.verified += 1
         if accepted:
             self.memory.accept_into_long_term(task.candidate)
             self.stats.accepted += 1
@@ -265,9 +265,9 @@ class MemoryService:
         Used for tests that don't want to spawn the worker thread.
         """
         if isinstance(task, VerificationTask):
+            self.stats.verified += 1
             score, accepted = self.verifier.verify(task.candidate, task.cstate)
             self.last_verification_signal.append(score)
-            self.stats.verified += 1
             if accepted:
                 self.memory.accept_into_long_term(task.candidate)
                 self.stats.accepted += 1
