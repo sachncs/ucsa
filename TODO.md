@@ -40,12 +40,12 @@ update `CHANGELOG.md` `[Unreleased]` and pass `ruff`, `mypy --strict`, and
 
 ## Phase 3 — Reasoning + perception
 
-- [ ] feat(perception): add tokenizer + embedding + positional + modality
+- [x] feat(perception): add tokenizer + embedding + positional + modality
       projection
-- [ ] test(perception): cover tokenize -> embed -> project pipeline, modality
+- [x] test(perception): cover tokenize -> embed -> project pipeline, modality
       alignment
-- [ ] feat(loop): add ReasoningLoop with N-iteration operator calls
-- [ ] test(loop): cover iteration count, observation injection, state isolation
+- [x] feat(loop): add ReasoningLoop with N-iteration operator calls
+- [x] test(loop): cover iteration count, observation injection, state isolation
 
 ## Phase 4 — Memory
 
