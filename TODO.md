@@ -26,16 +26,16 @@ update `CHANGELOG.md` `[Unreleased]` and pass `ruff`, `mypy --strict`, and
 
 ## Phase 2 — PCS + operator
 
-- [ ] feat(pcs): add PersistentCognitiveState with six banks and retention
+- [x] feat(pcs): add PersistentCognitiveState with six banks and retention
       buffers
-- [ ] test(pcs): cover bank shapes, parameter registration, retention math
-- [ ] feat(operator): add StateTransitionOperator ABC with reset/initialize
+- [x] test(pcs): cover bank shapes, parameter registration, retention math
+- [x] feat(operator): add StateTransitionOperator ABC with reset/initialize
       contract
-- [ ] test(operator): cover ABC contract via dummy implementation
-- [ ] feat(operator): add TransformerOperator with LN, GQA, FF, residual
-- [ ] test(operator): cover forward shapes, KV cache wiring, gradient flow
-- [ ] feat(operator): add MoE block on upper-half layers with top-2 routing
-- [ ] test(operator): cover MoE routing, load-balancing aux loss, expert
+- [x] test(operator): cover ABC contract via dummy implementation
+- [x] feat(operator): add TransformerOperator with LN, GQA, FF, residual
+- [x] test(operator): cover forward shapes, KV cache wiring, gradient flow
+- [x] feat(operator): add MoE block on upper-half layers with top-2 routing
+- [x] test(operator): cover MoE routing, load-balancing aux loss, expert
       collapse guard
 
 ## Phase 3 — Reasoning + perception
