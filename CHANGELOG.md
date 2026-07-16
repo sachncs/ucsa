@@ -57,3 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ucsa.models.projection_heads`: `ProjectionHeads`, `LanguageHead`,
   `PlanningHead`, `ToolHead`, `MemoryHead`, `HeadConfig`. Four
   independent heads reading only from working memory.
+- `ucsa.models.losses`: `UCSACombinedLoss`, `AutoregressiveLoss`,
+  `JEPALoss`, `MemoryStabilityLoss`, `RouterLoadBalancingLoss`,
+  `LossWeights`. Combined loss = AR + lambda1*JEPA + lambda2*Memory +
+  lambda3*Router with per-component reporting.
