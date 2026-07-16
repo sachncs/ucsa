@@ -54,3 +54,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clustering of long-term memory embeddings, co-activation edge
   discovery, concept-token retrieval, and direct injection into PCS
   working memory.
+- `ucsa.models.projection_heads`: `ProjectionHeads`, `LanguageHead`,
+  `PlanningHead`, `ToolHead`, `MemoryHead`, `HeadConfig`. Four
+  independent heads reading only from working memory.
