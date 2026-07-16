@@ -18,11 +18,11 @@ update `CHANGELOG.md` `[Unreleased]` and pass `ruff`, `mypy --strict`, and
 
 ## Phase 1 — Scaffolding
 
-- [ ] chore: initialise pyproject.toml with deps and tool configs
-- [ ] chore: add ruff + black + mypy + pytest config files
-- [ ] docs: add README.md skeleton and docs/architecture.md skeleton
-- [ ] docs: add CHANGELOG.md and TODO.md with phase breakdown
-- [ ] chore: create ucsa/ directory tree and .gitignore
+- [x] chore: initialise pyproject.toml with deps and tool configs
+- [x] chore: add ruff + black + mypy + pytest config files
+- [x] docs: add README.md skeleton and docs/architecture.md skeleton
+- [x] docs: add CHANGELOG.md and TODO.md with phase breakdown
+- [x] chore: create ucsa/ directory tree and .gitignore
 
 ## Phase 2 — PCS + operator
 
