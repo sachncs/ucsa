@@ -7,11 +7,11 @@ import torch
 from torch import Tensor
 
 from ucsa.models.state import PCSConfig, PersistentCognitiveState
+from ucsa.models.moe import MoEConfig
 from ucsa.models.transformer_operator import (
     CrossAttention,
     FeedForward,
     GroupedQueryAttention,
-    MoEConfig,
     RMSNorm,
     RotaryEmbedding,
     TransformerBlock,

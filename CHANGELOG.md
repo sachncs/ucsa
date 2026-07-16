@@ -26,3 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rotary embeddings, grouped-query attention, sliding-window KV cache,
   `memory_index` cross-attention, gated FFN, and `MoEConfig` (FFN-only
   blocks in this commit; MoE swap-in is added in the next feat commit).
+- `ucsa.models.moe`: standalone `MixtureOfExperts`, `Expert`, `MoEConfig`
+  modules. Top-k routing with load-balancing auxiliary loss. The operator
+  installs MoE on the upper half of layers automatically when configured.

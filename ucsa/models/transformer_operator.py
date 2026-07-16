@@ -30,6 +30,7 @@ from typing import Mapping
 import torch
 from torch import Tensor, nn
 
+from ucsa.models.moe import MixtureOfExperts, MoEConfig
 from ucsa.models.state import BANK_NAMES, PersistentCognitiveState
 from ucsa.models.transition_operator import StateTransitionOperator
 
@@ -107,44 +108,6 @@ class TransformerOperatorConfig:
             raise ValueError(
                 f"hidden_size ({self.hidden_size}) must be divisible by "
                 f"num_q_heads ({self.num_q_heads})."
-            )
-
-
-@dataclass(frozen=True)
-class MoEConfig:
-    """Configuration for the Mixture-of-Experts block.
-
-    Attributes:
-        num_experts: Number of experts.
-        top_k: Number of experts activated per token.
-        capacity_factor: Multiplier on the average tokens-per-expert
-            allocation, controlling the expert capacity.
-        aux_loss_weight: Weight applied to the load-balancing auxiliary
-            loss returned alongside the main loss.
-    """
-
-    num_experts: int = 4
-    top_k: int = 2
-    capacity_factor: float = 1.25
-    aux_loss_weight: float = 0.01
-
-    def __post_init__(self) -> None:
-        if self.num_experts <= 0:
-            raise ValueError(
-                f"num_experts must be positive, got {self.num_experts}."
-            )
-        if self.top_k <= 0 or self.top_k > self.num_experts:
-            raise ValueError(
-                f"top_k must be in [1, {self.num_experts}], got {self.top_k}."
-            )
-        if self.capacity_factor <= 0.0:
-            raise ValueError(
-                f"capacity_factor must be positive, got {self.capacity_factor}."
-            )
-        if self.aux_loss_weight < 0.0:
-            raise ValueError(
-                f"aux_loss_weight must be non-negative, "
-                f"got {self.aux_loss_weight}."
             )
 
 
@@ -262,6 +225,12 @@ class GroupedQueryAttention(nn.Module):
     heads. Supports Flash Attention via
     :func:`torch.nn.functional.scaled_dot_product_attention` and a sliding-
     window KV cache sized to ``sliding_window`` tokens.
+
+    The KV cache stores keys/values for the **context** stream only. Queries
+    come from a (possibly different) query stream. This matches the
+    ``reasoning-loop`` access pattern: the observation context is constant
+    across iterations, so caching it avoids recomputation while the PCS
+    queries are always fresh.
     """
 
     def __init__(
@@ -315,28 +284,39 @@ class GroupedQueryAttention(nn.Module):
         """Clear the KV cache."""
         self.kv_cache = {"k": None, "v": None, "length": 0}
 
-    def forward(self, x: Tensor, is_first_step: bool) -> Tensor:
+    def forward(
+        self,
+        query: Tensor,
+        context: Tensor,
+        is_first_step: bool,
+    ) -> Tensor:
         """Apply grouped-query attention with KV cache.
 
         Args:
-            x: Tensor of shape ``(batch, seq, hidden_size)``.
+            query: Tensor of shape ``(batch, q_seq, hidden_size)``.
+            context: Tensor of shape ``(batch, c_seq, hidden_size)``.
             is_first_step: If ``True`` the KV cache is initialised with the
-                keys and values of this step.
+                context keys and values of this step.
 
         Returns:
-            Tensor of shape ``(batch, seq, hidden_size)``.
+            Tensor of shape ``(batch, q_seq, hidden_size)``.
         """
-        batch, seq, _ = x.shape
-        q = self.q_proj(x).view(batch, seq, self.num_q_heads, self.head_dim)
-        k_new = self.k_proj(x).view(batch, seq, self.num_kv_heads, self.head_dim)
-        v_new = self.v_proj(x).view(batch, seq, self.num_kv_heads, self.head_dim)
-        q = q.transpose(1, 2)
-        k_new = k_new.transpose(1, 2)
-        v_new = v_new.transpose(1, 2)
+        batch, q_seq, _ = query.shape
+        c_seq = context.shape[1]
+        q = self.q_proj(query).view(
+            batch, q_seq, self.num_q_heads, self.head_dim
+        ).transpose(1, 2)
+        k_new = self.k_proj(context).view(
+            batch, c_seq, self.num_kv_heads, self.head_dim
+        ).transpose(1, 2)
+        v_new = self.v_proj(context).view(
+            batch, c_seq, self.num_kv_heads, self.head_dim
+        ).transpose(1, 2)
 
-        cos, sin = self.rotary.get_cos_sin(seq, x.device)
-        q = RotaryEmbedding.apply_rotary(q, cos, sin)
-        k_new = RotaryEmbedding.apply_rotary(k_new, cos, sin)
+        cos_q, sin_q = self.rotary.get_cos_sin(q_seq, query.device)
+        cos_c, sin_c = self.rotary.get_cos_sin(c_seq, context.device)
+        q = RotaryEmbedding.apply_rotary(q, cos_q, sin_q)
+        k_new = RotaryEmbedding.apply_rotary(k_new, cos_c, sin_c)
 
         if is_first_step or self.kv_cache["k"] is None:
             k_full = k_new
@@ -364,7 +344,7 @@ class GroupedQueryAttention(nn.Module):
             dropout_p=self.attention_dropout if self.training else 0.0,
             is_causal=False,
         )
-        attn_output = attn_output.transpose(1, 2).contiguous().view(batch, seq, -1)
+        attn_output = attn_output.transpose(1, 2).contiguous().view(batch, q_seq, -1)
         return self.out_proj(attn_output)
 
     def _expand_kv(self, kv: Tensor) -> Tensor:
@@ -607,7 +587,8 @@ class TransformerBlock(nn.Module):
             Tuple ``(updated_all_tokens, aux_outputs)``.
         """
         aux = _BlockAux()
-        attn_out = self.self_attn(self.norm_self_attn(all_tokens), is_first_step)
+        normed = self.norm_self_attn(all_tokens)
+        attn_out = self.self_attn(normed, normed, is_first_step)
         all_tokens = all_tokens + self.residual_dropout(attn_out)
 
         if (
@@ -671,6 +652,15 @@ class TransformerOperator(StateTransitionOperator):
             TransformerBlock(config, layer_index=i)
             for i in range(config.num_layers)
         )
+        if config.moe is not None:
+            for block in self.blocks:
+                if block.is_moe_layer:
+                    moe_module = MixtureOfExperts(
+                        hidden_size=config.hidden_size,
+                        intermediate_size=config.intermediate_size,
+                        config=config.moe,
+                    )
+                    block.install_moe(moe_module)
         self.final_norm = RMSNorm(config.hidden_size, eps=config.norm_eps)
         self.bank_offsets: dict[str, tuple[int, int]] = {}
         self.cumulative_offsets: tuple[int, ...] = ()
