@@ -148,9 +148,16 @@ class MemoryStabilityLoss(nn.Module):
 class RouterLoadBalancingLoss(nn.Module):
     """Auxiliary load-balancing loss for MoE routers.
 
-    The loss penalises imbalanced routing by minimising the product of
-    per-expert token count and per-expert routing probability. The result
-    is averaged over the number of tokens and experts.
+    Implements the Switch Transformer load-balancing loss:
+
+    .. math::
+
+        L = N \\cdot \\sum_i f_i \\cdot P_i
+
+    where :math:`N` is the number of experts, :math:`f_i` is the fraction
+    of tokens routed to expert :math:`i`, and :math:`P_i` is the average
+    routing probability for expert :math:`i`. Perfect balance yields
+    ``L = 1``.
     """
 
     def forward(self, router_logits: Tensor) -> Tensor:
@@ -172,7 +179,7 @@ class RouterLoadBalancingLoss(nn.Module):
                 router_logits.argmax(dim=-1), num_classes=num_experts
             ).float()
         tokens_per_expert = expert_mask.mean(dim=0)
-        loss = (tokens_per_expert * avg_routing).sum() / num_experts
+        loss = num_experts * (tokens_per_expert * avg_routing).sum()
         return loss
 
 
