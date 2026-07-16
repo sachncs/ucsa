@@ -99,7 +99,8 @@ class Memory:
         Args:
             working_tokens: Optional working-memory tokens to include.
                 Defaults to the current working bank.
-            long_term_tokens: Optional long-term tokens to include.
+            long_term_tokens: Optional long-term tokens to include. Pass
+                an empty tensor (shape ``(0, hidden)``) to disable.
 
         Returns:
             Tensor stored in the episode bank.
@@ -108,7 +109,10 @@ class Memory:
             working_tokens = self.cstate.get_bank("working")
         if long_term_tokens is None:
             long_term_tokens = self.cstate.get_bank("long_term")
-        combined = torch.cat([working_tokens, long_term_tokens], dim=0)
+        if long_term_tokens.shape[0] == 0:
+            combined = working_tokens
+        else:
+            combined = torch.cat([working_tokens, long_term_tokens], dim=0)
         episode_size = self.cstate.bank_size("episode")
         if combined.shape[0] >= episode_size:
             combined = combined[:episode_size]
