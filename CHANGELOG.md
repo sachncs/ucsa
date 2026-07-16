@@ -34,3 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tokenizer wrapper around Hugging Face `AutoTokenizer`, token embedding,
   modality embedding, and modality projection. Outputs observation tokens
   of shape ``(batch, seq, hidden_size)``.
+- `ucsa.models.reasoning_loop`: `ReasoningLoop`, `ReasoningLoopConfig`.
+  Runs the operator ``num_iterations`` times per forward pass, with
+  optional capture of per-iteration working-memory snapshots for JEPA.
