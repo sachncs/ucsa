@@ -16,3 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TODO.md tracking every atomic commit through Phase 10.
 - Package skeleton: `ucsa/`, `ucsa/models/`, `ucsa/training/`, `ucsa/utils/`,
   `ucsa/configs/`, `tests/`.
+- `ucsa.models.state`: `PersistentCognitiveState`, `PCSConfig`, `BankSpec`,
+  `retention_score`, `resolve_bank_sizes`, `build_bank_specs`. Six token
+  banks (working/long_term/goal/episode/task/memory_index), retention
+  metadata buffers, recycle policy.
