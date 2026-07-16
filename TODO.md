@@ -49,10 +49,10 @@ update `CHANGELOG.md` `[Unreleased]` and pass `ruff`, `mypy --strict`, and
 
 ## Phase 4 — Memory
 
-- [ ] feat(memory): add Memory hierarchy (scratch/working/episode/long-term)
-- [ ] test(memory): cover bank mutation, capacity enforcement
-- [ ] feat(memory): add retention scoring and recycle-by-bottom-k
-- [ ] test(memory): cover retention math, FIFO recycle, capacity invariants
+- [x] feat(memory): add Memory hierarchy (scratch/working/episode/long-term)
+- [x] test(memory): cover bank mutation, capacity enforcement
+- [x] feat(memory): add retention scoring and recycle-by-bottom-k
+- [x] test(memory): cover retention math, FIFO recycle, capacity invariants
 
 ## Phase 5 — Memory service + verification
 
