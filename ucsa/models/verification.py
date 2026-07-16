@@ -123,9 +123,9 @@ class HeuristicVerifier(Verifier):
         """
         long_term = cstate.get_bank("long_term")
         usage = getattr(cstate, "meta_usage_long_term")
-        novelty = self._novelty(candidate.tokens, long_term, usage)
-        recency = self._recency(candidate.importance)
-        usage_score = self._usage_signal(candidate.importance)
+        novelty = HeuristicVerifier.novelty(candidate.tokens, long_term, usage)
+        recency = HeuristicVerifier.recency(candidate.importance)
+        usage_score = HeuristicVerifier.usage_signal(candidate.importance)
         confidence = candidate.confidence
         score = (
             self.confidence_weight * confidence
@@ -147,7 +147,7 @@ class HeuristicVerifier(Verifier):
         return torch.zeros(())
 
     @staticmethod
-    def _novelty(
+    def novelty(
         candidate_tokens: Tensor,
         long_term: Tensor,
         usage: Tensor,
@@ -172,7 +172,7 @@ class HeuristicVerifier(Verifier):
         return float(novelty.clamp(0.0, 1.0).item())
 
     @staticmethod
-    def _recency(importance: Tensor) -> float:
+    def recency(importance: Tensor) -> float:
         """Compute a recency score from importance values.
 
         A linear scaling of importance, normalised to ``[0, 1]`` via a
@@ -183,7 +183,7 @@ class HeuristicVerifier(Verifier):
         return float(torch.sigmoid(torch.tensor(mean_importance)).item())
 
     @staticmethod
-    def _usage_signal(importance: Tensor) -> float:
+    def usage_signal(importance: Tensor) -> float:
         """Compute a usage signal from importance values.
 
         Returns ``0.5 + 0.5 * sigmoid(mean(importance))`` to keep the term
