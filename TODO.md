@@ -68,12 +68,12 @@ update `CHANGELOG.md` `[Unreleased]` and pass `ruff`, `mypy --strict`, and
 
 ## Phase 6 — Graph service
 
-- [ ] feat(graph): add cosine clustering for concept extraction (pure torch)
-- [ ] test(graph): cover cluster assignment, concept deduplication
-- [ ] feat(graph): add co-activation edge discovery
-- [ ] test(graph): cover edge weight, threshold, decay
-- [ ] feat(graph): add retrieval -> memory-token injection into PCS
-- [ ] test(graph): cover end-to-end retrieval and injection shape correctness
+- [x] feat(graph): add cosine clustering for concept extraction (pure torch)
+- [x] test(graph): cover cluster assignment, concept deduplication
+- [x] feat(graph): add co-activation edge discovery
+- [x] test(graph): cover edge weight, threshold, decay
+- [x] feat(graph): add retrieval -> memory-token injection into PCS
+- [x] test(graph): cover end-to-end retrieval and injection shape correctness
 
 ## Phase 7 — Projection heads
 
