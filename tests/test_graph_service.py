@@ -279,6 +279,73 @@ class TestConcept:
         assert concept.token is None
 
 
+class TestInjection:
+    """Tests for :meth:`GraphService.inject_into_working`."""
+
+    def test_inject_writes_to_working(self) -> None:
+        """Tokens are prepended into the working bank."""
+        gs = GraphService(num_concepts=4)
+        pcs = tiny_pcs()
+        populate_long_term(pcs, num_tokens=20)
+        gs.build_graph(pcs)
+        # Snapshot the working bank before injection.
+        before = pcs.get_bank("working").clone()
+        n = gs.inject_into_working(pcs, torch.randn(32), top_k=3)
+        after = pcs.get_bank("working")
+        assert n == 3
+        # First three rows were overwritten.
+        assert not torch.allclose(before[:3], after[:3])
+        # Tail of the bank is unchanged.
+        assert torch.allclose(before[3:], after[3:])
+
+    def test_inject_no_graph_returns_zero(self) -> None:
+        """Without a graph, ``inject_into_working`` is a no-op."""
+        gs = GraphService(num_concepts=2)
+        pcs = tiny_pcs()
+        before = pcs.get_bank("working").clone()
+        n = gs.inject_into_working(pcs, torch.randn(32), top_k=3)
+        assert n == 0
+        after = pcs.get_bank("working")
+        assert torch.allclose(before, after)
+
+    def test_inject_more_than_working_caps(self) -> None:
+        """Injection is capped by the working-bank size."""
+        gs = GraphService(num_concepts=4)
+        pcs = tiny_pcs()
+        populate_long_term(pcs, num_tokens=20)
+        gs.build_graph(pcs)
+        # Ask for many more tokens than the working bank can hold.
+        n = gs.inject_into_working(pcs, torch.randn(32), top_k=200)
+        # Capped by the working bank size and by the number of concepts.
+        assert n <= min(200, pcs.bank_size("working"), len(gs.last_graph.concepts))
+
+    def test_inject_query_batch_dim(self) -> None:
+        """Batch-dim query is accepted."""
+        gs = GraphService(num_concepts=3)
+        pcs = tiny_pcs()
+        populate_long_term(pcs, num_tokens=15)
+        gs.build_graph(pcs)
+        n = gs.inject_into_working(pcs, torch.randn(2, 32), top_k=2)
+        assert n >= 0
+
+    def test_injection_round_trip(self) -> None:
+        """End-to-end: build graph, retrieve, inject, read back."""
+        gs = GraphService(num_concepts=4)
+        pcs = tiny_pcs()
+        populate_long_term(pcs, num_tokens=20)
+        gs.build_graph(pcs)
+        query = torch.randn(32)
+        n = gs.inject_into_working(pcs, query, top_k=3)
+        assert n == 3
+        # The injected tokens should match the top-3 retrieved concept tokens.
+        retrieved = gs.retrieve_tokens(query, top_k=3)
+        assert torch.allclose(
+            pcs.get_bank("working")[:3].to(retrieved.device, retrieved.dtype),
+            retrieved,
+            atol=1e-5,
+        )
+
+
 class TestCoActivationEdges:
     """Tests for co-activation edge discovery."""
 
