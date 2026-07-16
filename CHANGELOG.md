@@ -45,3 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ucsa.models.verification`: `Verifier` ABC, `HeuristicVerifier`,
   `LearnedVerifier`. Score-based blend (confidence / novelty / recency
   / usage) and an MLP head trained on the retention signal.
+- `ucsa.models.memory_service`: `MemoryService`, `VerificationTask`,
+  `PruneTask`, `ServiceStats`. Background asyncio worker with a
+  dedicated thread, async queue, sync `submit_*` facades that drop to
+  inline processing when no loop is running.
