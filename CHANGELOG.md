@@ -29,3 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ucsa.models.moe`: standalone `MixtureOfExperts`, `Expert`, `MoEConfig`
   modules. Top-k routing with load-balancing auxiliary loss. The operator
   installs MoE on the upper half of layers automatically when configured.
+- `ucsa.models.perception`: `Perception`, `PerceptionConfig`,
+  `TokenizerWrapper`, `MODALITY_TEXT`, `MODALITY_CODE`. Replaceable
+  tokenizer wrapper around Hugging Face `AutoTokenizer`, token embedding,
+  modality embedding, and modality projection. Outputs observation tokens
+  of shape ``(batch, seq, hidden_size)``.
