@@ -130,11 +130,12 @@ class CosineClusterer:
             centroids = torch.zeros(self.num_clusters, embeddings.shape[-1])
             centroids[:n] = normalised
             assignments = torch.arange(n, dtype=torch.long)
-            # Assign surplus clusters to existing points in round-robin.
-            for extra in range(n, self.num_clusters):
-                assignments = torch.cat(
-                    [assignments, torch.tensor([extra % n], dtype=torch.long)]
-                )
+            # Surplus clusters have empty assignment rows; pad with -1
+            # so callers can detect empty clusters by ``assignments < 0``.
+            pad = torch.full(
+                (self.num_clusters - n,), -1, dtype=torch.long
+            )
+            assignments = torch.cat([assignments, pad])
             return assignments, centroids
         # Random initial centroids drawn from the input.
         generator = torch.Generator()
