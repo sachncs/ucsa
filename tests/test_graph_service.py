@@ -277,3 +277,68 @@ class TestConcept:
         assert torch.allclose(concept.centroid, centroid)
         assert concept.member_indices == [0, 1, 2]
         assert concept.token is None
+
+
+class TestCoActivationEdges:
+    """Tests for co-activation edge discovery."""
+
+    def test_no_edges_with_one_token(self) -> None:
+        """A single token produces no edges."""
+        gs = GraphService(num_concepts=2, co_activation_threshold=0.5)
+        embeddings = torch.randn(1, 32)
+        used_indices = torch.tensor([0])
+        edges = gs.build_edges(embeddings, used_indices)
+        assert edges == []
+
+    def test_high_threshold_no_edges(self) -> None:
+        """A high threshold yields no edges when similarities are lower."""
+        gs = GraphService(num_concepts=2, co_activation_threshold=0.99)
+        # Use orthogonal-ish embeddings.
+        embeddings = torch.eye(5, 32)
+        used_indices = torch.arange(5)
+        edges = gs.build_edges(embeddings, used_indices)
+        assert edges == []
+
+    def test_low_threshold_produces_edges(self) -> None:
+        """A low threshold yields edges between highly-similar tokens."""
+        gs = GraphService(num_concepts=2, co_activation_threshold=0.5)
+        # Build two nearly-identical token pairs.
+        a = torch.randn(1, 32)
+        b = a + 0.01 * torch.randn(1, 32)
+        c = -a + 0.01 * torch.randn(1, 32)
+        embeddings = torch.cat([a, b, c], dim=0)
+        used_indices = torch.tensor([0, 1, 2])
+        edges = gs.build_edges(embeddings, used_indices)
+        # At least one edge should exist (between a and b).
+        assert len(edges) >= 1
+
+    def test_edges_have_weights_in_unit_interval(self) -> None:
+        """Every edge weight lies in ``[0, 1]``."""
+        gs = GraphService(num_concepts=2, co_activation_threshold=0.0)
+        torch.manual_seed(0)
+        embeddings = torch.randn(10, 32)
+        used_indices = torch.arange(10)
+        edges = gs.build_edges(embeddings, used_indices)
+        for edge in edges:
+            assert 0.0 <= edge.weight <= 1.0
+
+    def test_no_self_loops(self) -> None:
+        """No edge connects a token to itself."""
+        gs = GraphService(num_concepts=2, co_activation_threshold=0.0)
+        embeddings = torch.randn(5, 32)
+        used_indices = torch.arange(5)
+        edges = gs.build_edges(embeddings, used_indices)
+        for edge in edges:
+            assert edge.source != edge.target
+
+    def test_no_duplicate_edges(self) -> None:
+        """Each pair of nodes gets at most one edge."""
+        gs = GraphService(num_concepts=2, co_activation_threshold=0.0)
+        embeddings = torch.randn(5, 32)
+        used_indices = torch.arange(5)
+        edges = gs.build_edges(embeddings, used_indices)
+        pairs: set[tuple[int, int]] = set()
+        for edge in edges:
+            pair = (min(edge.source, edge.target), max(edge.source, edge.target))
+            assert pair not in pairs
+            pairs.add(pair)

@@ -225,7 +225,7 @@ class GraphService:
                 continue
             member_used_indices = used_indices[mask]
             centroid = centroids[cluster_id]
-            token = self._build_concept_token(centroid, used_embeddings[mask])
+            token = self.build_concept_token(centroid, used_embeddings[mask])
             concepts.append(
                 Concept(
                     centroid=centroid,
@@ -233,11 +233,11 @@ class GraphService:
                     token=token,
                 )
             )
-        edges = self._build_edges(used_embeddings, used_indices)
+        edges = self.build_edges(used_embeddings, used_indices)
         self.last_graph = GraphMemory(concepts=concepts, edges=edges)
         return self.last_graph
 
-    def _build_concept_token(
+    def build_concept_token(
         self, centroid: Tensor, member_embeddings: Tensor
     ) -> Tensor:
         """Build the concept's memory token.
@@ -255,7 +255,7 @@ class GraphService:
         residual = member_embeddings.mean(dim=0) - centroid
         return (centroid + 0.1 * residual).detach()
 
-    def _build_edges(
+    def build_edges(
         self,
         used_embeddings: Tensor,
         used_indices: Tensor,
