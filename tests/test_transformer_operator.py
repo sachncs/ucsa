@@ -20,7 +20,7 @@ from ucsa.models.transformer_operator import (
 )
 
 
-def _tiny_config(**overrides: object) -> TransformerOperatorConfig:
+def tiny_config(**overrides: object) -> TransformerOperatorConfig:
     """Return a tiny transformer config for tests."""
     defaults: dict[str, object] = {
         "hidden_size": 32,
@@ -266,7 +266,7 @@ class TestTransformerBlock:
     def test_is_moe_layer_upper_half(self) -> None:
         """Upper-half blocks report ``is_moe_layer`` as ``True`` only when
         MoE is configured."""
-        config = _tiny_config(num_layers=4, moe=MoEConfig())
+        config = tiny_config(num_layers=4, moe=MoEConfig())
         lower_block = TransformerBlock(config, layer_index=0)
         upper_block = TransformerBlock(config, layer_index=3)
         assert lower_block.is_moe_layer is False
@@ -274,7 +274,7 @@ class TestTransformerBlock:
 
     def test_forward_shape(self) -> None:
         """Forward preserves token sequence shape."""
-        config = _tiny_config()
+        config = tiny_config()
         block = TransformerBlock(config, layer_index=0)
         tokens = torch.randn(2, 10, 32)
         out, aux = block(
@@ -287,7 +287,7 @@ class TestTransformerBlock:
 
     def test_cross_attention_used_when_memory_index_provided(self) -> None:
         """Cross attention changes the working-memory output."""
-        config = _tiny_config()
+        config = tiny_config()
         block = TransformerBlock(config, layer_index=0)
         torch.manual_seed(0)
         tokens_a = torch.randn(1, 6, 32)
@@ -321,7 +321,7 @@ class TestTransformerOperator:
     @pytest.fixture()
     def operator(self) -> TransformerOperator:
         """Provide a tiny transformer operator."""
-        return TransformerOperator(_tiny_config())
+        return TransformerOperator(tiny_config())
 
     def test_constructs_with_default_config(self) -> None:
         """Default config builds a transformer operator."""
@@ -347,7 +347,7 @@ class TestTransformerOperator:
 
     def test_forward_hidden_size_validation(self) -> None:
         """A PCS whose hidden size mismatches the operator raises."""
-        op = TransformerOperator(_tiny_config(hidden_size=32))
+        op = TransformerOperator(tiny_config(hidden_size=32))
         bad_state = PersistentCognitiveState(PCSConfig(hidden_size=64))
         with pytest.raises(ValueError):
             op(bad_state, torch.randn(1, 4, 64))
@@ -383,14 +383,14 @@ class TestTransformerOperator:
         self, state: PersistentCognitiveState
     ) -> None:
         """Disabling cross attention removes the cross-attn module."""
-        op = TransformerOperator(_tiny_config(use_memory_index_cross_attention=False))
+        op = TransformerOperator(tiny_config(use_memory_index_cross_attention=False))
         assert all(block.cross_attn is None for block in op.blocks)
 
     def test_cross_attention_enabled_by_default(
         self, state: PersistentCognitiveState
     ) -> None:
         """By default every block has a cross-attention module."""
-        op = TransformerOperator(_tiny_config())
+        op = TransformerOperator(tiny_config())
         assert all(block.cross_attn is not None for block in op.blocks)
 
     def test_aux_loss_is_zero_without_moe(
