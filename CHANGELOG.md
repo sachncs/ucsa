@@ -42,3 +42,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Includes candidate proposal, long-term acceptance with capacity
   enforcement, episode snapshotting, recycle-by-bottom-k, retention-
   score access, FIFO recycle, and threshold-based recycle.
+- `ucsa.models.verification`: `Verifier` ABC, `HeuristicVerifier`,
+  `LearnedVerifier`. Score-based blend (confidence / novelty / recency
+  / usage) and an MLP head trained on the retention signal.
