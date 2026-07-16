@@ -37,3 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ucsa.models.reasoning_loop`: `ReasoningLoop`, `ReasoningLoopConfig`.
   Runs the operator ``num_iterations`` times per forward pass, with
   optional capture of per-iteration working-memory snapshots for JEPA.
+- `ucsa.models.memory`: `Memory`, `MemoryUpdate`. Hierarchical memory
+  facade wrapping the PCS: scratch / working / episode / long-term.
+  Includes candidate proposal, long-term acceptance with capacity
+  enforcement, episode snapshotting, and recycle-by-bottom-k.
