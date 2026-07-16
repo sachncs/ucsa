@@ -351,6 +351,37 @@ class GraphService:
             dim=0,
         )
 
+    def inject_into_working(
+        self,
+        cstate: PersistentCognitiveState,
+        query: Tensor,
+        top_k: int = 4,
+    ) -> int:
+        """Retrieve ``top_k`` concept tokens and prepend them into working
+        memory.
+
+        Args:
+            cstate: The PCS whose working memory is updated.
+            query: Query tensor of shape ``(hidden,)`` or ``(batch, hidden)``.
+            top_k: Number of tokens to inject.
+
+        Returns:
+            Number of tokens actually injected (may be less than ``top_k``).
+        """
+        tokens = self.retrieve_tokens(query, top_k=top_k)
+        if tokens.shape[0] == 0:
+            return 0
+        working = cstate.get_bank("working")
+        num_to_inject = min(tokens.shape[0], working.shape[0])
+        if num_to_inject == 0:
+            return 0
+        replacement = tokens[:num_to_inject].to(
+            device=working.device, dtype=working.dtype
+        )
+        with torch.no_grad():
+            working[:num_to_inject] = replacement
+        return int(num_to_inject)
+
 
 __all__ = [
     "Concept",

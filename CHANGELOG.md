@@ -52,4 +52,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ucsa.models.graph_service`: `GraphService`, `CosineClusterer`,
   `Concept`, `GraphEdge`, `GraphMemory`. Pure-torch cosine k-means
   clustering of long-term memory embeddings, co-activation edge
-  discovery, and concept-token retrieval.
+  discovery, concept-token retrieval, and direct injection into PCS
+  working memory.
