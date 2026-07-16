@@ -56,14 +56,14 @@ update `CHANGELOG.md` `[Unreleased]` and pass `ruff`, `mypy --strict`, and
 
 ## Phase 5 — Memory service + verification
 
-- [ ] feat(verify): add Verifier ABC
-- [ ] feat(verify): add HeuristicVerifier (confidence, novelty, recency, usage)
-- [ ] test(verify): cover HeuristicVerifier score components and acceptance
+- [x] feat(verify): add Verifier ABC
+- [x] feat(verify): add HeuristicVerifier (confidence, novelty, recency, usage)
+- [x] test(verify): cover HeuristicVerifier score components and acceptance
       thresholds
-- [ ] feat(verify): add LearnedVerifier MLP head, trained on retention signal
-- [ ] test(verify): cover LearnedVerifier forward, training step, signal flow
-- [ ] feat(service): add MemoryService with asyncio Queue and worker task
-- [ ] test(service): cover non-blocking enqueue, FIFO processing, error
+- [x] feat(verify): add LearnedVerifier MLP head, trained on retention signal
+- [x] test(verify): cover LearnedVerifier forward, training step, signal flow
+- [x] feat(service): add MemoryService with asyncio Queue and worker task
+- [x] test(service): cover non-blocking enqueue, FIFO processing, error
       isolation
 
 ## Phase 6 — Graph service
