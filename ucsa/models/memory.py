@@ -330,7 +330,7 @@ class Memory:
         Returns:
             Indices of recycled slots.
         """
-        scores = self.get_retention_scores("long_term")
+        scores = getattr(self.cstate, "meta_retention_long_term")
         mask = scores < threshold
         if not mask.any():
             return []
