@@ -78,3 +78,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gating.
 - `ucsa.training.evaluation`: `EvaluationLoop`, `EvaluationState`.
   Periodic no-grad evaluation with running loss and perplexity.
+- `ucsa.utils.seed`: `set_seed`, `get_seed`, `seed_context`. Seeds
+  Python, NumPy, and PyTorch (CPU + CUDA) for reproducible runs.
+- `ucsa.utils.checkpoint`: `save_checkpoint`, `load_checkpoint`,
+  `CheckpointMetadata`. Safetensors-backed weight save/load with
+  sidecar JSON metadata.
+- `ucsa.utils.logging`: `LoggerConfig`, `LoggerBundle`, `build_logger`,
+  `log_metrics`, `close_logger`, `configure_logging`. TensorBoard and
+  optional Weights & Biases backends behind a single API.
