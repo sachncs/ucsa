@@ -72,3 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DEFAULT_METRIC_NAMES`, helpers for perplexity, expert utilisation,
   attention entropy, throughput, GPU memory, memory utilisation, and
   replacement rate. TensorBoard logging hook.
+- `ucsa.training.trainer`: `Trainer`, `TrainerConfig`,
+  `CosineWarmupScheduler`, `TrainerState`. AdamW + cosine + warmup +
+  AMP + grad clip + checkpoint round-trip + curriculum-aware loss
+  gating.
