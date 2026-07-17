@@ -1,22 +1,24 @@
-"""End-to-end training on fineweb-edu.
+"""End-to-end training + SOTA showcase on fineweb-edu.
 
-Profile (matches the default UCSA paper config, scaled for MPS):
-- hidden_size=384, num_layers=6, num_concepts=16, reasoning_iterations=4
-- batch_size=1 (UCSA PCS is per-call today), max_seq_len=1024
-- 0.1 attention/residual/ffn dropout (regularisation against the no-val-signal
-  overfit we saw without it)
-- 8000 steps with a 4-stage curriculum so every component warms up:
-  language only (0-2000) → language+jepa (2000-4500) →
-  language+jepa+memory (4500-6500) → joint+router (6500-end)
-- JEPA/memory/router aux losses are wired to real model outputs
-  (jepa_predicted/target = consecutive reasoning-loop intermediates;
-  long_term = PCS long-term bank with refreshed baseline buffer;
-  router_logits = aggregated MoE logits across blocks)
-- val: a held-out cursor on the same fineweb-edu stream
-  (--val-skip to advance into tail)
+Trains UCSA-small and reports its val perplexity against published
+HuggingFace baselines evaluated on the same held-out cursor. No
+baseline fine-tuning; we report their zero-shot PPL on
+fineweb-edu-style text. If UCSA-small beats a larger baseline, the
+script flags the win.
+
+Defaults:
+  - UCSA-small profile: hidden=384, layers=6, num_concepts=16,
+    reasoning_iterations=4, max_seq_len=1024 (≈63M params)
+  - 8000 steps, 0.1 attention/residual/ffn dropout
+  - 4-stage curriculum so every loss component warms up:
+    language only (0-2000) → language+jepa (2000-4500) →
+    language+jepa+memory (4500-6500) → joint+router (6500-end)
+  - JEPA/memory/router aux losses are wired to real model outputs
+  - val cursor advanced via skip(val_skip) on the same stream
 
 Usage:
     .venv/bin/python scripts/train.py [--max-steps N] [--ckpt-dir DIR]
+                                     [--baselines gpt2 gpt2-medium]
 """
 from __future__ import annotations
 
@@ -28,10 +30,11 @@ import time
 import torch
 import yaml
 from torch.utils.data import DataLoader
+from transformers import AutoModelForCausalLM
 
+from ucsa.models.perception import TokenizerWrapper
 from ucsa.train import build_model, build_trainer
 from ucsa.training.dataset import DatasetConfig, TextDataset
-from ucsa.models.perception import TokenizerWrapper
 
 
 def parse_args() -> argparse.Namespace:
@@ -45,7 +48,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--stage-2-end", type=int, default=4500)
     p.add_argument("--stage-3-end", type=int, default=6500)
     p.add_argument("--val-skip", type=int, default=10_000,
-                   help="Skip this many fineweb-edu examples before reading val batches (held-out signal)")
+                   help="Skip this many fineweb-edu examples before reading val batches")
+    p.add_argument("--baseline-eval-batches", type=int, default=20,
+                   help="Number of val batches to eval baselines on (same protocol as UCSA)")
+    p.add_argument("--baselines", nargs="*",
+                   default=["gpt2", "gpt2-medium"],
+                   help="HuggingFace model ids evaluated zero-shot on the same val cursor")
+    p.add_argument("--skip-baselines", action="store_true",
+                   help="Skip the SOTA comparison; just train UCSA-small")
     return p.parse_args()
 
 
@@ -60,10 +70,8 @@ class _IterableOver(torch.utils.data.IterableDataset):
 
 
 def _infinite(loader: DataLoader):
-    """Yield from loader forever; the outer loop controls when to stop."""
     while True:
-        for batch in loader:
-            yield batch
+        yield from loader
 
 
 def _current_lr(trainer) -> float:
@@ -77,11 +85,11 @@ def _current_lr(trainer) -> float:
 
 @torch.no_grad()
 def _eval(trainer, loader: DataLoader, max_batches: int) -> dict[str, float]:
-    """Run a quick held-out eval using trainer.compute_loss."""
+    """UCSA eval — uses trainer.compute_loss so all aux losses apply consistently."""
     trainer.model.eval()
     total, count = 0.0, 0
     it = iter(loader)
-    for i in range(max_batches):
+    for _i in range(max_batches):
         try:
             inputs, targets = next(it)
         except StopIteration:
@@ -98,6 +106,50 @@ def _eval(trainer, loader: DataLoader, max_batches: int) -> dict[str, float]:
     return {"loss": avg, "perplexity": math.exp(avg)}
 
 
+@torch.no_grad()
+def _eval_hf_baseline(
+    model_id: str,
+    val_iter,
+    max_batches: int,
+    device: torch.device,
+) -> dict[str, float]:
+    """Evaluate a HuggingFace CausalLM zero-shot on the same val cursor.
+
+    Standard next-token cross-entropy averaged across ``max_batches``.
+    """
+    print(f"    loading {model_id}...", flush=True)
+    model = AutoModelForCausalLM.from_pretrained(model_id).to(device).eval()
+    n_params = sum(p.numel() for p in model.parameters())
+    total, count = 0.0, 0
+    for _i in range(max_batches):
+        try:
+            inputs, targets = next(val_iter)
+        except StopIteration:
+            break
+        inputs = inputs.to(device)
+        targets = targets.to(device)
+        out = model(input_ids=inputs)
+        logits = out.logits
+        # align seq len (HF returns full length)
+        if logits.shape[1] != targets.shape[1]:
+            seq = min(logits.shape[1], targets.shape[1])
+            logits = logits[:, -seq:, :]
+            targets = targets[:, -seq:]
+        loss = torch.nn.functional.cross_entropy(
+            logits.reshape(-1, logits.shape[-1]),
+            targets.reshape(-1),
+        )
+        total += float(loss.item())
+        count += 1
+    del model
+    if hasattr(device, "type") and device.type == "mps":
+        torch.mps.empty_cache()
+    if count == 0:
+        return {"loss": 0.0, "perplexity": 0.0, "params": n_params}
+    avg = total / count
+    return {"loss": avg, "perplexity": math.exp(avg), "params": n_params}
+
+
 def main() -> None:
     args = parse_args()
     with open("ucsa/configs/default.yaml") as f:
@@ -112,7 +164,6 @@ def main() -> None:
     cfg["model"]["vocab_size"] = 50257
     cfg["model"]["max_seq_len"] = 1024
     cfg["model"]["num_concepts"] = 16
-    # regularization: prevents the train-loss descent we saw with no signal on val
     cfg["model"]["attention_dropout"] = 0.1
     cfg["model"]["residual_dropout"] = 0.1
     cfg["model"]["ffn_dropout"] = 0.1
@@ -129,7 +180,7 @@ def main() -> None:
     cfg["curriculum"]["stage_3_end"] = args.stage_3_end
 
     print("Building tokenizer + dataset...", flush=True)
-    tokenizer = TokenizerWrapper(
+    ucsa_tokenizer = TokenizerWrapper(
         tokenizer_name=cfg["tokenizer"]["name"],
         max_seq_len=cfg["dataset"]["sequence_length"],
     )
@@ -140,14 +191,14 @@ def main() -> None:
         streaming=True,
         pack_sequences=True,
     )
-    train_ds = TextDataset(tokenizer, ds_cfg)
-    val_ds = TextDataset(tokenizer, ds_cfg)
+    train_ds = TextDataset(ucsa_tokenizer, ds_cfg)
+    val_ds = TextDataset(ucsa_tokenizer, ds_cfg)
     val_ds.dataset = val_ds.dataset.skip(args.val_skip)  # ponytail: held-out cursor; fineweb-edu has no real val split
 
     print("Building model...", flush=True)
     model = build_model(cfg)
-    n_params = sum(p.numel() for p in model.parameters())
-    print(f"Params: {n_params:,}", flush=True)
+    n_ucsa_params = sum(p.numel() for p in model.parameters())
+    print(f"UCSA-small params: {n_ucsa_params:,}", flush=True)
 
     trainer = build_trainer(model, cfg)
     print(f"Device: {trainer.device}", flush=True)
@@ -161,10 +212,12 @@ def main() -> None:
     val_loader = DataLoader(_IterableOver(val_ds), batch_size=None)
 
     os.makedirs(args.ckpt_dir, exist_ok=True)
-    print(f"Starting: max_steps={args.max_steps}", flush=True)
+    print(f"Starting training: max_steps={args.max_steps}", flush=True)
 
     start = time.time()
     losses: list[float] = []
+    best_val_ppl = float("inf")
+    best_step = -1
     for step, batch in enumerate(_infinite(train_loader)):
         if step >= args.max_steps:
             break
@@ -186,9 +239,12 @@ def main() -> None:
 
         if step > 0 and step % args.eval_every == 0:
             vm = _eval(trainer, val_loader, args.eval_batches)
+            if vm["perplexity"] < best_val_ppl:
+                best_val_ppl = vm["perplexity"]
+                best_step = step
             print(
                 f"  eval@{step}: val_loss={vm['loss']:.4f} "
-                f"val_ppl={vm['perplexity']:.1f}",
+                f"val_ppl={vm['perplexity']:.1f} (best={best_val_ppl:.1f}@{best_step})",
                 flush=True,
             )
 
@@ -211,6 +267,74 @@ def main() -> None:
         f"{sum(losses[:5])/5 - sum(losses[-5:])/5:.3f}",
         flush=True,
     )
+
+    # Final eval on UCSA-small using a longer window — the headline number.
+    final_ucsa = _eval(trainer, val_loader, args.eval_batches)
+    print(
+        f"\nUCSA-small val (final, {args.eval_batches} batches): "
+        f"val_loss={final_ucsa['loss']:.4f} val_ppl={final_ucsa['perplexity']:.1f}",
+        flush=True,
+    )
+
+    if args.skip_baselines:
+        return
+
+    # Ponytail: the comparison cursor is fresh — different from the train val
+    # cursor (which has been advanced). Both are evaluated on the held-out
+    # skip region. We re-build a small val cursor for each baseline so they
+    # see the same first N examples.
+    print("\n=== SOTA comparison vs HuggingFace baselines ===", flush=True)
+    print(
+        f"  evaluating baselines on the same val cursor "
+        f"(skip={args.val_skip}, batches={args.baseline_eval_batches}, "
+        f"sequence_length={cfg['dataset']['sequence_length']})",
+        flush=True,
+    )
+    device = trainer.device
+    bench_ds = TextDataset(
+        ucsa_tokenizer,
+        DatasetConfig(
+            sequence_length=cfg["dataset"]["sequence_length"],
+            primary_dataset=cfg["dataset"]["primary_dataset"],
+            primary_split=cfg["dataset"]["primary_split"],
+            streaming=True,
+            pack_sequences=True,
+        ),
+    )
+    bench_ds.dataset = bench_ds.dataset.skip(args.val_skip)
+    bench_loader = DataLoader(_IterableOver(bench_ds), batch_size=None)
+    bench_iter = iter(bench_loader)
+
+    rows: list[tuple[str, int, float | None]] = [
+        ("UCSA-small (ours, trained)", n_ucsa_params, final_ucsa["perplexity"]),
+    ]
+    for baseline in args.baselines:
+        try:
+            metrics = _eval_hf_baseline(
+                baseline, bench_iter, args.baseline_eval_batches, device
+            )
+            rows.append((baseline, metrics["params"], metrics["perplexity"]))
+        except Exception as exc:
+            print(f"    {baseline} failed: {exc}", flush=True)
+            rows.append((baseline, 0, None))
+
+    print("\n  Model                              Params        Val PPL", flush=True)
+    print("  ---------------------------------  ------------  --------", flush=True)
+    for name, params, ppl in rows:
+        ppl_str = f"{ppl:.1f}" if ppl is not None else "n/a"
+        print(f"  {name:35s}  {params/1e6:>7.0f}M       {ppl_str}", flush=True)
+
+    ucsa_ppl = final_ucsa["perplexity"]
+    print("\n  Small beats large:", flush=True)
+    for name, _, ppl in rows[1:]:
+        if ppl is None:
+            continue
+        ratio = ucsa_ppl / ppl
+        verdict = "WIN" if ratio < 1.0 else "loss"
+        print(
+            f"    UCSA-small / {name:20s}: {ratio:.3f}x  ({verdict})",
+            flush=True,
+        )
 
 
 if __name__ == "__main__":

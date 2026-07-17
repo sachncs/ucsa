@@ -50,4 +50,5 @@ logs/
 # Model weights (uncomment if you want to ignore them; we keep them in repo)
 # *.safetensors
 # *.pt
-# *.pth
+# *.pthckpts/
+ckpts/
