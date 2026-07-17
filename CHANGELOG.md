@@ -172,6 +172,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deterministic seed control: `--seed N` on every training /
   eval script, with `utils.seed.set_seed(seed, deterministic=True)`
   wiring Python, NumPy, PyTorch, and CUDA RNGs.
+- `scripts/probe_banks.py`: memory-bank probing utility. For a
+  trained UCSA, projects each of the six PCS bank tokens back
+  into vocabulary space via the tied LM head and reports the
+  top-k tokens each bank "remembers", the per-bank L2 norm /
+  retention-score statistics, and a 6x6 cosine-similarity
+  matrix of bank centroids — evidence of differentiated roles.
+  Exports to JSON for plotting.
 
 ### Changed
 - `scripts/train.py`: refactored around ablation. CLI flags
@@ -189,7 +196,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 4 new tests in `tests/test_eval_harness.py` covering the
   registry shape, dataclass, empty-loader fallback, and
   fake-loader smoke through the full eval path (offline).
-- Total: 432 / 432 tests pass.
+- 4 new tests in `tests/test_probe_banks.py` covering the
+  six-bank summary shape, centroid-matrix symmetry, token
+  decoding, and finite-statistics invariants.
+- Total: 436 / 436 tests pass.
 
 ### Changed
 - `scripts/benchmark.py`: added Kimi K3 (arXiv-style) features as

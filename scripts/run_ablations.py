@@ -26,7 +26,6 @@ import os
 import subprocess
 import sys
 
-
 ABLATIONS = [
     {"tag": "full", "flags": []},
     {"tag": "no-jepa", "flags": ["--no-lewm"]},

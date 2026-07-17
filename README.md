@@ -49,6 +49,13 @@ pip install -e ".[dev]"
     --ucsa-ckpt ckpts/ucsa-final.safetensors \
     --baseline-results runs/baseline.json \
     --out-json runs/eval-ucsa-small.json
+# 4. Probe what each PCS bank has learned
+.venv/bin/python scripts/probe_banks.py \
+    --ckpt ckpts/ucsa-final.safetensors \
+    --out-json runs/bank-probe.json
+# 5. Run the ablation sweep (5 seeds × 6 ablations is typical for the paper)
+.venv/bin/python scripts/run_ablations.py \
+    --max-steps 4000 --seeds 42 43 44
 ```
 
 ## Repository layout
@@ -60,7 +67,7 @@ ucsa/
 ├── training/        trainer, dataset, curriculum, metrics,
 │                    evaluation, EMA, Muon optimiser, eval harness
 ├── utils/           seed, checkpoint, logging
-├── tests/           428 tests, run with `pytest -q`
+├── tests/           436 tests, run with `pytest -q`
 ├── train.py         training entrypoint
 ├── infer.py         inference entrypoint
 └── paper/           paper draft (PAPER.md)
@@ -68,6 +75,8 @@ scripts/
 ├── train.py         UCSA training + SOTA stack + benchmark comparison
 ├── train_baseline.py matched-compute vanilla-Transformer baseline
 ├── eval.py          HellaSwag / ARC / PIQA / WinoGrande evaluation
+├── probe_banks.py   PCS bank probe (top tokens per bank, centroid sim)
+├── run_ablations.py ablation matrix driver
 └── benchmark.py     one-file showcase against modern-LM baselines
 ```
 
