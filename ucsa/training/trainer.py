@@ -164,9 +164,12 @@ class Trainer:
         self.curriculum = curriculum or Curriculum()
         self.metrics = metrics or build_default_registry()
         if device is None:
-            device = torch.device(
-                "cuda" if torch.cuda.is_available() else "cpu"
-            )
+            if torch.cuda.is_available():
+                device = torch.device("cuda")
+            elif torch.backends.mps.is_available():
+                device = torch.device("mps")
+            else:
+                device = torch.device("cpu")
         self.device = device
         self.model.to(self.device)
         if config.compile_model and hasattr(torch, "compile"):
@@ -178,7 +181,7 @@ class Trainer:
         )
         self.state = TrainerState()
         self.amp_enabled = (
-            self.device.type == "cuda"
+            self.device.type in ("cuda", "mps")
             and config.amp_dtype in (torch.float16, torch.bfloat16)
         )
         # Stash a reference for the scheduler to read.
@@ -217,6 +220,13 @@ class Trainer:
             logits = outputs.get("language", outputs.get("logits", outputs))
         else:
             logits = outputs
+        # Align targets length to logits sequence length (model output may be shorter
+        # than dataset sequence length when working-bank < dataset seq_len).
+        if targets.shape[1] > logits.shape[1]:
+            targets = targets[:, -logits.shape[1]:]
+        elif targets.shape[1] < logits.shape[1]:
+            pad = logits.shape[1] - targets.shape[1]
+            targets = torch.nn.functional.pad(targets, (pad, 0))
         active = self.curriculum.active_components()
         kwargs: dict[str, Any] = {}
         if "jepa" in active:
