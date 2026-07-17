@@ -1038,11 +1038,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--top-k", type=int, default=2)
     p.add_argument("--skip-ucsa", action="store_true")
     p.add_argument("--skip-baseline", action="store_true")
+    p.add_argument("--seed", type=int, default=42)
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    from ucsa.utils.seed import set_seed
+    set_seed(args.seed)
     if args.baseline_param_target > 500_000_000:
         raise SystemExit(
             f"--baseline-param-target={args.baseline_param_target} exceeds the "

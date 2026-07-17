@@ -147,23 +147,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - (none)
 
 ### Added
-- True multi-step JEPA prediction (LeWM §3.4, arXiv 2603.19312).
-  `UCSA.forward` emits `jepa_multi_step` — a list of
-  ``(predicted_k, target_{k+1})`` tensors derived from the
-  reasoning-loop intermediate clones. With the default
-  `reasoning_iterations=4` this is a 3-step chain per forward.
-  `JEPALoss.forward` accepts the list and averages the per-step
-  loss. The EMA target encoder, when active, swaps the targets
-  with its own intermediates so each step prediction is matched
-  against EMA-tracked latents. Surfaced as `jepa_steps` metric
-  when active.
-- `scripts/train.py` rewritten around the SOTA stack: EMA
-  target encoder (momentum 0.996 default), LeWM JEPA mode,
-  multi-step prediction chain, input-reconstruction head,
-  12k-step default. CLI exposes `--no-ema`, `--no-lewm`,
-  `--no-recon`, `--ema-momentum`, `--lewm-gaussian-reg`,
-  `--reconstruction-weight` to dial each piece on/off for
-  ablation studies.
+- `ucsa.training.eval_harness` + `scripts/eval.py`: standard-LM
+  eval harness (HellaSwag, ARC-easy, ARC-challenge, PIQA,
+  WinoGrande) following the canonical rank-by-conditional-loglik
+  protocol. Loads from a safetensors UCSA checkpoint plus an
+  optional baseline JSON for matched-compute tables. Writes a
+  structured JSON report to `runs/eval-*.json`. Compatible
+  stream-mode dataset loaders keep CI offline-friendly.
+- `scripts/train_baseline.py`: matched-compute baseline trainer.
+  Vanilla GPT-2-style Transformer (GQA + RoPE + SwiGLU, no PCS
+  hooks, no MoE, no JEPA) trained on the exact same fineweb-edu
+  stream for the same number of steps; emits structured JSON
+  matching UCSA's training output so the two can be tabled
+  side-by-side.
+- `scripts/run_ablations.py`: ablation matrix runner. Sweeps
+  the canonical ablation flags (no-jepa, no-ema, no-recon,
+  no-tc-jepa, no-curriculum) over one or more seeds, dumping each
+  run to `runs/ablations/`. The summary JSON drives the
+  ablation table in `paper/PAPER.md`.
+- `paper/PAPER.md`: paper-grade write-up draft with proper
+  abstract, method, experiments, results, and appendix sections.
+  Numbers in tables are placeholders until the ablation suite
+  finishes running.
+- Deterministic seed control: `--seed N` on every training /
+  eval script, with `utils.seed.set_seed(seed, deterministic=True)`
+  wiring Python, NumPy, PyTorch, and CUDA RNGs.
+
+### Changed
+- `scripts/train.py`: refactored around ablation. CLI flags
+  `--no-ema`, `--no-lewm`, `--no-recon`, `--no-tc-jepa`,
+  `--no-curriculum`, `--ablation NAME`, `--seed N`, and
+  `--out-json PATH`. Always writes structured JSON. Default
+  behavior (full SOTA stack) is unchanged.
+- `scripts/benchmark.py`: adds `--seed` for parity with the rest
+  of the suite.
+- `README.md`: rewritten to put the paper-grade reproduction
+  recipe first, with the original "why" / "layout" moved to
+  the bottom and a clear "what's novel / where it lives" map.
+
+### Tests
+- 4 new tests in `tests/test_eval_harness.py` covering the
+  registry shape, dataclass, empty-loader fallback, and
+  fake-loader smoke through the full eval path (offline).
+- Total: 432 / 432 tests pass.
 
 ### Changed
 - `scripts/benchmark.py`: added Kimi K3 (arXiv-style) features as

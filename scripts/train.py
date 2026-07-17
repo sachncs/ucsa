@@ -1,38 +1,28 @@
-"""End-to-end training + SOTA showcase on fineweb-edu.
+"""UCSA-small training + SOTA stack + ablation harness.
 
-Trains UCSA-small with the full JEPA+SOTA stack wired up (LeWM-style
-loss, hard-EMA target encoder, multi-step JEPA prediction chain,
-input-reconstruction head, 4-stage curriculum) and reports its val
-perplexity against pretrained HuggingFace baselines on the same
-held-out cursor. If UCSA-small beats a larger baseline, the script
-flags the win.
+This script is the central entrypoint for the paper's experiments.
+It supports:
 
-Defaults:
-  - UCSA-small profile: hidden=384, layers=6, num_concepts=16,
-    reasoning_iterations=4, max_seq_len=1024 (≈63M params).
-  - 12000 steps with a 4-stage curriculum so every loss component
-    warms up:
-    language only (0-2000) -> language+jepa (2000-4500) ->
-    language+jepa+memory (4500-6500) -> joint+router (6500-end).
-  - 0.1 attention/residual/ffn dropout.
-  - JEPA: LeWM mode (single SmoothL1 prediction + Gaussian
-    regulariser) with multi-step chain (3 prediction steps per
-    forward), plus the TC-JEPA sparse text conditioner.
-  - Hard-EMA target encoder (momentum 0.996), target encoder swaps
-    the multi-step targets so the predictor learns to match
-    EMA-tracked latents.
-  - Input-reconstruction head + loss (capacity bottleneck).
-  - Held-out cursor advanced via skip(val_skip) on the same stream.
+- A full-stack UCSA-small training run (default), with the
+  multi-step JEPA chain, hard-EMA target encoder, LeWM mode,
+  input-reconstruction head, and TC-JEPA text conditioner all
+  enabled.
+- A per-feature ablation mode. ``--no-ema``, ``--no-lewm``,
+  ``--no-recon``, ``--no-tc-jepa``, ``--no-curriculum``, and so on
+  isolate the contribution of each piece.
+- Structured JSON output for downstream paper-writing tools.
+- Deterministic seeding (``--seed``).
 
 Usage:
-    .venv/bin/python scripts/train.py [--max-steps N] [--ckpt-dir DIR]
-                                     [--baselines gpt2 gpt2-medium]
-                                     [--skip-baselines]
-                                     [--no-ema] [--no-lewm] [--no-recon]
+    .venv/bin/python scripts/train.py [--seed N] [--max-steps N]
+        [--ablation NAME] [--out-json PATH]
+        [--no-ema|--no-lewm|--no-recon|--no-tc-jepa|--no-curriculum]
+        [--baselines gpt2 gpt2-medium] [--skip-baselines]
 """
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import time
@@ -45,10 +35,12 @@ from transformers import AutoModelForCausalLM
 from ucsa.models.perception import TokenizerWrapper
 from ucsa.train import build_model, build_trainer
 from ucsa.training.dataset import DatasetConfig, TextDataset
+from ucsa.utils.seed import set_seed
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
+    p.add_argument("--seed", type=int, default=42)
     p.add_argument("--max-steps", type=int, default=12000)
     p.add_argument("--ckpt-dir", default="ckpts")
     p.add_argument("--ckpt-every", type=int, default=1000)
@@ -57,23 +49,28 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--stage-1-end", type=int, default=2000)
     p.add_argument("--stage-2-end", type=int, default=4500)
     p.add_argument("--stage-3-end", type=int, default=6500)
-    p.add_argument("--val-skip", type=int, default=10_000,
-                   help="Skip this many fineweb-edu examples before reading val batches")
+    p.add_argument("--val-skip", type=int, default=10_000)
     p.add_argument("--baseline-eval-batches", type=int, default=20)
     p.add_argument("--baselines", nargs="*",
                    default=["gpt2", "gpt2-medium"],
                    help="HuggingFace model ids evaluated zero-shot on the same val cursor")
-    p.add_argument("--skip-baselines", action="store_true",
-                   help="Skip the SOTA comparison; just train UCSA-small")
-    # SOTA stack toggles
+    p.add_argument("--skip-baselines", action="store_true")
+    # SOTA stack toggles — ablations
     p.add_argument("--no-ema", dest="ema", action="store_false")
-    p.add_argument("--ema-momentum", type=float, default=0.996,
-                   help="EMA decay for the target encoder (default 0.996, I-JEPA-style)")
+    p.add_argument("--ema-momentum", type=float, default=0.996)
     p.add_argument("--no-lewm", dest="lewm", action="store_false")
     p.add_argument("--lewm-gaussian-reg", type=float, default=0.1)
     p.add_argument("--no-recon", dest="recon", action="store_false")
     p.add_argument("--reconstruction-weight", type=float, default=0.1)
-    p.set_defaults(ema=True, lewm=True, recon=True)
+    p.add_argument("--no-tc-jepa", dest="tc_jepa", action="store_false")
+    p.add_argument("--text-conditioner-scale", type=float, default=0.1)
+    p.add_argument("--no-curriculum", dest="curriculum", action="store_false",
+                   help="Disable the 4-stage curriculum (all losses always on).")
+    p.add_argument("--ablation", default=None,
+                   help="A short tag appended to --out-json (e.g., 'no-ema').")
+    p.add_argument("--out-json", default=None)
+    p.set_defaults(ema=True, lewm=True, recon=True,
+                   tc_jepa=True, curriculum=True)
     return p.parse_args()
 
 
@@ -101,7 +98,6 @@ def _current_lr(trainer) -> float:
 
 @torch.no_grad()
 def _eval(trainer, loader: DataLoader, max_batches: int) -> dict[str, float]:
-    """UCSA eval — uses trainer.compute_loss so all aux losses apply consistently."""
     trainer.model.eval()
     total, count = 0.0, 0
     it = iter(loader)
@@ -123,13 +119,7 @@ def _eval(trainer, loader: DataLoader, max_batches: int) -> dict[str, float]:
 
 
 @torch.no_grad()
-def _eval_hf_baseline(
-    model_id: str,
-    val_iter,
-    max_batches: int,
-    device: torch.device,
-) -> dict[str, float]:
-    """Standard next-token cross-entropy averaged across ``max_batches``."""
+def _eval_hf_baseline(model_id, val_iter, max_batches, device):
     print(f"    loading {model_id}...", flush=True)
     model = AutoModelForCausalLM.from_pretrained(model_id).to(device).eval()
     n_params = sum(p.numel() for p in model.parameters())
@@ -164,6 +154,18 @@ def _eval_hf_baseline(
 
 def main() -> None:
     args = parse_args()
+    set_seed(args.seed, deterministic=True)
+
+    # Auto-name output if not specified, so ablation sweeps land
+    # in separate JSON files without a shell wrapper.
+    if args.out_json is None:
+        ab = args.ablation or "full"
+        os.makedirs("runs", exist_ok=True)
+        args.out_json = f"runs/ucsa-{ab}-seed{args.seed}.json"
+
+    print(f"Seed: {args.seed}", flush=True)
+    print(f"Output: {args.out_json}", flush=True)
+
     with open("ucsa/configs/default.yaml") as f:
         cfg = yaml.safe_load(f)
 
@@ -180,11 +182,16 @@ def main() -> None:
     cfg["model"]["residual_dropout"] = 0.1
     cfg["model"]["ffn_dropout"] = 0.1
 
-    # JEPA stack
+    # Ablation toggles that all map into the config
     cfg["model"]["jepa_mode"] = "lewm" if args.lewm else "ijepa"
     cfg["model"]["gaussian_reg_weight"] = args.lewm_gaussian_reg
-    cfg["training"]["ema_momentum"] = args.ema_momentum if args.ema else 0.0
+    cfg["training"]["ema_momentum"] = (
+        args.ema_momentum if args.ema else 0.0
+    )
     cfg["training"]["ema_update_every"] = 1
+    cfg["model"]["text_conditioner_scale"] = (
+        args.text_conditioner_scale if args.tc_jepa else 0.0
+    )
 
     cfg["training"]["max_steps"] = args.max_steps
     cfg["training"]["warmup_steps"] = 400
@@ -193,11 +200,19 @@ def main() -> None:
     cfg["training"]["learning_rate"] = 6e-4
     cfg["training"]["checkpoint_every_n_steps"] = args.ckpt_every
     cfg["dataset"]["sequence_length"] = 1024
-    cfg["curriculum"]["stage_1_end"] = args.stage_1_end
-    cfg["curriculum"]["stage_2_end"] = args.stage_2_end
-    cfg["curriculum"]["stage_3_end"] = args.stage_3_end
+    if args.curriculum:
+        cfg["curriculum"]["stage_1_end"] = args.stage_1_end
+        cfg["curriculum"]["stage_2_end"] = args.stage_2_end
+        cfg["curriculum"]["stage_3_end"] = args.stage_3_end
+    else:
+        # No curriculum: stage_1_end = 1 means every loss is on from
+        # step 1 onward. The trainer's compute_loss gates by stage
+        # name so a stage-N setup with N-1 = "any step > 0" puts
+        # everything in JOINT for the whole run.
+        cfg["curriculum"]["stage_1_end"] = 1
+        cfg["curriculum"]["stage_2_end"] = 2
+        cfg["curriculum"]["stage_3_end"] = 3
 
-    print("Building tokenizer + dataset...", flush=True)
     ucsa_tokenizer = TokenizerWrapper(
         tokenizer_name=cfg["tokenizer"]["name"],
         max_seq_len=cfg["dataset"]["sequence_length"],
@@ -212,39 +227,52 @@ def main() -> None:
     train_ds = TextDataset(ucsa_tokenizer, ds_cfg)
     val_ds = TextDataset(ucsa_tokenizer, ds_cfg)
     val_ds.dataset = val_ds.dataset.skip(args.val_skip)
+    train_loader = DataLoader(_IterableOver(train_ds), batch_size=None)
+    val_loader = DataLoader(_IterableOver(val_ds), batch_size=None)
 
-    print("Building model...", flush=True)
     model = build_model(cfg)
     n_ucsa_params = sum(p.numel() for p in model.parameters())
     print(f"UCSA-small params: {n_ucsa_params:,}", flush=True)
 
     trainer = build_trainer(model, cfg)
     print(f"Device: {trainer.device}", flush=True)
-    stack_label = (
-        f"JEPA={cfg['model']['jepa_mode']} "
-        f"+recon={args.recon} "
-        f"+ema={cfg['training']['ema_momentum']:.3f}"
-    )
-    print(
-        f"Stack: {stack_label}",
-        flush=True,
-    )
-    print(
-        f"Curriculum: stage1->{args.stage_1_end} stage2->{args.stage_2_end} "
-        f"stage3->{args.stage_3_end} stage4->end",
-        flush=True,
-    )
-
-    train_loader = DataLoader(_IterableOver(train_ds), batch_size=None)
-
+    stack = []
+    if args.lewm:
+        stack.append("JEPA=lewm(multi-step)")
+    if args.ema:
+        stack.append(f"EMA=0.{int(args.ema_momentum*1000):03d}")
+    if args.recon:
+        stack.append(f"recon(w={args.reconstruction_weight})")
+    if args.tc_jepa:
+        stack.append(f"tc-jepa(s={args.text_conditioner_scale})")
+    if args.curriculum:
+        stack.append("curriculum=4stage")
+    else:
+        stack.append("curriculum=off(all-on)")
+    print(f"Stack: {' + '.join(stack)}", flush=True)
     os.makedirs(args.ckpt_dir, exist_ok=True)
     print(f"Starting training: max_steps={args.max_steps}", flush=True)
 
-    start = time.time()
+    # ponytail: ablation toggles flow into the combined loss via a
+    # zero-weight substitution. The forward path stays unchanged.
+    if not args.recon:
+        from ucsa.models.losses import LossWeights
+        trainer.loss_fn.weights = LossWeights(
+            jepa=trainer.loss_fn.weights.jepa,
+            memory=trainer.loss_fn.weights.memory,
+            router=trainer.loss_fn.weights.router,
+            reconstruction=0.0,
+        )
+    if not args.tc_jepa:
+        # ponytail: zero the field, the conditioner contributes 0.
+        trainer.model.text_conditioner_scale = 0.0
+
+    history: list[dict[str, float]] = []
     losses: list[float] = []
     best_val_ppl = float("inf")
     best_step = -1
-    val_loader = DataLoader(_IterableOver(val_ds), batch_size=None)
+    start = time.time()
+
     for step, batch in enumerate(_infinite(train_loader)):
         if step >= args.max_steps:
             break
@@ -260,13 +288,24 @@ def main() -> None:
             stage = trainer.curriculum.state.current_stage.display_name
             extras = (
                 f"jp={snap.get('jepa_prediction', 0):.4f} "
-                f"rec={snap.get('reconstruction_loss', 0):.4f}"
+                f"rec={snap.get('reconstruction_loss', 0):.4f} "
+                f"steps={int(snap.get('jepa_steps', 0))}"
             )
             print(
                 f"  step={step:5d} loss={loss:.4f} avg={avg:.4f} "
                 f"lr={lr:.2e} stage={stage} {extras} elapsed={el:.0f}s",
                 flush=True,
             )
+            history.append({
+                "step": step,
+                "loss": loss,
+                "avg": avg,
+                "lr": lr,
+                "stage": stage,
+                "jepa_prediction": snap.get("jepa_prediction", 0),
+                "reconstruction_loss": snap.get("reconstruction_loss", 0),
+                "jepa_steps": int(snap.get("jepa_steps", 0)),
+            })
 
         if step > 0 and step % args.eval_every == 0:
             vm = _eval(trainer, val_loader, args.eval_batches)
@@ -287,85 +326,64 @@ def main() -> None:
 
     trainer.save_checkpoint(os.path.join(args.ckpt_dir, "ucsa-final.safetensors"))
     elapsed = time.time() - start
-    print(
-        f"\nDone: {args.max_steps} steps in {elapsed:.0f}s "
-        f"= {args.max_steps/elapsed:.2f} steps/s",
-        flush=True,
-    )
-    print(f"first-10 losses: {[round(x, 3) for x in losses[:10]]}", flush=True)
-    print(f"last-10 losses:  {[round(x, 3) for x in losses[-10:]]}", flush=True)
-    print(
-        f"loss delta (first5 mean - last5 mean): "
-        f"{sum(losses[:5])/5 - sum(losses[-5:])/5:.3f}",
-        flush=True,
-    )
-
-    # Final eval on UCSA-small using a longer window — the headline number.
     final_ucsa = _eval(trainer, val_loader, args.eval_batches)
+    rows: list[dict] = []
+    if not args.skip_baselines:
+        device = trainer.device
+        rows.append(
+            {"name": "UCSA-small (this run)", "params": n_ucsa_params,
+             "val_ppl": final_ucsa["perplexity"]}
+        )
+        bench_ds = TextDataset(
+            ucsa_tokenizer,
+            DatasetConfig(
+                sequence_length=cfg["dataset"]["sequence_length"],
+                primary_dataset=cfg["dataset"]["primary_dataset"],
+                primary_split=cfg["dataset"]["primary_split"],
+                streaming=True, pack_sequences=True,
+            ),
+        )
+        bench_ds.dataset = bench_ds.dataset.skip(args.val_skip)
+        bench_loader = DataLoader(_IterableOver(bench_ds), batch_size=None)
+        bench_iter = iter(bench_loader)
+        for baseline in args.baselines:
+            try:
+                metrics = _eval_hf_baseline(
+                    baseline, bench_iter,
+                    args.baseline_eval_batches, device,
+                )
+                rows.append({
+                    "name": baseline, "params": metrics["params"],
+                    "val_ppl": metrics["perplexity"],
+                })
+            except Exception as exc:
+                print(f"    {baseline} failed: {exc}", flush=True)
+                rows.append({"name": baseline, "params": 0, "val_ppl": None})
+
+    report = {
+        "model": "ucsa-small",
+        "seed": args.seed,
+        "max_steps": args.max_steps,
+        "stack": stack,
+        "history": history,
+        "final_val_loss": final_ucsa["loss"],
+        "final_val_ppl": final_ucsa["perplexity"],
+        "best_val_ppl": best_val_ppl,
+        "best_val_ppl_step": best_step,
+        "n_ucsa_params": n_ucsa_params,
+        "elapsed_seconds": elapsed,
+        "baselines": rows,
+    }
+    os.makedirs(os.path.dirname(args.out_json) or ".", exist_ok=True)
+    with open(args.out_json, "w") as f:
+        json.dump(report, f, indent=2)
+    print(f"\nWrote {args.out_json}", flush=True)
     print(
-        f"\nUCSA-small val (final, {args.eval_batches} batches): "
-        f"val_loss={final_ucsa['loss']:.4f} val_ppl={final_ucsa['perplexity']:.1f}",
+        f"Final: loss={final_ucsa['loss']:.4f} "
+        f"val_ppl={final_ucsa['perplexity']:.1f} "
+        f"(best={best_val_ppl:.1f}@{best_step})",
         flush=True,
     )
-
-    if args.skip_baselines:
-        return
-
-    print("\n=== SOTA comparison vs HuggingFace baselines ===", flush=True)
-    print(
-        f"  evaluating baselines on the same val cursor "
-        f"(skip={args.val_skip}, batches={args.baseline_eval_batches}, "
-        f"sequence_length={cfg['dataset']['sequence_length']})",
-        flush=True,
-    )
-    device = trainer.device
-    bench_ds = TextDataset(
-        ucsa_tokenizer,
-        DatasetConfig(
-            sequence_length=cfg["dataset"]["sequence_length"],
-            primary_dataset=cfg["dataset"]["primary_dataset"],
-            primary_split=cfg["dataset"]["primary_split"],
-            streaming=True,
-            pack_sequences=True,
-        ),
-    )
-    bench_ds.dataset = bench_ds.dataset.skip(args.val_skip)
-    bench_loader = DataLoader(_IterableOver(bench_ds), batch_size=None)
-    bench_iter = iter(bench_loader)
-
-    rows: list[tuple[str, int, float | None]] = [
-        ("UCSA-small (ours, SOTA stack)", n_ucsa_params, final_ucsa["perplexity"]),
-    ]
-    for baseline in args.baselines:
-        try:
-            metrics = _eval_hf_baseline(
-                baseline, bench_iter, args.baseline_eval_batches, device
-            )
-            rows.append((baseline, metrics["params"], metrics["perplexity"]))
-        except Exception as exc:
-            print(f"    {baseline} failed: {exc}", flush=True)
-            rows.append((baseline, 0, None))
-
-    print("\n  Model                              Params        Val PPL", flush=True)
-    print("  -----------------------------------  ------------  --------", flush=True)
-    for name, params, ppl in rows:
-        ppl_str = f"{ppl:.1f}" if ppl is not None else "n/a"
-        print(
-            f"  {name:35s}  {params/1e6:>7.0f}M       {ppl_str}",
-            flush=True,
-        )
-
-    ucsa_ppl = final_ucsa["perplexity"]
-    print("\n  Small beats large:", flush=True)
-    for name, _, ppl in rows[1:]:
-        if ppl is None:
-            continue
-        ratio = ucsa_ppl / ppl
-        verdict = "WIN" if ratio < 1.0 else "loss"
-        print(
-            f"    UCSA-small / {name:20s}: {ratio:.3f}x  ({verdict})",
-            flush=True,
-        )
 
 
 if __name__ == "__main__":
