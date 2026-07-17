@@ -103,7 +103,19 @@ def build_trainer(
 ) -> Trainer:
     """Construct the trainer from the config."""
     cfg_dict = _config_to_dict(cfg)
-    loss_fn = UCSACombinedLoss()
+    # ponytail: pull JEPA-loss config out of the model section if
+    # present. Defaults preserve the original I-JEPA-style loss.
+    model_section = cfg_dict.get("model", {})
+    jepa_mode = model_section.get("jepa_mode", "ijepa")
+    jepa_alpha = float(model_section.get("jepa_alpha", 0.5))
+    gaussian_reg_weight = float(
+        model_section.get("gaussian_reg_weight", 0.1)
+    )
+    loss_fn = UCSACombinedLoss(
+        jepa_mode=jepa_mode,
+        jepa_alpha=jepa_alpha,
+        gaussian_reg_weight=gaussian_reg_weight,
+    )
     optimizer = build_optimizer(model, cfg)
     training = cfg_dict["training"]
     trainer_config = TrainerConfig(

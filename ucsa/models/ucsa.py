@@ -83,6 +83,9 @@ class UCSAConfig:
     residual_dropout: float = 0.0
     ffn_dropout: float = 0.0
     moe: MoEConfig | None = None
+    # TC-JEPA text conditioner config; arXiv 2605.03245 (May 2026).
+    text_conditioner_top_k: int = 4
+    text_conditioner_scale: float = 0.1
 
     def __post_init__(self) -> None:
         if self.hidden_size <= 0:
@@ -182,6 +185,28 @@ class UCSA(nn.Module):
             persistent=False,
         )
         self._baseline_initialised: bool = False
+        # TC-JEPA (arXiv 2605.03245, May 2026, Meta): sparse cross-attention
+        # text conditioner modulates the JEPA prediction. We treat the
+        # model's own input-token embeddings as the conditioning source —
+        # natural for a text-only LM, equivalent in spirit to captions.
+        self.text_conditioner_top_k: int = max(
+            1, getattr(config, "text_conditioner_top_k", 4)
+        )
+        self.text_conditioner_scale: float = getattr(
+            config, "text_conditioner_scale", 0.1
+        )
+        self._text_q = nn.Linear(
+            config.hidden_size, config.hidden_size, bias=False
+        )
+        self._text_k = nn.Linear(
+            config.hidden_size, config.hidden_size, bias=False
+        )
+        self._text_v = nn.Linear(
+            config.hidden_size, config.hidden_size, bias=False
+        )
+        self._text_o = nn.Linear(
+            config.hidden_size, config.hidden_size, bias=False
+        )
 
     def forward(
         self,
@@ -217,6 +242,32 @@ class UCSA(nn.Module):
         elif len(intermediates) == 1:
             jepa_predicted = intermediates[0]
             jepa_target = new_pcs.get_bank("working").detach()
+
+        # TC-JEPA: condition the predicted embedding on input tokens via a
+        # sparse (top-k) cross-attention. Queries = JEPA prediction;
+        # keys/values = input token embeddings. We keep the scale small
+        # (text_conditioner_scale, default 0.1) so the conditioner
+        # refines the prediction without dominating it.
+        if jepa_predicted is not None:
+            token_embeds = self.perception.embed_tokens(
+                inputs.to(self.pcs.get_bank("working").device)
+            )
+            q = self._text_q(jepa_predicted.unsqueeze(0)).unsqueeze(1)
+            k = self._text_k(token_embeds).unsqueeze(1)
+            v = self._text_v(token_embeds).unsqueeze(1)
+            scores = torch.matmul(q, k.transpose(-1, -2)) / (
+                token_embeds.shape[-1] ** 0.5
+            )
+            topk = scores.topk(
+                min(self.text_conditioner_top_k, scores.shape[-1]), dim=-1
+            )
+            attn = torch.zeros_like(scores)
+            attn.scatter_(-1, topk.indices, 1.0)
+            attn = attn / attn.sum(dim=-1, keepdim=True).clamp(min=1e-6)
+            conditioned = torch.matmul(attn, v).squeeze(1)
+            jepa_predicted = jepa_predicted + self.text_conditioner_scale * (
+                self._text_o(conditioned).squeeze(1)
+            )
 
         # Long-term memory + MoE router logits are direct reads.
         long_term = new_pcs.get_bank("long_term")
@@ -299,6 +350,12 @@ def build_ucsa(cfg: Any) -> UCSA:
             residual_dropout=float(model_section.get("residual_dropout", 0.0)),
             ffn_dropout=float(model_section.get("ffn_dropout", 0.0)),
             moe=moe_cfg,
+            text_conditioner_top_k=int(
+                model_section.get("text_conditioner_top_k", 4)
+            ),
+            text_conditioner_scale=float(
+                model_section.get("text_conditioner_scale", 0.1)
+            ),
         )
     )
 

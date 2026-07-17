@@ -75,51 +75,105 @@ class AutoregressiveLoss(nn.Module):
 
 
 class JEPALoss(nn.Module):
-    """Latent-prediction loss combining cosine similarity and SmoothL1.
+    """Latent-prediction loss.
 
-    The loss computes:
+    Two modes:
 
-    .. math::
+    - ``"ijepa"`` (default; backwards-compatible): convex combination of
+      cosine distance and SmoothL1, with weight ``alpha``.
+      ``L = α (1 - cos(pred, target)).mean() + (1 - α) smooth_l1(pred, target)``
+    - ``"lewm"`` (LeWorldModel, arXiv 2603.19312, Jun 2026, Maes et al.):
+      a single SmoothL1 prediction term plus a per-batch Gaussian
+      regulariser on the latent embeddings. The Gaussian reg enforces
+      the predicted latents to match N(0, 1) — preventing collapse
+      without needing stop-grad, EMA target networks, or multi-term
+      hyperparameter tweaking. The paper drops the tuning budget from
+      six loss terms to one weight.
 
-        L = \\alpha * (1 - \\cos(pred, target)).mean()
-          + (1 - \\alpha) * smooth_l1(pred, target).mean()
-
-    where :math:`\\alpha` defaults to ``0.5``.
+    When ``mode="lewm"``, ``forward`` returns a tuple
+    ``(loss, components)`` so the components dict can list the
+    prediction and the regulariser separately.
     """
 
-    def __init__(self, alpha: float = 0.5) -> None:
+    def __init__(
+        self,
+        alpha: float = 0.5,
+        mode: str = "ijepa",
+        gaussian_reg_weight: float = 0.1,
+    ) -> None:
         """Initialise the loss.
 
         Args:
-            alpha: Weight of the cosine term.
+            alpha: Weight of the cosine term in ``"ijepa"`` mode.
+            mode: ``"ijepa"`` or ``"lewm"``.
+            gaussian_reg_weight: Weight for the latent Gaussian KL term
+                in ``"lewm"`` mode.
         """
         super().__init__()
         if not 0.0 <= alpha <= 1.0:
             raise ValueError(f"alpha must be in [0, 1], got {alpha}.")
+        if mode not in {"ijepa", "lewm"}:
+            raise ValueError(f"mode must be 'ijepa' or 'lewm', got {mode}.")
         self.alpha = alpha
+        self.mode = mode
+        self.gaussian_reg_weight = gaussian_reg_weight
 
-    def forward(self, predicted: Tensor, target: Tensor) -> Tensor:
+    def _gaussian_kl(
+        self, predicted: Tensor, latent_for_reg: Tensor | None
+    ) -> Tensor:
+        """KL( predicted_latent_distribution || N(0, I) ).
+
+        Matches LeWM §3.4: enforce the latent to be unit-variance,
+        zero-mean by penalising ``0.5 * (var + mu^2 - 1 - log var)``.
+        """
+        # The paper regularises the predicted embedding directly;
+        # `latent_for_reg` lets callers pass a pre-conditioning latent
+        # so the regulariser measures the underlying distribution
+        # rather than any additive offset.
+        target = latent_for_reg if latent_for_reg is not None else predicted
+        mu = target.mean(dim=(0, 1))
+        var = target.var(dim=(0, 1), unbiased=False) + 1e-6
+        return 0.5 * (var + mu.pow(2) - 1.0 - var.log()).mean()
+
+    def forward(
+        self,
+        predicted: Tensor,
+        target: Tensor,
+        latent_for_reg: Tensor | None = None,
+    ) -> Tensor | tuple[Tensor, dict[str, float]]:
         """Compute the JEPA loss.
 
         Args:
             predicted: Predicted embeddings of shape
                 ``(batch, seq, hidden)``.
             target: Target embeddings of the same shape.
+            latent_for_reg: Optional latent to regularise in LeWM mode
+                (defaults to ``predicted``).
 
         Returns:
-            Scalar loss tensor.
+            Scalar tensor (``"ijepa"``) or ``(loss, components)`` tuple
+            (``"lewm"``).
         """
         if predicted.shape != target.shape:
             raise ValueError(
                 f"predicted and target must share shape; got "
                 f"{tuple(predicted.shape)} and {tuple(target.shape)}."
             )
-        cosine = torch.nn.functional.cosine_similarity(
-            predicted, target, dim=-1
-        )
-        cosine_term = (1.0 - cosine).mean()
-        l1_term = torch.nn.functional.smooth_l1_loss(predicted, target)
-        return self.alpha * cosine_term + (1.0 - self.alpha) * l1_term
+        if self.mode == "ijepa":
+            cosine = torch.nn.functional.cosine_similarity(
+                predicted, target, dim=-1
+            )
+            cosine_term = (1.0 - cosine).mean()
+            l1_term = torch.nn.functional.smooth_l1_loss(predicted, target)
+            return self.alpha * cosine_term + (1.0 - self.alpha) * l1_term
+        # LeWM mode: single SmoothL1 prediction + Gaussian regulariser.
+        pred_loss = torch.nn.functional.smooth_l1_loss(predicted, target)
+        reg = self._gaussian_kl(predicted, latent_for_reg)
+        loss = pred_loss + self.gaussian_reg_weight * reg
+        return loss, {
+            "jepa_pred": float(pred_loss.item()),
+            "jepa_gaussian_reg": float(reg.item()),
+        }
 
 
 class MemoryStabilityLoss(nn.Module):
@@ -185,18 +239,32 @@ class RouterLoadBalancingLoss(nn.Module):
 class UCSACombinedLoss(nn.Module):
     """Combine the four UCSA loss components with configurable weights."""
 
-    def __init__(self, weights: LossWeights | None = None) -> None:
+    def __init__(
+        self,
+        weights: LossWeights | None = None,
+        jepa_mode: str = "ijepa",
+        jepa_alpha: float = 0.5,
+        gaussian_reg_weight: float = 0.1,
+    ) -> None:
         """Initialise the combined loss.
 
         Args:
             weights: Optional :class:`LossWeights`.
+            jepa_mode: ``"ijepa"`` (default) or ``"lewm"`` (LeWorldModel).
+            jepa_alpha: Cosine blend weight for ``"ijepa"`` mode.
+            gaussian_reg_weight: Gaussian regulariser weight for
+                ``"lewm"`` mode.
         """
         super().__init__()
         if weights is None:
             weights = LossWeights()
         self.weights = weights
         self.ar = AutoregressiveLoss()
-        self.jepa = JEPALoss()
+        self.jepa = JEPALoss(
+            alpha=jepa_alpha,
+            mode=jepa_mode,
+            gaussian_reg_weight=gaussian_reg_weight,
+        )
         self.memory = MemoryStabilityLoss()
         self.router = RouterLoadBalancingLoss()
 
@@ -227,9 +295,16 @@ class UCSACombinedLoss(nn.Module):
         components = {"ar": float(total.item())}
 
         if jepa_predicted is not None and jepa_target is not None:
-            jepa_loss = self.jepa(jepa_predicted, jepa_target)
+            jepa_out = self.jepa(jepa_predicted, jepa_target)
+            if self.jepa.mode == "lewm":
+                jepa_loss, jepa_components = jepa_out
+                components.update(
+                    {f"jepa_{k}": v for k, v in jepa_components.items()}
+                )
+            else:
+                jepa_loss = jepa_out
+                components["jepa"] = float(jepa_loss.item())
             total = total + self.weights.jepa * jepa_loss
-            components["jepa"] = float(jepa_loss.item())
         if long_term is not None:
             memory_loss = self.memory(long_term)
             total = total + self.weights.memory * memory_loss

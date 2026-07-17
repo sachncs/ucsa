@@ -145,6 +145,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 - (none)
+
+### Added
+- New JEPA loss mode `lewm` (LeWorldModel, arXiv 2603.19312, Mar
+  2026): single SmoothL1 prediction term plus a per-batch Gaussian
+  regulariser on the latent embeddings. The mode is opt-in via
+  `model.jepa_mode=lewm` in the config and is designed to fit
+  LeWM's "one weight, no EMA, no multi-term juggling" claim.
+- New text-conditioned JEPA path (TC-JEPA, arXiv 2605.03245, May
+  2026, Meta): `UCSA.forward` now applies a sparse top-k
+  cross-attention from the input-token embeddings into the JEPA
+  prediction. Two new `UCSAConfig`/`defaults.yaml` fields control
+  the conditioner (`text_conditioner_top_k`, `text_conditioner_scale`).
+
+### Changed
+- `scripts/benchmark.py`: added Kimi K3 (arXiv-style) features as
+  opt-in options: `--kda` (Kimi Delta Attention), `--gated-mla`
+  (Gated MLA), `--stable-moe` (Stable LatentMoE), `--attn-res`
+  (Attention Residuals), `--situ` (Sigmoid-Tanh Unit activation),
+  `--per-head-muon`. The default baseline (no flags) is unchanged
+  from the previous release. Added an in-script `Muon` import
+  via `ucsa.training.optimizer` (new module).
+- `scripts/train.py` no longer renamed — reverted on a follow-up
+  edit. (The SOTA-comparison scaffold remains under `--baselines`.)
+- `ucsa.training.optimizer`: new module providing `Muon`, the
+  orthogonalised-momentum SGD variant used by Kimi K2 and DeepSeek
+  V4. Newton-Schulz iteration is inline, no new dependencies.
 - Project scaffolding: `pyproject.toml` with project metadata, dependencies,
   and tool configuration for ruff, black, mypy, and pytest.
 - README.md with quickstart, layout, and extension guide.
