@@ -664,6 +664,7 @@ class TransformerOperator(StateTransitionOperator):
         self.cumulative_offsets: tuple[int, ...] = ()
         self.is_first_step: bool = True
         self.last_aux_loss: Tensor = torch.zeros(())
+        self.last_router_logits: Tensor | None = None  # ponytail: aggregated MoE router logits from blocks; None if no MoE
         self.initialize()
 
     @property
@@ -785,6 +786,7 @@ class TransformerOperator(StateTransitionOperator):
         )
 
         total_aux = torch.zeros(())
+        router_pieces: list[Tensor] = []
         for block in self.blocks:
             all_tokens, aux = block(
                 all_tokens,
@@ -793,9 +795,14 @@ class TransformerOperator(StateTransitionOperator):
                 working_slice=(working_start, working_end),
             )
             total_aux = total_aux + aux.moe_load
+            if block.is_moe_layer and hasattr(block.ffn, "last_router_logits"):
+                rl = block.ffn.last_router_logits
+                if rl is not None:
+                    router_pieces.append(rl)
         all_tokens = self.final_norm(all_tokens)
         self.is_first_step = False
         self.last_aux_loss = total_aux
+        self.last_router_logits = torch.cat(router_pieces, dim=0) if router_pieces else None
 
         new_pcs = cstate
         for bank_name in BANK_NAMES:

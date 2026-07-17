@@ -181,7 +181,8 @@ class TestUCSAModel:
         )
         inputs = torch.randint(0, 100, (1, 4))
         out = model(inputs)
-        assert set(out) == {"language", "planning", "tool", "memory"}
+        assert set(out) >= {"language", "planning", "tool", "memory"}
+        assert set(out) >= {"jepa_predicted", "jepa_target", "long_term", "router_logits"}
 
     def test_forward_returns_logits_with_correct_vocab(self) -> None:
         """Language logits have shape ``(batch, working_size, vocab)``."""

@@ -165,9 +165,9 @@ class Trainer:
         self.metrics = metrics or build_default_registry()
         if device is None:
             if torch.cuda.is_available():
-                device = torch.device("cuda")
+                device = torch.device("cuda", 0)
             elif torch.backends.mps.is_available():
-                device = torch.device("mps")
+                device = torch.device("mps", 0)
             else:
                 device = torch.device("cpu")
         self.device = device
@@ -206,6 +206,8 @@ class Trainer:
         Returns:
             Tuple ``(loss, components)``.
         """
+        inputs = inputs.to(self.device)
+        targets = targets.to(self.device)
         # The model is expected to expose a ``forward`` method returning a
         # tuple ``(language_logits, memory_state, intermediates)`` when
         # possible. For tests, the trainer accepts an ``inputs -> logits``
@@ -229,13 +231,26 @@ class Trainer:
             targets = torch.nn.functional.pad(targets, (pad, 0))
         active = self.curriculum.active_components()
         kwargs: dict[str, Any] = {}
+        # Prefer real model aux outputs over randn dummies. Fall back only
+        # when the model doesn't expose them (e.g. callable test models).
         if "jepa" in active:
-            kwargs["jepa_predicted"] = torch.randn_like(logits[..., :32])
-            kwargs["jepa_target"] = torch.randn_like(logits[..., :32])
+            jp = outputs.get("jepa_predicted") if isinstance(outputs, dict) else None
+            jt = outputs.get("jepa_target") if isinstance(outputs, dict) else None
+            if jp is None or jt is None:
+                jp = torch.randn_like(logits[..., :32])
+                jt = torch.randn_like(logits[..., :32])
+            kwargs["jepa_predicted"] = jp
+            kwargs["jepa_target"] = jt
         if "memory" in active:
-            kwargs["long_term"] = torch.randn(8, logits.shape[-1])
+            lt = outputs.get("long_term") if isinstance(outputs, dict) else None
+            if lt is None:
+                lt = torch.randn(8, logits.shape[-1])
+            kwargs["long_term"] = lt
         if "router" in active:
-            kwargs["router_logits"] = torch.randn(16, 4)
+            rl = outputs.get("router_logits") if isinstance(outputs, dict) else None
+            if rl is None:
+                rl = torch.randn(16, 4)
+            kwargs["router_logits"] = rl
         return self.loss_fn(logits, targets, **kwargs)
 
     def train_step(
@@ -269,6 +284,16 @@ class Trainer:
         self.state.last_loss = float(loss.item())
         self.state.last_components = components
         self.curriculum.step()
+        # ponytail: refresh memory baseline every 50 steps so MemoryStabilityLoss
+        # has a moving reference instead of being a no-op.
+        if (
+            isinstance(self.model, nn.Module)
+            and hasattr(self.model, "memory_baseline")
+            and self.state.global_step % 50 == 0
+        ):
+            lt = self.model.pcs.get_bank("long_term")
+            if lt.numel() > 0:
+                self.model.memory_baseline.copy_(lt.detach().mean(dim=0))
 
         self.metrics.update("training_loss", float(loss.item()))
         self.metrics.update(

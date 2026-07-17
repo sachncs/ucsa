@@ -113,6 +113,7 @@ class MixtureOfExperts(nn.Module):
             Expert(hidden_size, intermediate_size)
             for _ in range(config.num_experts)
         )
+        self.last_router_logits: Tensor | None = None  # ponytail: stash for aux loss wiring; overwritten each forward
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """Apply the MoE block.
@@ -130,6 +131,7 @@ class MixtureOfExperts(nn.Module):
         num_tokens = flat_x.shape[0]
 
         router_logits = self.router(flat_x)
+        self.last_router_logits = router_logits
         routing_weights = torch.softmax(router_logits, dim=-1)
         topk_weights, topk_indices = torch.topk(
             routing_weights, self.config.top_k, dim=-1

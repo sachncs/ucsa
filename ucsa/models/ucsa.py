@@ -29,6 +29,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+import torch
 from torch import Tensor, nn
 
 from ucsa.models.graph_service import GraphService
@@ -78,6 +79,9 @@ class UCSAConfig:
     vocab_size: int = 50257
     max_seq_len: int = 1024
     num_concepts: int = 16
+    attention_dropout: float = 0.0
+    residual_dropout: float = 0.0
+    ffn_dropout: float = 0.0
     moe: MoEConfig | None = None
 
     def __post_init__(self) -> None:
@@ -145,6 +149,9 @@ class UCSA(nn.Module):
                     sliding_window=config.sliding_window,
                     vocab_size=config.vocab_size,
                     moe=config.moe,
+                    attention_dropout=config.attention_dropout,
+                    residual_dropout=config.residual_dropout,
+                    ffn_dropout=config.ffn_dropout,
                 )
             )
         self.operator = operator
@@ -152,7 +159,7 @@ class UCSA(nn.Module):
             operator=self.operator,
             config=ReasoningLoopConfig(
                 num_iterations=config.reasoning_iterations,
-                capture_intermediates=False,
+                capture_intermediates=True,  # ponytail: needed for JEPA aux loss; intermediates are detached clones, no extra graph
             ),
         )
         self.heads = heads or ProjectionHeads(
@@ -166,6 +173,15 @@ class UCSA(nn.Module):
         self.graph_service = graph_service or GraphService(
             num_concepts=config.num_concepts
         )
+        # ponytail: memory_baseline is a non-trainable buffer that the trainer
+        # refreshes every N steps. MemoryStabilityLoss uses it as the reference
+        # so the loss is meaningful (MSE(long_term, baseline) instead of 0).
+        self.register_buffer(
+            "memory_baseline",
+            torch.zeros(config.hidden_size),
+            persistent=False,
+        )
+        self._baseline_initialised: bool = False
 
     def forward(
         self,
@@ -179,14 +195,43 @@ class UCSA(nn.Module):
             modality: Modality tag.
 
         Returns:
-            Dict with at least the ``language`` logits.
+            Dict with at least ``language`` (logits), plus JEPA/memory/MoE
+            aux outputs: ``jepa_predicted``, ``jepa_target``, ``long_term``,
+            ``router_logits``. Missing keys indicate aux features weren't
+            produced this step (caller should handle None/dummy).
         """
         observation = self.perception.forward_from_ids(
             inputs.to(self.pcs.get_bank("working").device), modality=modality
         )
         new_pcs = self.reasoning_loop(self.pcs, observation)
-        working = new_pcs.get_bank("working").unsqueeze(0)
-        return self.heads(working)
+        heads_out = self.heads(new_pcs.get_bank("working").unsqueeze(0))
+
+        # JEPA aux: predict next working-state from previous.
+        # Intermediates are captured clones; pick last two iterations.
+        intermediates = self.reasoning_loop.get_intermediates()
+        jepa_predicted: Tensor | None = None
+        jepa_target: Tensor | None = None
+        if len(intermediates) >= 2:
+            jepa_predicted = intermediates[-1]
+            jepa_target = intermediates[-2]
+        elif len(intermediates) == 1:
+            jepa_predicted = intermediates[0]
+            jepa_target = new_pcs.get_bank("working").detach()
+
+        # Long-term memory + MoE router logits are direct reads.
+        long_term = new_pcs.get_bank("long_term")
+        router_logits = self.operator.last_router_logits
+
+        # Lazy-init the memory baseline the first time we see a tensor.
+        if not self._baseline_initialised and long_term.numel() > 0:
+            self.memory_baseline = long_term.detach().mean(dim=0).clone()
+            self._baseline_initialised = True
+
+        heads_out["jepa_predicted"] = jepa_predicted
+        heads_out["jepa_target"] = jepa_target
+        heads_out["long_term"] = long_term
+        heads_out["router_logits"] = router_logits
+        return heads_out
 
     def start_memory_service(self) -> None:
         """Start the background memory worker."""
@@ -250,6 +295,9 @@ def build_ucsa(cfg: Any) -> UCSA:
             vocab_size=vocab_size,
             max_seq_len=max_seq_len,
             num_concepts=num_concepts,
+            attention_dropout=float(model_section.get("attention_dropout", 0.0)),
+            residual_dropout=float(model_section.get("residual_dropout", 0.0)),
+            ffn_dropout=float(model_section.get("ffn_dropout", 0.0)),
             moe=moe_cfg,
         )
     )

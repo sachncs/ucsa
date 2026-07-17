@@ -3,7 +3,17 @@
 Profile (matches the default UCSA paper config, scaled for MPS):
 - hidden_size=384, num_layers=6, num_concepts=16, reasoning_iterations=4
 - batch_size=1 (UCSA PCS is per-call today), max_seq_len=1024
-- 8000 steps with a 4-stage curriculum so every component warms up
+- 0.1 attention/residual/ffn dropout (regularisation against the no-val-signal
+  overfit we saw without it)
+- 8000 steps with a 4-stage curriculum so every component warms up:
+  language only (0-2000) → language+jepa (2000-4500) →
+  language+jepa+memory (4500-6500) → joint+router (6500-end)
+- JEPA/memory/router aux losses are wired to real model outputs
+  (jepa_predicted/target = consecutive reasoning-loop intermediates;
+  long_term = PCS long-term bank with refreshed baseline buffer;
+  router_logits = aggregated MoE logits across blocks)
+- val: a held-out cursor on the same fineweb-edu stream
+  (--val-skip to advance into tail)
 
 Usage:
     .venv/bin/python scripts/train.py [--max-steps N] [--ckpt-dir DIR]
@@ -34,6 +44,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--stage-1-end", type=int, default=2000)
     p.add_argument("--stage-2-end", type=int, default=4500)
     p.add_argument("--stage-3-end", type=int, default=6500)
+    p.add_argument("--val-skip", type=int, default=10_000,
+                   help="Skip this many fineweb-edu examples before reading val batches (held-out signal)")
     return p.parse_args()
 
 
@@ -100,6 +112,10 @@ def main() -> None:
     cfg["model"]["vocab_size"] = 50257
     cfg["model"]["max_seq_len"] = 1024
     cfg["model"]["num_concepts"] = 16
+    # regularization: prevents the train-loss descent we saw with no signal on val
+    cfg["model"]["attention_dropout"] = 0.1
+    cfg["model"]["residual_dropout"] = 0.1
+    cfg["model"]["ffn_dropout"] = 0.1
 
     cfg["training"]["max_steps"] = args.max_steps
     cfg["training"]["warmup_steps"] = 200
@@ -125,7 +141,8 @@ def main() -> None:
         pack_sequences=True,
     )
     train_ds = TextDataset(tokenizer, ds_cfg)
-    val_ds = TextDataset(tokenizer, ds_cfg)  # ponytail: same stream, different cursor; real eval wants a real validation split
+    val_ds = TextDataset(tokenizer, ds_cfg)
+    val_ds.dataset = val_ds.dataset.skip(args.val_skip)  # ponytail: held-out cursor; fineweb-edu has no real val split
 
     print("Building model...", flush=True)
     model = build_model(cfg)
