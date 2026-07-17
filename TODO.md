@@ -99,11 +99,11 @@ update `CHANGELOG.md` `[Unreleased]` and pass `ruff`, `mypy --strict`, and
 
 ## Phase 9 — Plumbing
 
-- [ ] feat(utils): add seed, checkpoint (safetensors), logging (TB + W&B)
-- [ ] test(utils): cover deterministic seed, checkpoint round-trip, logger init
-- [ ] feat(scripts): add train.py and infer.py with Hydra entrypoints
-- [ ] test(scripts): cover CLI arg parsing, config override, smoke step
-- [ ] feat(config): add configs/default.yaml with all hyperparameters
+- [x] feat(utils): add seed, checkpoint (safetensors), logging (TB + W&B)
+- [x] test(utils): cover deterministic seed, checkpoint round-trip, logger init
+- [x] feat(scripts): add train.py and infer.py with Hydra entrypoints
+- [x] test(scripts): cover CLI arg parsing, config override, smoke step
+- [x] feat(config): add configs/default.yaml with all hyperparameters
       externalized
 
 ## Phase 10 — Verification
