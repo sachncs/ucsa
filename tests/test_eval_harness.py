@@ -7,8 +7,8 @@ needs network access; that's exercised by ``scripts/eval.py``.
 from __future__ import annotations
 
 from ucsa.training.eval_harness import (
-    EvalResult,
     TASK_REGISTRY,
+    EvalResult,
     evaluate_all,
     evaluate_task,
 )
@@ -68,6 +68,7 @@ def test_evaluate_all_smoke_with_fake_examples(monkeypatch):
     """Make each loader return 2 trivial examples; rank-by-loglik
     should produce a finite accuracy number without touching network."""
     import torch
+
     from ucsa.training import eval_harness
 
     def fake_loader():
@@ -93,7 +94,7 @@ def test_evaluate_all_smoke_with_fake_examples(monkeypatch):
 
     # Replace each loader with our trivial one.
     saved = {n: s.loader for n, s in eval_harness.TASK_REGISTRY.items()}
-    for n, s in eval_harness.TASK_REGISTRY.items():
+    for n, _s in eval_harness.TASK_REGISTRY.items():
         eval_harness.TASK_REGISTRY[n] = eval_harness.TaskSpec(
             name=n, loader=fake_loader, max_examples=2
         )

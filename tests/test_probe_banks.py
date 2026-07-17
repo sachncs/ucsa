@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import torch
+from scripts.probe_banks import probe_banks
 
 from ucsa.models.ucsa import UCSA, UCSAConfig
-from scripts.probe_banks import probe_banks
 
 
 def test_probe_banks_returns_six_bank_summaries():
