@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 import torch
-from torch import Tensor
 
 from ucsa.models.memory import Memory
 from ucsa.models.state import PCSConfig, PersistentCognitiveState
@@ -18,7 +17,7 @@ def tiny_pcs() -> PersistentCognitiveState:
 class TestRetentionAccess:
     """Tests for :meth:`Memory.get_retention_scores`."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def memory(self) -> Memory:
         """Provide a memory facade with some accepted candidates."""
         mem = Memory(tiny_pcs())
@@ -67,7 +66,7 @@ class TestRetentionAccess:
 class TestRecyclePolicies:
     """Tests for FIFO and threshold-based recycle policies."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def memory(self) -> Memory:
         """Provide a memory facade with a populated long-term bank."""
         mem = Memory(tiny_pcs())
@@ -82,13 +81,9 @@ class TestRecyclePolicies:
         memory.cstate.step_age()
         recycled = memory.recycle_fifo(k=3)
         assert len(recycled) == 3
-        # Oldest slot has highest age.
-        age = getattr(memory.cstate, "meta_age_long_term")
-        for idx in recycled:
-            # The recycled slots originally had the highest ages.
-            # After recycle, ages are reset, so we just verify they were
-            # reset (not that they're still highest).
-            assert True  # Slot indices are returned.
+        for _ in recycled:
+            # Slot indices are returned (the actual ages are reset).
+            pass
 
     def test_recycle_fifo_zero_returns_empty(self, memory: Memory) -> None:
         """``k=0`` returns an empty list."""
@@ -98,9 +93,9 @@ class TestRecyclePolicies:
         """Recycled slots have their metadata cleared."""
         memory.cstate.step_age()
         recycled = memory.recycle_fifo(k=3)
-        usage = getattr(memory.cstate, "meta_usage_long_term")
+        usage = memory.cstate.meta_usage_long_term
         assert torch.all(usage[recycled] == 0.0)
-        age = getattr(memory.cstate, "meta_age_long_term")
+        age = memory.cstate.meta_age_long_term
         assert torch.all(age[recycled] == 0)
 
     def test_recycle_fifo_replaces_tokens(self, memory: Memory) -> None:
@@ -133,7 +128,7 @@ class TestRecyclePolicies:
         mem.accept_into_long_term(candidate, max_slots=20)
         # Force the first 5 slots to be lowest-retention.
         mem.cstate.update_retention()
-        retention = getattr(mem.cstate, "meta_retention_long_term")
+        retention = mem.cstate.meta_retention_long_term
         retention.fill_(1.0)
         retention[:5] = 0.0
         recycled = mem.recycle_below(0.1)
@@ -158,7 +153,7 @@ class TestCapacityInvariants:
         for _ in range(5):
             candidate = mem.propose_candidate()
             mem.accept_into_long_term(candidate)
-        usage = getattr(mem.cstate, "meta_usage_long_term")
+        usage = mem.cstate.meta_usage_long_term
         assert int((usage > 0).sum().item()) <= 8
 
     def test_recycle_frees_slots(self) -> None:
@@ -168,7 +163,7 @@ class TestCapacityInvariants:
         mem.accept_into_long_term(candidate)
         assert mem.long_term_usage() == 4
         mem.cstate.update_retention()
-        retention = getattr(mem.cstate, "meta_retention_long_term")
+        retention = mem.cstate.meta_retention_long_term
         retention.fill_(0.0)
         mem.recycle_below(0.1)
         assert mem.long_term_usage() == 0
@@ -180,7 +175,7 @@ class TestCapacityInvariants:
         mem.accept_into_long_term(candidate, max_slots=5)
         assert mem.long_term_capacity_used() == pytest.approx(0.5)
         mem.cstate.update_retention()
-        retention = getattr(mem.cstate, "meta_retention_long_term")
+        retention = mem.cstate.meta_retention_long_term
         retention.fill_(0.0)
         mem.recycle_below(0.1)
         assert mem.long_term_capacity_used() == 0.0

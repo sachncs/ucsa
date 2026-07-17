@@ -38,12 +38,11 @@ The recycle policy lives in :func:`retention_score` and
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Mapping
 
 import torch
 from torch import Tensor, nn
-
 
 BANK_NAMES: tuple[str, ...] = (
     "working",
@@ -236,7 +235,7 @@ class PersistentCognitiveState(nn.Module):
             config = PCSConfig()
         self.config = config
 
-        bank_parameter_dict: "nn.ParameterDict[str, nn.Parameter]" = nn.ParameterDict()
+        bank_parameter_dict: nn.ParameterDict[str, nn.Parameter] = nn.ParameterDict()
         bank_specs = build_bank_specs(config)
         for spec in bank_specs:
             tensor = torch.empty(spec.num_tokens, config.hidden_size)
@@ -463,9 +462,9 @@ class PersistentCognitiveState(nn.Module):
         with torch.no_grad():
             target[indices] = replacement_tensor
 
-        for field in ("importance", "usage", "age", "retention"):
-            buffer = getattr(self, f"meta_{field}_{name}")
-            buffer[indices] = 0.0 if field != "age" else 0
+        for metadata_field in ("importance", "usage", "age", "retention"):
+            buffer = getattr(self, f"meta_{metadata_field}_{name}")
+            buffer[indices] = 0.0 if metadata_field != "age" else 0
         return indices
 
     def extra_repr(self) -> str:

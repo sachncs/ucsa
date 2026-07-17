@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 import torch
-from torch import Tensor
 
 from ucsa.models.memory import Memory, MemoryUpdate
 from ucsa.models.state import PCSConfig, PersistentCognitiveState
@@ -60,7 +59,7 @@ class TestMemoryUpdate:
 class TestMemory:
     """Tests for :class:`Memory`."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def memory(self) -> Memory:
         """Provide a memory facade wrapping a fresh PCS."""
         return Memory(tiny_pcs())
@@ -118,9 +117,7 @@ class TestMemory:
             working_slice=working_slice, importance=importance
         )
         indices = memory.accept_into_long_term(candidate, max_slots=4)
-        recorded = getattr(
-            memory.cstate, "meta_importance_long_term"
-        )[indices]
+        recorded = memory.cstate.meta_importance_long_term[indices]
         assert torch.allclose(recorded, importance[:4])
 
     def test_accept_resets_age(self, memory: Memory) -> None:
@@ -128,7 +125,7 @@ class TestMemory:
         memory.cstate.step_age()
         candidate = memory.propose_candidate()
         indices = memory.accept_into_long_term(candidate, max_slots=3)
-        age = getattr(memory.cstate, "meta_age_long_term")[indices]
+        age = memory.cstate.meta_age_long_term[indices]
         assert torch.all(age == 0)
 
     def test_accept_updates_retention(self, memory: Memory) -> None:
@@ -146,7 +143,7 @@ class TestMemory:
         candidate = memory.propose_candidate()
         memory.accept_into_long_term(candidate, max_slots=memory.long_term_capacity)
         # Now lower retention and try to accept more.
-        getattr(memory.cstate, "meta_retention_long_term")[:] = 0.0
+        memory.cstate.meta_retention_long_term[:] = 0.0
         candidate2 = memory.propose_candidate(importance=torch.zeros(candidate.tokens.shape[0]))
         indices = memory.accept_into_long_term(candidate2)
         assert len(indices) > 0
@@ -196,7 +193,7 @@ class TestMemory:
         memory.accept_into_long_term(candidate, max_slots=20)
         memory.cstate.update_retention()
         # Force specific slots to be lowest retention.
-        retention = getattr(memory.cstate, "meta_retention_long_term")
+        retention = memory.cstate.meta_retention_long_term
         retention.fill_(1.0)
         retention[:3] = 0.0
         recycled = memory.recycle_low_retention(k=2)

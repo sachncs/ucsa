@@ -23,7 +23,6 @@ explicitly via the methods here, typically driven by the background
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
 
 import torch
 from torch import Tensor
@@ -177,7 +176,7 @@ class Memory:
         """
         long_term = self.cstate.get_bank("long_term")
         capacity = self.long_term_capacity
-        usage_buffer = getattr(self.cstate, "meta_usage_long_term")
+        usage_buffer = self.cstate.meta_usage_long_term
         already_used = int((usage_buffer > 0).sum().item())
         remaining = max(0, capacity - already_used)
         k = candidate.tokens.shape[0]
@@ -191,7 +190,7 @@ class Memory:
             device=long_term.device, dtype=long_term.dtype
         )
         importance_to_write = candidate.importance[:k].to(
-            device=long_term.device, dtype=getattr(self.cstate, "meta_importance_long_term").dtype
+            device=long_term.device, dtype=self.cstate.meta_importance_long_term.dtype
         )
         empty_indices = self._empty_long_term_indices(limit=k)
         if len(empty_indices) < k:
@@ -203,17 +202,17 @@ class Memory:
 
         with torch.no_grad():
             long_term[empty_indices] = tokens_to_write
-            getattr(self.cstate, "meta_importance_long_term")[empty_indices] = (
+            self.cstate.meta_importance_long_term[empty_indices] = (
                 importance_to_write
             )
-            getattr(self.cstate, "meta_age_long_term")[empty_indices] = 0
-            getattr(self.cstate, "meta_usage_long_term")[empty_indices] = 1.0
+            self.cstate.meta_age_long_term[empty_indices] = 0
+            self.cstate.meta_usage_long_term[empty_indices] = 1.0
         self.cstate.update_retention()
         return [int(i) for i in empty_indices]
 
     def _empty_long_term_indices(self, limit: int) -> list[int]:
         """Return up to ``limit`` long-term slots with zero usage."""
-        usage = getattr(self.cstate, "meta_usage_long_term")
+        usage = self.cstate.meta_usage_long_term
         empty = torch.nonzero(usage == 0, as_tuple=False).squeeze(-1)
         return [int(i) for i in empty[:limit].tolist()]
 
@@ -249,7 +248,7 @@ class Memory:
 
     def long_term_usage(self) -> int:
         """Return the number of used long-term slots."""
-        usage = getattr(self.cstate, "meta_usage_long_term")
+        usage = self.cstate.meta_usage_long_term
         return int((usage > 0).sum().item())
 
     def long_term_capacity_used(self) -> float:
@@ -284,7 +283,7 @@ class Memory:
         """
         if k <= 0:
             return []
-        age = getattr(self.cstate, "meta_age_long_term")
+        age = self.cstate.meta_age_long_term
         num_tokens = age.shape[0]
         k_eff = min(k, num_tokens)
         _, indices = torch.topk(age.float(), k_eff, largest=True)
@@ -330,7 +329,7 @@ class Memory:
         Returns:
             Indices of recycled slots.
         """
-        scores = getattr(self.cstate, "meta_retention_long_term")
+        scores = self.cstate.meta_retention_long_term
         mask = scores < threshold
         if not mask.any():
             return []

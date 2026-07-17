@@ -179,8 +179,7 @@ class RouterLoadBalancingLoss(nn.Module):
                 router_logits.argmax(dim=-1), num_classes=num_experts
             ).float()
         tokens_per_expert = expert_mask.mean(dim=0)
-        loss = num_experts * (tokens_per_expert * avg_routing).sum()
-        return loss
+        return num_experts * (tokens_per_expert * avg_routing).sum()
 
 
 class UCSACombinedLoss(nn.Module):

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 import torch
-from torch import Tensor
 
 from ucsa.models.reasoning_loop import ReasoningLoop, ReasoningLoopConfig
 from ucsa.models.state import PCSConfig, PersistentCognitiveState

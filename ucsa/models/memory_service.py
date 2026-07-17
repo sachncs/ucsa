@@ -18,10 +18,12 @@ that drop to a synchronous fallback when no event loop is running yet.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import threading
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any
 
 import torch
 from torch import Tensor
@@ -75,7 +77,7 @@ class VerificationTask:
 
     candidate: MemoryUpdate
     cstate: PersistentCognitiveState
-    on_complete: Optional[VerificationHandler] = None
+    on_complete: VerificationHandler | None = None
     trace: dict[str, Any] = field(default_factory=dict)
 
 
@@ -169,10 +171,8 @@ class MemoryService:
         await self.queue.join()
         if self.worker_task is not None:
             self.worker_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self.worker_task
-            except asyncio.CancelledError:
-                pass
 
     async def worker_loop(self) -> None:
         """The main worker coroutine.
@@ -223,7 +223,7 @@ class MemoryService:
         self,
         candidate: MemoryUpdate,
         cstate: PersistentCognitiveState,
-        on_complete: Optional[VerificationHandler] = None,
+        on_complete: VerificationHandler | None = None,
     ) -> Awaitable[Any] | None:
         """Submit a verification task.
 

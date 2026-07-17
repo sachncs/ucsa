@@ -25,15 +25,14 @@ explicit methods.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
-import torch
 from torch import Tensor, nn
 
 from ucsa.models.graph_service import GraphService
 from ucsa.models.head_config import (
-    HeadConfig,
     build_head_config_from_cfg,
 )
 from ucsa.models.memory import Memory
@@ -43,11 +42,11 @@ from ucsa.models.perception import Perception, PerceptionConfig
 from ucsa.models.projection_heads import ProjectionHeads
 from ucsa.models.reasoning_loop import ReasoningLoop, ReasoningLoopConfig
 from ucsa.models.state import PCSConfig, PersistentCognitiveState
-from ucsa.models.transition_operator import StateTransitionOperator
 from ucsa.models.transformer_operator import (
     TransformerOperator,
     TransformerOperatorConfig,
 )
+from ucsa.models.transition_operator import StateTransitionOperator
 from ucsa.models.verification import HeuristicVerifier, Verifier
 
 
@@ -187,8 +186,7 @@ class UCSA(nn.Module):
         )
         new_pcs = self.reasoning_loop(self.pcs, observation)
         working = new_pcs.get_bank("working").unsqueeze(0)
-        outputs = self.heads(working)
-        return outputs
+        return self.heads(working)
 
     def start_memory_service(self) -> None:
         """Start the background memory worker."""

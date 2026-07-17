@@ -17,15 +17,14 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any
 
 import torch
 from torch import Tensor, nn
 from torch.utils.data import DataLoader
 
-from ucsa.training.curriculum import Curriculum, CurriculumStage
+from ucsa.training.curriculum import Curriculum
 from ucsa.training.metrics import (
-    DEFAULT_METRIC_NAMES,
     MetricsRegistry,
     build_default_registry,
     perplexity_from_loss,
@@ -212,10 +211,7 @@ class Trainer:
             outputs = self.model(inputs)
         else:
             outputs = self.model(inputs)
-        if isinstance(outputs, tuple):
-            logits = outputs[0]
-        else:
-            logits = outputs
+        logits = outputs[0] if isinstance(outputs, tuple) else outputs
         active = self.curriculum.active_components()
         kwargs: dict[str, Any] = {}
         if "jepa" in active:

@@ -15,8 +15,8 @@ emits memory tokens.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Sequence
 
 import torch
 from torch import Tensor
@@ -210,7 +210,7 @@ class GraphService:
             The constructed :class:`GraphMemory`.
         """
         long_term = cstate.get_bank("long_term")
-        usage = getattr(cstate, "meta_usage_long_term")
+        usage = cstate.meta_usage_long_term
         used_mask = usage > 0
         if not used_mask.any():
             self.last_graph = GraphMemory()

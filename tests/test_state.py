@@ -154,12 +154,12 @@ class TestRetentionScore:
 class TestPersistentCognitiveState:
     """Tests for :class:`PersistentCognitiveState`."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def config(self) -> PCSConfig:
         """Default PCS config for tests."""
         return PCSConfig(hidden_size=32)
 
-    @pytest.fixture()
+    @pytest.fixture
     def state(self, config: PCSConfig) -> PersistentCognitiveState:
         """A fresh PCS instance."""
         return PersistentCognitiveState(config)
@@ -272,9 +272,9 @@ class TestPersistentCognitiveState:
         self, state: PersistentCognitiveState
     ) -> None:
         """``update_retention`` writes scores into the retention buffers."""
-        importance = getattr(state, "meta_importance_long_term")
+        importance = state.meta_importance_long_term
         importance.fill_(2.0)
-        usage = getattr(state, "meta_usage_long_term")
+        usage = state.meta_usage_long_term
         usage.fill_(1.0)
         state.update_retention()
         snapshot = state.get_all_metadata()
@@ -285,7 +285,7 @@ class TestPersistentCognitiveState:
         self, state: PersistentCognitiveState
     ) -> None:
         """``recycle_bottom_k`` returns the indices of recycled slots."""
-        retention = getattr(state, "meta_retention_long_term")
+        retention = state.meta_retention_long_term
         retention[:5] = 0.0
         retention[5:] = 1.0
         recycled = state.recycle_bottom_k("long_term", k=3)
@@ -297,7 +297,7 @@ class TestPersistentCognitiveState:
         self, state: PersistentCognitiveState
     ) -> None:
         """A custom replacement tensor is written into recycled slots."""
-        retention = getattr(state, "meta_retention_long_term")
+        retention = state.meta_retention_long_term
         retention.fill_(1.0)
         retention[:2] = 0.0
         replacement = torch.full((2, 32), 7.0)
@@ -309,7 +309,7 @@ class TestPersistentCognitiveState:
         self, state: PersistentCognitiveState
     ) -> None:
         """Recycled slots have their metadata zeroed."""
-        retention = getattr(state, "meta_retention_long_term")
+        retention = state.meta_retention_long_term
         retention.fill_(1.0)
         retention[:1] = 0.0
         state.recycle_bottom_k("long_term", k=1)

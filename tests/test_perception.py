@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
 import torch
 from torch import Tensor
@@ -127,7 +125,7 @@ class TestTokenizerWrapper:
 class TestPerception:
     """Tests for :class:`Perception`."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def perception(self) -> Perception:
         """Provide a perception instance with a fake tokenizer."""
         config = tiny_config()

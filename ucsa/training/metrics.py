@@ -26,8 +26,8 @@ from __future__ import annotations
 
 import time
 from collections import deque
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Mapping, Sequence
 
 import torch
 from torch import Tensor

@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
-
 import pytest
 import torch
-from torch import Tensor
 
 import ucsa.infer as infer
 import ucsa.train as train

@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import pytest
 import torch
-from torch import Tensor
 
-from ucsa.models.state import PCSConfig, PersistentCognitiveState
 from ucsa.models.moe import MoEConfig
+from ucsa.models.state import PCSConfig, PersistentCognitiveState
 from ucsa.models.transformer_operator import (
     CrossAttention,
     FeedForward,
@@ -313,12 +312,12 @@ class TestTransformerBlock:
 class TestTransformerOperator:
     """Tests for :class:`TransformerOperator`."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def state(self) -> PersistentCognitiveState:
         """Provide a fresh PCS sized for the tiny config."""
         return PersistentCognitiveState(PCSConfig(hidden_size=32))
 
-    @pytest.fixture()
+    @pytest.fixture
     def operator(self) -> TransformerOperator:
         """Provide a tiny transformer operator."""
         return TransformerOperator(tiny_config())

@@ -37,8 +37,8 @@ class Verifier(nn.Module, abc.ABC):
     @abc.abstractmethod
     def verify(
         self,
-        candidate: "MemoryUpdate",
-        cstate: "PersistentCognitiveState",
+        candidate: MemoryUpdate,
+        cstate: PersistentCognitiveState,
     ) -> tuple[float, bool]:
         """Score and decide whether to accept ``candidate``.
 
@@ -54,8 +54,8 @@ class Verifier(nn.Module, abc.ABC):
     @abc.abstractmethod
     def update_signal(
         self,
-        candidate: "MemoryUpdate",
-        cstate: "PersistentCognitiveState",
+        candidate: MemoryUpdate,
+        cstate: PersistentCognitiveState,
         was_used: bool,
     ) -> Tensor:
         """Update the verifier's training signal.
@@ -109,8 +109,8 @@ class HeuristicVerifier(Verifier):
 
     def verify(
         self,
-        candidate: "MemoryUpdate",
-        cstate: "PersistentCognitiveState",
+        candidate: MemoryUpdate,
+        cstate: PersistentCognitiveState,
     ) -> tuple[float, bool]:
         """Score the candidate against the current PCS.
 
@@ -122,7 +122,7 @@ class HeuristicVerifier(Verifier):
             Tuple ``(score, accepted)``.
         """
         long_term = cstate.get_bank("long_term")
-        usage = getattr(cstate, "meta_usage_long_term")
+        usage = cstate.meta_usage_long_term
         novelty = HeuristicVerifier.novelty(candidate.tokens, long_term, usage)
         recency = HeuristicVerifier.recency(candidate.importance)
         usage_score = HeuristicVerifier.usage_signal(candidate.importance)
@@ -138,8 +138,8 @@ class HeuristicVerifier(Verifier):
 
     def update_signal(
         self,
-        candidate: "MemoryUpdate",
-        cstate: "PersistentCognitiveState",
+        candidate: MemoryUpdate,
+        cstate: PersistentCognitiveState,
         was_used: bool,
     ) -> Tensor:
         """Heuristic verifier does not learn; returns a zero tensor."""
@@ -228,7 +228,7 @@ class LearnedVerifier(Verifier):
         )
         self.summarizer = nn.Linear(hidden_size, cstate_summary_size)
 
-    def pool_candidate(self, candidate: "MemoryUpdate") -> Tensor:
+    def pool_candidate(self, candidate: MemoryUpdate) -> Tensor:
         """Mean-pool the candidate's tokens into a single vector.
 
         Args:
@@ -239,7 +239,7 @@ class LearnedVerifier(Verifier):
         """
         return candidate.tokens.mean(dim=0)
 
-    def summarize_cstate(self, cstate: "PersistentCognitiveState") -> Tensor:
+    def summarize_cstate(self, cstate: PersistentCognitiveState) -> Tensor:
         """Compute a PCS summary vector.
 
         Args:
@@ -254,8 +254,8 @@ class LearnedVerifier(Verifier):
 
     def verify(
         self,
-        candidate: "MemoryUpdate",
-        cstate: "PersistentCognitiveState",
+        candidate: MemoryUpdate,
+        cstate: PersistentCognitiveState,
     ) -> tuple[float, bool]:
         """Score and decide using the MLP head.
 
@@ -275,8 +275,8 @@ class LearnedVerifier(Verifier):
 
     def update_signal(
         self,
-        candidate: "MemoryUpdate",
-        cstate: "PersistentCognitiveState",
+        candidate: MemoryUpdate,
+        cstate: PersistentCognitiveState,
         was_used: bool,
     ) -> Tensor:
         """Compute BCE loss against the retention signal.
@@ -295,10 +295,9 @@ class LearnedVerifier(Verifier):
         target = torch.tensor(
             1.0 if was_used else 0.0, device=logit.device
         )
-        loss = torch.nn.functional.binary_cross_entropy_with_logits(
+        return torch.nn.functional.binary_cross_entropy_with_logits(
             logit.squeeze(-1), target
         )
-        return loss
 
 
 __all__ = [

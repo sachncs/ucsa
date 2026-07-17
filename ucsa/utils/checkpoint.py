@@ -8,13 +8,12 @@ inference script.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping
-
-import torch
-from torch import nn
+from typing import Any
 
 from safetensors.torch import load_file, save_file
+from torch import nn
 
 
 @dataclass
@@ -88,7 +87,7 @@ def load_checkpoint(
     meta_path = path + ".meta.json"
     if not __import__("os").path.exists(meta_path):
         return CheckpointMetadata()
-    with open(meta_path, "r", encoding="utf-8") as fp:
+    with open(meta_path, encoding="utf-8") as fp:
         meta_dict = json.load(fp)
     return CheckpointMetadata(
         step=int(meta_dict.get("step", 0)),

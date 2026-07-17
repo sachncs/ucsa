@@ -128,7 +128,7 @@ class TestCosineWarmupScheduler:
 class TestTrainerBasics:
     """Tests for the :class:`Trainer` core flow."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def dataset(self) -> DataLoader:
         """Provide a deterministic small dataset."""
         torch.manual_seed(0)

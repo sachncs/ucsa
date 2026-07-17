@@ -93,7 +93,7 @@ def zero_parameters(tensor: Tensor) -> None:
 class TestMixtureOfExperts:
     """Tests for :class:`MixtureOfExperts`."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def moe(self) -> MixtureOfExperts:
         """Provide a tiny MoE block."""
         return MixtureOfExperts(
@@ -228,7 +228,6 @@ class TestMixtureOfExperts:
 
     def test_moe_layer_count_in_operator(self) -> None:
         """The upper-half of layers is configured as MoE layers."""
-        from ucsa.models.state import PCSConfig, PersistentCognitiveState
         from ucsa.models.transformer_operator import (
             TransformerOperator,
             TransformerOperatorConfig,

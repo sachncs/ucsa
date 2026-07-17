@@ -60,7 +60,7 @@ class TestVerifierABC:
 class TestHeuristicVerifier:
     """Tests for :class:`HeuristicVerifier`."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def verifier(self) -> HeuristicVerifier:
         """Provide a default heuristic verifier."""
         return HeuristicVerifier()
@@ -172,7 +172,7 @@ class TestHeuristicVerifier:
 class TestLearnedVerifier:
     """Tests for :class:`LearnedVerifier`."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def verifier(self) -> LearnedVerifier:
         """Provide a default learned verifier."""
         return LearnedVerifier(hidden_size=32, cstate_summary_size=8)

@@ -14,12 +14,11 @@ The output has shape ``(batch, seq, hidden_size)``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 import torch
 from torch import Tensor, nn
-
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 MODALITY_TEXT: int = 0
@@ -260,10 +259,7 @@ class Perception(nn.Module):
         Returns:
             Observation tokens of shape ``(batch, seq, hidden_size)``.
         """
-        if isinstance(texts, str):
-            batch = [texts]
-        else:
-            batch = list(texts)
+        batch = [texts] if isinstance(texts, str) else list(texts)
         token_ids = self.tokenizer.batch_encode(batch, modality=modality)
         token_ids = token_ids.to(self.token_embedding.weight.device)
         embeddings = self.embed_tokens(token_ids)

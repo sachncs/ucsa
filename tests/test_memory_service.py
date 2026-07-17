@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import threading
 import time
 
 import pytest
 import torch
-from torch import Tensor
 
 from ucsa.models.memory import Memory, MemoryUpdate
 from ucsa.models.memory_service import (
@@ -61,7 +59,7 @@ class TestServiceStats:
 class TestMemoryServiceInline:
     """Tests that exercise :class:`MemoryService` synchronously."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def service(self) -> MemoryService:
         """Provide an inline memory service."""
         pcs = tiny_pcs()
@@ -141,7 +139,7 @@ class TestMemoryServiceInline:
 class TestMemoryServiceAsync:
     """Tests for the asynchronous worker behaviour."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def started_service(self) -> tuple[MemoryService, PersistentCognitiveState]:
         """Provide a started memory service and its PCS."""
         pcs = tiny_pcs()
@@ -190,7 +188,7 @@ class TestMemoryServiceAsync:
         service, pcs = started_service
         scores_seen: list[float] = []
 
-        def make_callback(score: float) -> "callable":  # type: ignore[name-defined]
+        def make_callback(score: float) -> callable:  # type: ignore[name-defined]
             def callback(
                 candidate: MemoryUpdate,
                 cstate: PersistentCognitiveState,

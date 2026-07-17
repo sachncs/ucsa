@@ -46,9 +46,9 @@ class StateTransitionOperator(nn.Module, abc.ABC):
     @abc.abstractmethod
     def forward(
         self,
-        cstate: "PersistentCognitiveState",
+        cstate: PersistentCognitiveState,
         observation: Tensor,
-    ) -> "PersistentCognitiveState":
+    ) -> PersistentCognitiveState:
         """Compute :math:`C_{t+1} = F(C_t, O_t)`.
 
         Args:

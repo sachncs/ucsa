@@ -7,15 +7,14 @@ and perplexity over a dataloader. Supports periodic triggering from the
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Callable, Optional
+from collections.abc import Callable
+from dataclasses import dataclass
 
 import torch
 from torch import Tensor, nn
 from torch.utils.data import DataLoader
 
 from ucsa.training.metrics import (
-    MetricsRegistry,
     perplexity_from_loss,
 )
 

@@ -78,7 +78,7 @@ class TestSeed:
 class TestCheckpoint:
     """Tests for :mod:`ucsa.utils.checkpoint`."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def tiny_model(self) -> nn.Module:
         """Provide a tiny model."""
         torch.manual_seed(0)
@@ -146,7 +146,7 @@ class TestCheckpoint:
             )
             meta_path = path + ".meta.json"
             assert os.path.exists(meta_path)
-            with open(meta_path, "r", encoding="utf-8") as fp:
+            with open(meta_path, encoding="utf-8") as fp:
                 payload = json.load(fp)
             assert payload["step"] == 1
 

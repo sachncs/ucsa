@@ -7,10 +7,11 @@ is available.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 LOGGER = logging.getLogger(__name__)
 
@@ -128,16 +129,12 @@ def close_logger(bundle: LoggerBundle) -> None:
         bundle: The logger bundle.
     """
     if bundle.tensorboard_writer is not None:
-        try:
+        with contextlib.suppress(Exception):
             bundle.tensorboard_writer.flush()
             bundle.tensorboard_writer.close()
-        except Exception:  # pragma: no cover - defensive
-            pass
     if bundle.wandb_run is not None:
-        try:
+        with contextlib.suppress(Exception):
             bundle.wandb_run.finish()
-        except Exception:  # pragma: no cover - defensive
-            pass
 
 
 __all__ = [

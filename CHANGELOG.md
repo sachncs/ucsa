@@ -98,3 +98,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ucsa.infer`: inference entrypoint with autoregressive generation.
 - `ucsa.configs.default`: YAML configuration with all hyperparameters
   externalized.
+- Lint fixes: ruff clean on the entire `ucsa/` and `tests/` tree.

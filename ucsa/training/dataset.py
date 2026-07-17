@@ -12,17 +12,15 @@ training. Streaming keeps memory pressure low for any dataset size.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Iterator
+from collections.abc import Iterator
+from dataclasses import dataclass
 
 import torch
-from torch import Tensor
-
 from datasets import load_dataset
+from torch import Tensor
 from transformers import PreTrainedTokenizerBase
 
 from ucsa.models.perception import TokenizerWrapper
-
 
 PRIMARY_DATASET: str = "HuggingFaceFW/fineweb-edu"
 FALLBACK_DATASETS: tuple[tuple[str, str], ...] = (
@@ -84,25 +82,28 @@ class TextDataset:
         Returns:
             A Hugging Face :class:`datasets.Dataset` (or streaming iterable).
         """
+        last_error: Exception | None = None
         try:
             return load_dataset(
                 self.config.primary_dataset,
                 split=self.config.primary_split,
                 streaming=self.config.streaming,
             )
-        except Exception:
-            for dataset_name, split in self.config.fallback_chain:
-                try:
-                    return load_dataset(
-                        dataset_name,
-                        split=split,
-                        streaming=self.config.streaming,
-                    )
-                except Exception:
-                    continue
-            raise RuntimeError(
-                "Unable to load any dataset from the configured chain."
-            )
+        except Exception as exc:
+            last_error = exc
+        for dataset_name, split in self.config.fallback_chain:
+            try:
+                return load_dataset(
+                    dataset_name,
+                    split=split,
+                    streaming=self.config.streaming,
+                )
+            except Exception as exc:
+                last_error = exc
+                continue
+        raise RuntimeError(
+            "Unable to load any dataset from the configured chain."
+        ) from last_error
 
     def _detect_text_field(self) -> str:
         """Return the dataset's text field name."""

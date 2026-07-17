@@ -23,9 +23,8 @@ observation keys/values. It is reset between requests by :meth:`reset`.
 
 from __future__ import annotations
 
-import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Mapping
 
 import torch
 from torch import Tensor, nn
@@ -76,7 +75,7 @@ class TransformerOperatorConfig:
     rope_base: float = 10000.0
     use_memory_index_cross_attention: bool = True
     max_position: int = 4096
-    moe: "MoEConfig | None" = None
+    moe: MoEConfig | None = None
 
     def __post_init__(self) -> None:
         if self.hidden_size <= 0:
@@ -360,12 +359,11 @@ class GroupedQueryAttention(nn.Module):
         if repeat == 1:
             return kv
         batch, kv_heads, seq, head_dim = kv.shape
-        expanded = (
+        return (
             kv.unsqueeze(2)
             .expand(batch, kv_heads, repeat, seq, head_dim)
             .reshape(batch, kv_heads * repeat, seq, head_dim)
         )
-        return expanded
 
 
 class CrossAttention(nn.Module):

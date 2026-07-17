@@ -50,7 +50,7 @@ class TestCurriculumStage:
 class TestCurriculumGetStage:
     """Tests for :meth:`Curriculum.get_stage`."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def curriculum(self) -> Curriculum:
         """Provide a curriculum with a tiny schedule."""
         return Curriculum(
@@ -97,7 +97,7 @@ class TestCurriculumGetStage:
 class TestCurriculumActiveComponents:
     """Tests for :meth:`Curriculum.active_components`."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def curriculum(self) -> Curriculum:
         """Provide a curriculum."""
         return Curriculum(

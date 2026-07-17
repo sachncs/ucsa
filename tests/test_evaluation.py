@@ -51,13 +51,13 @@ class BoundARLoss(ARLoss):
         self.model_reference = model
 
 
-@pytest.fixture()
+@pytest.fixture
 def model() -> ToyModel:
     """Provide a toy model."""
     return ToyModel()
 
 
-@pytest.fixture()
+@pytest.fixture
 def dataloader() -> DataLoader:
     """Provide a deterministic dataset."""
     torch.manual_seed(0)

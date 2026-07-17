@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import pytest
 import torch
-from torch import Tensor
-
 from datasets import Dataset
 
 from ucsa.models.perception import TokenizerWrapper
@@ -164,7 +162,7 @@ class TestTextDataset:
     def test_iter_yields_default_batch(self) -> None:
         """``__iter__`` yields batches of size 1 by default."""
         ds = make_fake_dataset()
-        for inputs, targets in ds:
+        for inputs, _targets in ds:
             assert inputs.shape[0] == 1
             break
 

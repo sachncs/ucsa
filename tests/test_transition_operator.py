@@ -84,7 +84,7 @@ class RecordingOperator(StateTransitionOperator):
 class TestStateTransitionOperatorABC:
     """Tests for the StateTransitionOperator ABC contract."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def state(self) -> PersistentCognitiveState:
         """Provide a fresh PCS."""
         return PersistentCognitiveState(PCSConfig(hidden_size=16))

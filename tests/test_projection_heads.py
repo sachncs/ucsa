@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 import torch
-from torch import Tensor
 
 from ucsa.models.projection_heads import (
     HeadConfig,
@@ -136,7 +135,7 @@ class TestMemoryHead:
 class TestProjectionHeads:
     """Tests for :class:`ProjectionHeads`."""
 
-    @pytest.fixture()
+    @pytest.fixture
     def heads(self) -> ProjectionHeads:
         """Provide a tiny head bundle."""
         return ProjectionHeads(tiny_config())
