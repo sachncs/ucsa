@@ -76,3 +76,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CosineWarmupScheduler`, `TrainerState`. AdamW + cosine + warmup +
   AMP + grad clip + checkpoint round-trip + curriculum-aware loss
   gating.
+- `ucsa.training.evaluation`: `EvaluationLoop`, `EvaluationState`.
+  Periodic no-grad evaluation with running loss and perplexity.
