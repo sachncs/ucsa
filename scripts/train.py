@@ -20,7 +20,6 @@ import yaml
 from torch.utils.data import DataLoader
 
 from ucsa.train import build_model, build_trainer
-from ucsa.training.curriculum import Curriculum, CurriculumSchedule
 from ucsa.training.dataset import DatasetConfig, TextDataset
 from ucsa.models.perception import TokenizerWrapper
 
@@ -109,6 +108,9 @@ def main() -> None:
     cfg["training"]["learning_rate"] = 6e-4
     cfg["training"]["checkpoint_every_n_steps"] = args.ckpt_every
     cfg["dataset"]["sequence_length"] = 1024
+    cfg["curriculum"]["stage_1_end"] = args.stage_1_end
+    cfg["curriculum"]["stage_2_end"] = args.stage_2_end
+    cfg["curriculum"]["stage_3_end"] = args.stage_3_end
 
     print("Building tokenizer + dataset...", flush=True)
     tokenizer = TokenizerWrapper(
@@ -130,12 +132,7 @@ def main() -> None:
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Params: {n_params:,}", flush=True)
 
-    curriculum = Curriculum(CurriculumSchedule(
-        stage_1_end=args.stage_1_end,
-        stage_2_end=args.stage_2_end,
-        stage_3_end=args.stage_3_end,
-    ))
-    trainer = build_trainer(model, cfg, curriculum=curriculum)
+    trainer = build_trainer(model, cfg)
     print(f"Device: {trainer.device}", flush=True)
     print(
         f"Curriculum: stage1→{args.stage_1_end} stage2→{args.stage_2_end} "
