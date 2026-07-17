@@ -61,3 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `JEPALoss`, `MemoryStabilityLoss`, `RouterLoadBalancingLoss`,
   `LossWeights`. Combined loss = AR + lambda1*JEPA + lambda2*Memory +
   lambda3*Router with per-component reporting.
+- `ucsa.training.dataset`: `TextDataset`, `DatasetConfig`,
+  `PRIMARY_DATASET`, `FALLBACK_DATASETS`. Hugging Face streaming
+  dataset loader with graceful fallback chain (fineweb-edu ->
+  openwebtext -> wikitext-103) and fixed-length sequence packing.
