@@ -73,7 +73,7 @@ def main() -> None:
             el = time.time() - start
             window = min(cfg["training"]["log_every_n_steps"], len(losses))
             avg = sum(losses[-window:]) / window
-            lr = trainer.scheduler.get_lr()
+            lr = trainer.scheduler.get_last_lr()[0] if hasattr(trainer.scheduler, "get_last_lr") else trainer.scheduler.last_lr[0] if hasattr(trainer.scheduler, "last_lr") else trainer.optimizer.param_groups[0]["lr"]  # ponytail: scheduler exposes different attr names across versions, fall through
             print(
                 f"  step={step:4d} loss={tl:.4f} avg={avg:.4f} "
                 f"lr={lr:.2e} elapsed={el:.1f}s",
