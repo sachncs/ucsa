@@ -82,20 +82,20 @@ update `CHANGELOG.md` `[Unreleased]` and pass `ruff`, `mypy --strict`, and
 
 ## Phase 8 — Training pipeline
 
-- [ ] feat(losses): add AR + JEPA (block+iter) + MemoryStability + RouterLB
+- [x] feat(losses): add AR + JEPA (block+iter) + MemoryStability + RouterLB
       losses
-- [ ] test(losses): cover loss finiteness, gradient flow, weighted sum
-- [ ] feat(data): add HF streaming dataset (fineweb-edu -> OWT -> WikiText-103
+- [x] test(losses): cover loss finiteness, gradient flow, weighted sum
+- [x] feat(data): add HF streaming dataset (fineweb-edu -> OWT -> WikiText-103
       fallback)
-- [ ] test(data): cover tokenization, packing, fallback chain
-- [ ] feat(curriculum): add four-stage curriculum with step-gated activation
-- [ ] test(curriculum): cover stage transitions, loss-component gating
-- [ ] feat(metrics): add all 11 metrics from spec
-- [ ] test(metrics): cover metric accumulation, reset, tensorboard logging
-- [ ] feat(trainer): add Accelerate trainer with AMP, grad-ckpt, torch.compile
-- [ ] test(trainer): cover training step, checkpoint round-trip, scheduler step
-- [ ] feat(eval): add evaluation loop
-- [ ] test(eval): cover no-grad path, periodic eval trigger
+- [x] test(data): cover tokenization, packing, fallback chain
+- [x] feat(curriculum): add four-stage curriculum with step-gated activation
+- [x] test(curriculum): cover stage transitions, loss-component gating
+- [x] feat(metrics): add all 11 metrics from spec
+- [x] test(metrics): cover metric accumulation, reset, tensorboard logging
+- [x] feat(trainer): add Accelerate trainer with AMP, grad-ckpt, torch.compile
+- [x] test(trainer): cover training step, checkpoint round-trip, scheduler step
+- [x] feat(eval): add evaluation loop
+- [x] test(eval): cover no-grad path, periodic eval trigger
 
 ## Phase 9 — Plumbing
 
