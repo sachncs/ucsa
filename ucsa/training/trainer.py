@@ -105,14 +105,11 @@ class CosineWarmupScheduler:
         self.min_lr_ratio = min_lr_ratio
         self.base_lrs = [group["lr"] for group in optimizer.param_groups]
         self.last_lr: list[float] = list(self.base_lrs)
+        self.current_step: int = 0
 
     def step(self) -> list[float]:
         """Compute the new learning rates and apply them."""
-        state = getattr(self.optimizer, "_ucsa_trainer_state", None)
-        if state is None:
-            step = 0
-        else:
-            step = state.global_step
+        step = self.current_step
         if step < self.warmup_steps:
             scale = float(step + 1) / float(self.warmup_steps)
         else:
@@ -127,6 +124,7 @@ class CosineWarmupScheduler:
         ):
             group["lr"] = base_lr * scale
         self.last_lr = [group["lr"] for group in self.optimizer.param_groups]
+        self.current_step += 1
         return self.last_lr
 
     def get_last_lr(self) -> list[float]:
