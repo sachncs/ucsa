@@ -179,6 +179,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retention-score statistics, and a 6x6 cosine-similarity
   matrix of bank centroids — evidence of differentiated roles.
   Exports to JSON for plotting.
+- `scripts/build_paper_tables.py`: paper-table aggregator. Reads
+  every JSON the training / eval / probe scripts emit under
+  ``runs/`` and produces ``paper/TABLES.md`` — the four tables
+  the paper promises (matched-compute comparison, ablation
+  matrix, downstream benchmark accuracy, PCS bank probe) ready
+  to paste into ``paper/PAPER.md``.
 
 ### Changed
 - `scripts/train.py`: refactored around ablation. CLI flags
@@ -199,7 +205,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 4 new tests in `tests/test_probe_banks.py` covering the
   six-bank summary shape, centroid-matrix symmetry, token
   decoding, and finite-statistics invariants.
-- Total: 436 / 436 tests pass.
+- 7 new tests in `tests/test_build_paper_tables.py` covering
+  per-function builds of all four tables, multi-seed aggregation,
+  and JSON loader.
+- Total: 443 / 443 tests pass.
 
 ### Changed
 - `scripts/benchmark.py`: added Kimi K3 (arXiv-style) features as

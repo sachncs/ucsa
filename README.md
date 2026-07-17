@@ -56,6 +56,9 @@ pip install -e ".[dev]"
 # 5. Run the ablation sweep (5 seeds × 6 ablations is typical for the paper)
 .venv/bin/python scripts/run_ablations.py \
     --max-steps 4000 --seeds 42 43 44
+# 6. Aggregate the runs/*.json files into paper-ready tables
+.venv/bin/python scripts/build_paper_tables.py \
+    --runs-dir runs --out-md paper/TABLES.md
 ```
 
 ## Repository layout
@@ -67,16 +70,17 @@ ucsa/
 ├── training/        trainer, dataset, curriculum, metrics,
 │                    evaluation, EMA, Muon optimiser, eval harness
 ├── utils/           seed, checkpoint, logging
-├── tests/           436 tests, run with `pytest -q`
+├── tests/           443 tests, run with `pytest -q`
 ├── train.py         training entrypoint
 ├── infer.py         inference entrypoint
-└── paper/           paper draft (PAPER.md)
+└── paper/           paper draft (PAPER.md, TABLES.md)
 scripts/
 ├── train.py         UCSA training + SOTA stack + benchmark comparison
 ├── train_baseline.py matched-compute vanilla-Transformer baseline
 ├── eval.py          HellaSwag / ARC / PIQA / WinoGrande evaluation
 ├── probe_banks.py   PCS bank probe (top tokens per bank, centroid sim)
 ├── run_ablations.py ablation matrix driver
+├── build_paper_tables.py reads runs/*.json, writes paper/TABLES.md
 └── benchmark.py     one-file showcase against modern-LM baselines
 ```
 
