@@ -108,9 +108,9 @@ update `CHANGELOG.md` `[Unreleased]` and pass `ruff`, `mypy --strict`, and
 
 ## Phase 10 — Verification
 
-- [ ] chore: run pytest, mypy, ruff; fix any lints
-- [ ] chore: smoke run 100 steps on tiny model, confirm no NaN
-- [ ] chore: validate multi-epoch fineweb-edu config compiles
+- [x] chore: run pytest, mypy, ruff; fix any lints
+- [x] chore: smoke run 100 steps on tiny model, confirm no NaN
+- [x] chore: validate multi-epoch fineweb-edu config compiles
 
 ## Exit criteria
 
