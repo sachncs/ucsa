@@ -86,3 +86,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ucsa.utils.logging`: `LoggerConfig`, `LoggerBundle`, `build_logger`,
   `log_metrics`, `close_logger`, `configure_logging`. TensorBoard and
   optional Weights & Biases backends behind a single API.
+- `ucsa.models.ucsa`: `UCSA`, `UCSAConfig`, `build_ucsa`,
+  `build_ucsa_from_hydra`. Top-level model composing perception, PCS,
+  reasoning loop, projection heads, memory, memory service, and graph
+  service.
+- `ucsa.models.head_config`: `HeadSpec`, `build_head_config`,
+  `build_head_config_from_cfg`. Helpers for building
+  :class:`HeadConfig` instances.
+- `ucsa.train`: training entrypoint with Hydra/OmegaConf loader and
+  CLI integration via ``python -m ucsa.train``.
+- `ucsa.infer`: inference entrypoint with autoregressive generation.
+- `ucsa.configs.default`: YAML configuration with all hyperparameters
+  externalized.

@@ -1,0 +1,75 @@
+seed: 42
+reasoning_iterations: 4
+
+model:
+  hidden_size: 128
+  num_layers: 4
+  num_q_heads: 4
+  num_kv_heads: 2
+  intermediate_size: 256
+  sliding_window: 4096
+  vocab_size: 50257
+  max_seq_len: 1024
+  num_concepts: 16
+  moe:
+    num_experts: 4
+    top_k: 2
+    capacity_factor: 1.25
+    aux_loss_weight: 0.01
+
+heads:
+  vocab_size: 50257
+  num_plan_tokens: 64
+  num_tools: 32
+  memory_query_dim: 64
+
+tokenizer:
+  name: gpt2
+
+dataset:
+  sequence_length: 1024
+  primary_dataset: HuggingFaceFW/fineweb-edu
+  primary_split: train
+  streaming: true
+  pack_sequences: true
+
+training:
+  learning_rate: 0.0003
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  grad_clip_norm: 1.0
+  warmup_steps: 100
+  max_steps: 10000
+  batch_size: 4
+  log_every_n_steps: 10
+  eval_every_n_steps: 0
+  checkpoint_every_n_steps: 0
+  gradient_checkpointing: false
+  compile_model: false
+  amp_dtype: float32
+
+curriculum:
+  stage_1_end: 1000
+  stage_2_end: 5000
+  stage_3_end: 20000
+
+memory:
+  long_term_capacity: 128
+  co_activation_threshold: 0.5
+
+verification:
+  name: heuristic
+  acceptance_threshold: 0.5
+  learned_hidden_size: 128
+
+logging:
+  log_dir: runs/ucsa
+  use_tensorboard: true
+  use_wandb: false
+  wandb_project: ucsa
+
+inference:
+  max_new_tokens: 64
+  temperature: 1.0
+  top_k: 50
