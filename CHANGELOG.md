@@ -65,3 +65,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PRIMARY_DATASET`, `FALLBACK_DATASETS`. Hugging Face streaming
   dataset loader with graceful fallback chain (fineweb-edu ->
   openwebtext -> wikitext-103) and fixed-length sequence packing.
+- `ucsa.training.curriculum`: `Curriculum`, `CurriculumSchedule`,
+  `CurriculumStage`, `CurriculumState`. Four-stage step-gated training
+  curriculum with component gating per stage.
