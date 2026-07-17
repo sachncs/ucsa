@@ -211,7 +211,12 @@ class Trainer:
             outputs = self.model(inputs)
         else:
             outputs = self.model(inputs)
-        logits = outputs[0] if isinstance(outputs, tuple) else outputs
+        if isinstance(outputs, tuple):
+            logits = outputs[0]
+        elif isinstance(outputs, dict):
+            logits = outputs.get("language", outputs.get("logits", outputs))
+        else:
+            logits = outputs
         active = self.curriculum.active_components()
         kwargs: dict[str, Any] = {}
         if "jepa" in active:
