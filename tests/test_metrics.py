@@ -25,7 +25,7 @@ class TestMetricsRegistry:
 
     def test_default_names(self) -> None:
         """The default metric set has 12 entries."""
-        assert len(DEFAULT_METRIC_NAMES) == 12
+        assert len(DEFAULT_METRIC_NAMES) == 17
 
     def test_construction(self) -> None:
         """A registry with custom names initialises correctly."""

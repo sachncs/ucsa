@@ -157,6 +157,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cross-attention from the input-token embeddings into the JEPA
   prediction. Two new `UCSAConfig`/`defaults.yaml` fields control
   the conditioner (`text_conditioner_top_k`, `text_conditioner_scale`).
+- Hard-EMA target encoder (`ucsa.training.ema.EMATargetEncoder`):
+  opt-in via `training.ema_momentum > 0`. When enabled, the trainer
+  uses the EMA model's JEPA latent as the predictive target —
+  classic I-JEPA-style anti-collapse. The EMA is blended toward
+  the predictor after every `ema_update_every` step.
+- Input-reconstruction head (`projection_heads.InputReconstructionHead`)
+  + `InputReconstructionLoss`: a LeWM-style capacity bottleneck.
+  The new head projects working memory back to a same-dim vector
+  that is scored against `perception.embed_tokens(inputs)`. Forced
+  alignment via `take(seq_len)` slices since the working bank
+  length (64) is fixed while input seq can vary.
+- New Trainer config fields `ema_momentum` and `ema_update_every`
+  with sane defaults (`0.0` / `1`).
 
 ### Changed
 - `scripts/benchmark.py`: added Kimi K3 (arXiv-style) features as

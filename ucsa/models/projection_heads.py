@@ -30,6 +30,9 @@ class HeadConfig:
         num_plan_tokens: Discrete plan vocabulary size.
         num_tools: Discrete tool vocabulary size.
         memory_query_dim: Dimensionality of memory-query embeddings.
+        reconstruction_dim: Dim of the input-reconstruction projection.
+            Defaults to ``hidden_size`` so it can be compared against
+            ``perception.embed_tokens`` element-wise.
     """
 
     hidden_size: int = 128
@@ -37,6 +40,7 @@ class HeadConfig:
     num_plan_tokens: int = 64
     num_tools: int = 32
     memory_query_dim: int = 64
+    reconstruction_dim: int = 0  # 0 = inherit hidden_size
 
     def __post_init__(self) -> None:
         if self.hidden_size <= 0:
@@ -59,6 +63,13 @@ class HeadConfig:
             raise ValueError(
                 f"memory_query_dim must be positive, "
                 f"got {self.memory_query_dim}."
+            )
+        if self.reconstruction_dim <= 0:
+            # ponytail: default the reconstruction dim to hidden_size
+            # so reconstructed token embeddings line up with
+            # perception.embed_tokens for element-wise loss.
+            object.__setattr__(
+                self, "reconstruction_dim", self.hidden_size
             )
 
 
@@ -167,6 +178,25 @@ class MemoryHead(nn.Module):
         return self.proj(working_memory)
 
 
+class InputReconstructionHead(nn.Module):
+    """Predict input-token embeddings from working memory.
+
+    Used for the LeWM-style "capacity bottleneck" loss: the JEPA latent
+    must retain enough information to reconstruct input-token
+    embeddings. Without this, the latent can collapse to a constant
+    and still satisfy the JEPA prediction loss (especially with the
+    LeWM Gaussian regulariser alone).
+    """
+
+    def __init__(self, hidden_size: int, reconstruction_dim: int) -> None:
+        super().__init__()
+        self.proj = nn.Linear(hidden_size, reconstruction_dim, bias=False)
+        self.reconstruction_dim = reconstruction_dim
+
+    def forward(self, working_memory: Tensor) -> Tensor:
+        return self.proj(working_memory)
+
+
 class ProjectionHeads(nn.Module):
     """Bundle of all four projection heads."""
 
@@ -185,6 +215,10 @@ class ProjectionHeads(nn.Module):
         self.planning = PlanningHead(config.hidden_size, config.num_plan_tokens)
         self.tool = ToolHead(config.hidden_size, config.num_tools)
         self.memory = MemoryHead(config.hidden_size, config.memory_query_dim)
+        # ponytail: input-reconstruction head (LeWM-style capacity bottleneck).
+        self.input_reconstruct = InputReconstructionHead(
+            config.hidden_size, config.reconstruction_dim
+        )
 
     def forward(self, working_memory: Tensor) -> dict[str, Tensor]:
         """Run every head on ``working_memory``.
@@ -201,6 +235,7 @@ class ProjectionHeads(nn.Module):
             "planning": self.planning(working_memory),
             "tool": self.tool(working_memory),
             "memory": self.memory(working_memory),
+            "input_reconstruct": self.input_reconstruct(working_memory),
         }
 
     def head_outputs(self, working_memory: Tensor) -> dict[str, Tensor]:
@@ -210,6 +245,7 @@ class ProjectionHeads(nn.Module):
 
 __all__ = [
     "HeadConfig",
+    "InputReconstructionHead",
     "LanguageHead",
     "MemoryHead",
     "PlanningHead",

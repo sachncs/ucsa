@@ -153,7 +153,9 @@ class TestProjectionHeads:
         """``forward`` returns language, planning, tool, and memory outputs."""
         x = torch.randn(2, 4, 32)
         out = heads(x)
-        assert set(out) == {"language", "planning", "tool", "memory"}
+        assert set(out) == {
+            "language", "planning", "tool", "memory", "input_reconstruct"
+        }
         assert out["language"].shape == (2, 4, 100)
         assert out["planning"].shape == (2, 4, 16)
         assert out["tool"].shape == (2, 4, 8)

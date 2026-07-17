@@ -131,6 +131,8 @@ def build_trainer(
         checkpoint_every_n_steps=training["checkpoint_every_n_steps"],
         gradient_checkpointing=training["gradient_checkpointing"],
         compile_model=training["compile_model"],
+        ema_momentum=float(training.get("ema_momentum", 0.0)),
+        ema_update_every=int(training.get("ema_update_every", 1)),
     )
     curriculum_dict = cfg_dict["curriculum"]
     curriculum = Curriculum(

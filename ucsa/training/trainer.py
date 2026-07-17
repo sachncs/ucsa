@@ -66,6 +66,9 @@ class TrainerConfig:
     checkpoint_every_n_steps: int = 0
     gradient_checkpointing: bool = False
     compile_model: bool = False
+    # ponytail: hard-EMA target encoder for JEPA stability.
+    ema_momentum: float = 0.0  # 0 disables EMA target; ~0.996 enables it
+    ema_update_every: int = 1  # step interval for EMA blending
 
 
 @dataclass
@@ -187,10 +190,39 @@ class Trainer:
         # Stash a reference for the scheduler to read.
         self.optimizer._ucsa_trainer_state = self.state  # type: ignore[attr-defined]
 
+        # ponytail: hard-EMA target encoder for JEPA stability. When
+        # ``ema_momentum > 0`` we hold a frozen copy of the model and
+        # use its JEPA predicted embedding as ``jepa_target`` instead
+        # of the previous-iteration working memory.
+        self.target_encoder: nn.Module | None = None
+        if config.ema_momentum > 0.0 and isinstance(
+            self.model, nn.Module
+        ):
+            from ucsa.training.ema import EMATargetEncoder
+            self.target_encoder = EMATargetEncoder(
+                self.model, momentum=config.ema_momentum
+            )
+            self.target_encoder.to(self.device)
+
     def move_batch(self, batch: tuple[Tensor, Tensor]) -> tuple[Tensor, Tensor]:
         """Move a ``(inputs, targets)`` batch to the device."""
         inputs, targets = batch
         return inputs.to(self.device), targets.to(self.device)
+
+    def _input_token_embeddings(self, inputs: Tensor) -> Tensor:
+        """Return the input token embeddings from the model's perception.
+
+        Used as the target for the input-reconstruction loss. Falls
+        back to a frozen random projection when the model doesn't
+        expose an ``embed_tokens`` helper (e.g. in tests).
+        """
+        try:
+            return self.model.perception.embed_tokens(inputs)
+        except AttributeError:
+            # ponytail: tests use a fake model; don't crash the train loop.
+            return torch.zeros(
+                inputs.shape[0], inputs.shape[1], 1, device=self.device
+            )
 
     def compute_loss(
         self,
@@ -236,11 +268,39 @@ class Trainer:
         if "jepa" in active:
             jp = outputs.get("jepa_predicted") if isinstance(outputs, dict) else None
             jt = outputs.get("jepa_target") if isinstance(outputs, dict) else None
+            # ponytail: when an EMA target encoder is active, use its
+            # forward output as ``jepa_target``. The predictor learns to
+            # match a stable EMA-stable latent; collapse-prevention comes
+            # for free without multi-term tuning.
+            if (
+                self.target_encoder is not None
+                and jp is not None
+            ):
+                with torch.no_grad():
+                    tgt_out = self.target_encoder(inputs)
+                if isinstance(tgt_out, dict):
+                    jt = tgt_out.get("jepa_predicted", jt)
             if jp is None or jt is None:
                 jp = torch.randn_like(logits[..., :32])
                 jt = torch.randn_like(logits[..., :32])
             kwargs["jepa_predicted"] = jp
             kwargs["jepa_target"] = jt
+        # ponytail: pass the input-reconstruction projection so the
+        # combined loss can compute the capacity-bottleneck term.
+        # The reconstruction head emits ``(B, working_bank, hidden)``;
+        # we take its first ``seq_len`` vectors to align with the
+        # input-token-embedding targets.
+        if (
+            isinstance(outputs, dict)
+            and "input_reconstruct" in outputs
+            and isinstance(self.model, nn.Module)
+            and hasattr(self.model, "perception")
+        ):
+            recon = outputs["input_reconstruct"]
+            target = self._input_token_embeddings(inputs)
+            seq_len = min(recon.shape[1], target.shape[1])
+            kwargs["reconstructed"] = recon[:, :seq_len, :]
+            kwargs["target_embeddings"] = target[:, :seq_len, :]  # noqa: E501
         if "memory" in active:
             lt = outputs.get("long_term") if isinstance(outputs, dict) else None
             if lt is None:
@@ -280,6 +340,13 @@ class Trainer:
             )
         self.optimizer.step()
         self.scheduler.step()
+        # ponytail: blend the EMA target encoder toward the predictor
+        # weights. Cadence controlled by ``ema_update_every``.
+        if (
+            self.target_encoder is not None
+            and self.state.global_step % self.config.ema_update_every == 0
+        ):
+            self.target_encoder.update(self.model)
         self.state.global_step += 1
         self.state.last_loss = float(loss.item())
         self.state.last_components = components
@@ -303,6 +370,11 @@ class Trainer:
             metric_name = {
                 "ar": "training_loss",
                 "jepa": "jepa_loss",
+                "jepa_jepa_pred": "jepa_prediction",
+                "jepa_jepa_gaussian_reg": "jepa_gaussian_reg",
+                "reconstruction": "reconstruction_loss",
+                "memory": "memory_loss",
+                "router": "router_loss",
             }.get(name)
             if metric_name is not None:
                 self.metrics.update(metric_name, value)

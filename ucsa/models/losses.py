@@ -29,11 +29,14 @@ class LossWeights:
         jepa: Coefficient for the JEPA auxiliary loss.
         memory: Coefficient for the memory stability regulariser.
         router: Coefficient for the MoE load-balancing loss.
+        reconstruction: Coefficient for the input-reconstruction loss
+            (LeWM-style capacity bottleneck).
     """
 
     jepa: float = 0.1
     memory: float = 0.01
     router: float = 0.01
+    reconstruction: float = 0.1
 
     def __post_init__(self) -> None:
         if self.jepa < 0.0:
@@ -42,6 +45,28 @@ class LossWeights:
             raise ValueError(f"memory must be non-negative, got {self.memory}.")
         if self.router < 0.0:
             raise ValueError(f"router must be non-negative, got {self.router}.")
+        if self.reconstruction < 0.0:
+            raise ValueError(
+                f"reconstruction must be non-negative, got {self.reconstruction}."
+            )
+
+
+class InputReconstructionLoss(nn.Module):
+    """Predict input-token embeddings from working memory (LeWM-style).
+
+    The JEPA latent must retain enough information that a small
+    projection head can recover the input-token embeddings. Used
+    alongside the JEPA prediction loss to enforce a "capacity
+    bottleneck" — without it the latent can collapse to a constant
+    and still satisfy the JEPA loss.
+    """
+
+    def forward(
+        self, reconstructed: Tensor, target_embeddings: Tensor
+    ) -> Tensor:
+        return torch.nn.functional.smooth_l1_loss(
+            reconstructed, target_embeddings
+        )
 
 
 class AutoregressiveLoss(nn.Module):
@@ -267,6 +292,7 @@ class UCSACombinedLoss(nn.Module):
         )
         self.memory = MemoryStabilityLoss()
         self.router = RouterLoadBalancingLoss()
+        self.reconstruction = InputReconstructionLoss()
 
     def forward(
         self,
@@ -276,6 +302,8 @@ class UCSACombinedLoss(nn.Module):
         jepa_target: Tensor | None = None,
         long_term: Tensor | None = None,
         router_logits: Tensor | None = None,
+        reconstructed: Tensor | None = None,
+        target_embeddings: Tensor | None = None,
     ) -> tuple[Tensor, dict[str, float]]:
         """Compute the combined loss.
 
@@ -286,10 +314,9 @@ class UCSACombinedLoss(nn.Module):
             jepa_target: Optional target embeddings for JEPA.
             long_term: Optional long-term memory tensor for stability loss.
             router_logits: Optional MoE router logits for load balancing.
-
-        Returns:
-            Tuple ``(total_loss, components)`` where ``components`` is a
-            dict mapping each loss name to its float value.
+            reconstructed: Optional input-reconstruction projection.
+            target_embeddings: Original input-token embeddings (target for
+                the reconstruction loss).
         """
         total = self.ar(logits, targets)
         components = {"ar": float(total.item())}
@@ -313,11 +340,16 @@ class UCSACombinedLoss(nn.Module):
             router_loss = self.router(router_logits)
             total = total + self.weights.router * router_loss
             components["router"] = float(router_loss.item())
+        if reconstructed is not None and target_embeddings is not None:
+            rec_loss = self.reconstruction(reconstructed, target_embeddings)
+            total = total + self.weights.reconstruction * rec_loss
+            components["reconstruction"] = float(rec_loss.item())
         return total, components
 
 
 __all__ = [
     "AutoregressiveLoss",
+    "InputReconstructionLoss",
     "JEPALoss",
     "LossWeights",
     "MemoryStabilityLoss",
