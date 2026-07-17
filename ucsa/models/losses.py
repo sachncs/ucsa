@@ -107,13 +107,20 @@ class JEPALoss(nn.Module):
     - ``"ijepa"`` (default; backwards-compatible): convex combination of
       cosine distance and SmoothL1, with weight ``alpha``.
       ``L = α (1 - cos(pred, target)).mean() + (1 - α) smooth_l1(pred, target)``
-    - ``"lewm"`` (LeWorldModel, arXiv 2603.19312, Jun 2026, Maes et al.):
+    - ``"lewm"`` (LeWorldModel, arXiv 2603.19312, Mar 2026, Maes et al.):
       a single SmoothL1 prediction term plus a per-batch Gaussian
       regulariser on the latent embeddings. The Gaussian reg enforces
       the predicted latents to match N(0, 1) — preventing collapse
       without needing stop-grad, EMA target networks, or multi-term
       hyperparameter tweaking. The paper drops the tuning budget from
       six loss terms to one weight.
+
+    Optional multi-step prediction: when callers pass
+    ``multi_step_pairs`` (a list of ``(predicted_k, target_k)``
+    tensors), the loss is averaged across steps. This implements
+    the autoregressive-latent prediction LeWM does for its "48x
+    faster planning" claim — at step k we predict target k+1, and
+    average across k.
 
     When ``mode="lewm"``, ``forward`` returns a tuple
     ``(loss, components)`` so the components dict can list the
@@ -151,39 +158,18 @@ class JEPALoss(nn.Module):
         Matches LeWM §3.4: enforce the latent to be unit-variance,
         zero-mean by penalising ``0.5 * (var + mu^2 - 1 - log var)``.
         """
-        # The paper regularises the predicted embedding directly;
-        # `latent_for_reg` lets callers pass a pre-conditioning latent
-        # so the regulariser measures the underlying distribution
-        # rather than any additive offset.
         target = latent_for_reg if latent_for_reg is not None else predicted
         mu = target.mean(dim=(0, 1))
         var = target.var(dim=(0, 1), unbiased=False) + 1e-6
         return 0.5 * (var + mu.pow(2) - 1.0 - var.log()).mean()
 
-    def forward(
+    def _single_pair_loss(
         self,
         predicted: Tensor,
         target: Tensor,
-        latent_for_reg: Tensor | None = None,
-    ) -> Tensor | tuple[Tensor, dict[str, float]]:
-        """Compute the JEPA loss.
-
-        Args:
-            predicted: Predicted embeddings of shape
-                ``(batch, seq, hidden)``.
-            target: Target embeddings of the same shape.
-            latent_for_reg: Optional latent to regularise in LeWM mode
-                (defaults to ``predicted``).
-
-        Returns:
-            Scalar tensor (``"ijepa"``) or ``(loss, components)`` tuple
-            (``"lewm"``).
-        """
-        if predicted.shape != target.shape:
-            raise ValueError(
-                f"predicted and target must share shape; got "
-                f"{tuple(predicted.shape)} and {tuple(target.shape)}."
-            )
+        for_reg: Tensor | None = None,
+    ) -> Tensor:
+        """Compute the per-step prediction loss (no aggregation)."""
         if self.mode == "ijepa":
             cosine = torch.nn.functional.cosine_similarity(
                 predicted, target, dim=-1
@@ -191,14 +177,70 @@ class JEPALoss(nn.Module):
             cosine_term = (1.0 - cosine).mean()
             l1_term = torch.nn.functional.smooth_l1_loss(predicted, target)
             return self.alpha * cosine_term + (1.0 - self.alpha) * l1_term
-        # LeWM mode: single SmoothL1 prediction + Gaussian regulariser.
+        # LeWM mode
         pred_loss = torch.nn.functional.smooth_l1_loss(predicted, target)
-        reg = self._gaussian_kl(predicted, latent_for_reg)
-        loss = pred_loss + self.gaussian_reg_weight * reg
-        return loss, {
-            "jepa_pred": float(pred_loss.item()),
-            "jepa_gaussian_reg": float(reg.item()),
-        }
+        reg = self._gaussian_kl(predicted, for_reg)
+        return pred_loss + self.gaussian_reg_weight * reg
+
+    def forward(
+        self,
+        predicted: Tensor | None = None,
+        target: Tensor | None = None,
+        latent_for_reg: Tensor | None = None,
+        multi_step_pairs: list[tuple[Tensor, Tensor]] | None = None,
+    ) -> Tensor | tuple[Tensor, dict[str, float]]:
+        """Compute the JEPA loss.
+
+        Args:
+            predicted: Single-step predicted embedding ``(B, S, H)``.
+            target: Single-step target embedding ``(B, S, H)``.
+            latent_for_reg: Latent to regularise in LeWM mode.
+            multi_step_pairs: Optional list of
+                ``(predicted_k, target_k)`` tensors. The loss is the
+                per-step mean; the Gaussian regulariser is applied
+                to each predicted independently.
+
+        Returns:
+            Scalar tensor (``"ijepa"``) or ``(loss, components)`` tuple
+            (``"lewm"``).
+        """
+        if multi_step_pairs is not None and len(multi_step_pairs) > 0:
+            per_step = [
+                self._single_pair_loss(p, t, for_reg=p)
+                for p, t in multi_step_pairs
+            ]
+            stack = torch.stack(per_step)
+            loss = stack.mean()
+            if self.mode == "lewm":
+                return loss, {
+                    "jepa_pred": float(stack.mean().item()),
+                    "jepa_gaussian_reg": float(
+                        self._gaussian_kl(
+                            torch.cat([p for p, _ in multi_step_pairs], dim=0),
+                            None,
+                        ).item()
+                    ),
+                    "jepa_steps": float(len(multi_step_pairs)),
+                }
+            return loss
+        if predicted is None or target is None:
+            return torch.zeros((), device=predicted.device if predicted is not None else target.device)
+        if predicted.shape != target.shape:
+            raise ValueError(
+                f"predicted and target must share shape; got "
+                f"{tuple(predicted.shape)} and {tuple(target.shape)}."
+            )
+        loss = self._single_pair_loss(predicted, target, for_reg=latent_for_reg)
+        if self.mode == "lewm":
+            return loss, {
+                "jepa_pred": float(loss.item())
+                if self.gaussian_reg_weight == 0
+                else float(self._single_pair_loss(predicted, target, for_reg=None).item()),
+                "jepa_gaussian_reg": float(
+                    self._gaussian_kl(predicted, latent_for_reg).item()
+                ),
+            }
+        return loss
 
 
 class MemoryStabilityLoss(nn.Module):
@@ -304,25 +346,40 @@ class UCSACombinedLoss(nn.Module):
         router_logits: Tensor | None = None,
         reconstructed: Tensor | None = None,
         target_embeddings: Tensor | None = None,
+        jepa_multi_step: list[tuple[Tensor, Tensor]] | None = None,
     ) -> tuple[Tensor, dict[str, float]]:
         """Compute the combined loss.
 
         Args:
             logits: Language head logits.
             targets: Target token ids.
-            jepa_predicted: Optional predicted embeddings for JEPA.
-            jepa_target: Optional target embeddings for JEPA.
+            jepa_predicted: Optional single-step predicted embedding.
+            jepa_target: Optional single-step target embedding.
             long_term: Optional long-term memory tensor for stability loss.
             router_logits: Optional MoE router logits for load balancing.
             reconstructed: Optional input-reconstruction projection.
             target_embeddings: Original input-token embeddings (target for
                 the reconstruction loss).
+            jepa_multi_step: Optional list of multi-step JEPA pairs.
+                When provided, this takes precedence over the
+                single-step ``jepa_predicted``/``jepa_target`` pair.
         """
         total = self.ar(logits, targets)
         components = {"ar": float(total.item())}
 
-        if jepa_predicted is not None and jepa_target is not None:
-            jepa_out = self.jepa(jepa_predicted, jepa_target)
+        # ponytail: multi-step JEPA takes precedence over single-step.
+        # When the EMA target encoder is active, the trainer swaps the
+        # targets in the multi-step list for the EMA-tracked latents.
+        active_jepa_pairs: list[tuple[Tensor, Tensor]] | None = None
+        if jepa_multi_step is not None and len(jepa_multi_step) > 0:
+            active_jepa_pairs = list(jepa_multi_step)
+        elif jepa_predicted is not None and jepa_target is not None:
+            active_jepa_pairs = [(jepa_predicted, jepa_target)]
+
+        if active_jepa_pairs is not None:
+            jepa_out = self.jepa(
+                multi_step_pairs=active_jepa_pairs
+            )
             if self.jepa.mode == "lewm":
                 jepa_loss, jepa_components = jepa_out
                 components.update(

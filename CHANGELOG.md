@@ -147,29 +147,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - (none)
 
 ### Added
-- New JEPA loss mode `lewm` (LeWorldModel, arXiv 2603.19312, Mar
-  2026): single SmoothL1 prediction term plus a per-batch Gaussian
-  regulariser on the latent embeddings. The mode is opt-in via
-  `model.jepa_mode=lewm` in the config and is designed to fit
-  LeWM's "one weight, no EMA, no multi-term juggling" claim.
-- New text-conditioned JEPA path (TC-JEPA, arXiv 2605.03245, May
-  2026, Meta): `UCSA.forward` now applies a sparse top-k
-  cross-attention from the input-token embeddings into the JEPA
-  prediction. Two new `UCSAConfig`/`defaults.yaml` fields control
-  the conditioner (`text_conditioner_top_k`, `text_conditioner_scale`).
-- Hard-EMA target encoder (`ucsa.training.ema.EMATargetEncoder`):
-  opt-in via `training.ema_momentum > 0`. When enabled, the trainer
-  uses the EMA model's JEPA latent as the predictive target —
-  classic I-JEPA-style anti-collapse. The EMA is blended toward
-  the predictor after every `ema_update_every` step.
-- Input-reconstruction head (`projection_heads.InputReconstructionHead`)
-  + `InputReconstructionLoss`: a LeWM-style capacity bottleneck.
-  The new head projects working memory back to a same-dim vector
-  that is scored against `perception.embed_tokens(inputs)`. Forced
-  alignment via `take(seq_len)` slices since the working bank
-  length (64) is fixed while input seq can vary.
-- New Trainer config fields `ema_momentum` and `ema_update_every`
-  with sane defaults (`0.0` / `1`).
+- True multi-step JEPA prediction (LeWM §3.4, arXiv 2603.19312).
+  `UCSA.forward` emits `jepa_multi_step` — a list of
+  ``(predicted_k, target_{k+1})`` tensors derived from the
+  reasoning-loop intermediate clones. With the default
+  `reasoning_iterations=4` this is a 3-step chain per forward.
+  `JEPALoss.forward` accepts the list and averages the per-step
+  loss. The EMA target encoder, when active, swaps the targets
+  with its own intermediates so each step prediction is matched
+  against EMA-tracked latents. Surfaced as `jepa_steps` metric
+  when active.
+- `scripts/train.py` rewritten around the SOTA stack: EMA
+  target encoder (momentum 0.996 default), LeWM JEPA mode,
+  multi-step prediction chain, input-reconstruction head,
+  12k-step default. CLI exposes `--no-ema`, `--no-lewm`,
+  `--no-recon`, `--ema-momentum`, `--lewm-gaussian-reg`,
+  `--reconstruction-weight` to dial each piece on/off for
+  ablation studies.
 
 ### Changed
 - `scripts/benchmark.py`: added Kimi K3 (arXiv-style) features as

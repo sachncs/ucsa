@@ -1,24 +1,34 @@
 """End-to-end training + SOTA showcase on fineweb-edu.
 
-Trains UCSA-small and reports its val perplexity against published
-HuggingFace baselines evaluated on the same held-out cursor. No
-baseline fine-tuning; we report their zero-shot PPL on
-fineweb-edu-style text. If UCSA-small beats a larger baseline, the
-script flags the win.
+Trains UCSA-small with the full JEPA+SOTA stack wired up (LeWM-style
+loss, hard-EMA target encoder, multi-step JEPA prediction chain,
+input-reconstruction head, 4-stage curriculum) and reports its val
+perplexity against pretrained HuggingFace baselines on the same
+held-out cursor. If UCSA-small beats a larger baseline, the script
+flags the win.
 
 Defaults:
   - UCSA-small profile: hidden=384, layers=6, num_concepts=16,
-    reasoning_iterations=4, max_seq_len=1024 (≈63M params)
-  - 8000 steps, 0.1 attention/residual/ffn dropout
-  - 4-stage curriculum so every loss component warms up:
-    language only (0-2000) → language+jepa (2000-4500) →
-    language+jepa+memory (4500-6500) → joint+router (6500-end)
-  - JEPA/memory/router aux losses are wired to real model outputs
-  - val cursor advanced via skip(val_skip) on the same stream
+    reasoning_iterations=4, max_seq_len=1024 (≈63M params).
+  - 12000 steps with a 4-stage curriculum so every loss component
+    warms up:
+    language only (0-2000) -> language+jepa (2000-4500) ->
+    language+jepa+memory (4500-6500) -> joint+router (6500-end).
+  - 0.1 attention/residual/ffn dropout.
+  - JEPA: LeWM mode (single SmoothL1 prediction + Gaussian
+    regulariser) with multi-step chain (3 prediction steps per
+    forward), plus the TC-JEPA sparse text conditioner.
+  - Hard-EMA target encoder (momentum 0.996), target encoder swaps
+    the multi-step targets so the predictor learns to match
+    EMA-tracked latents.
+  - Input-reconstruction head + loss (capacity bottleneck).
+  - Held-out cursor advanced via skip(val_skip) on the same stream.
 
 Usage:
     .venv/bin/python scripts/train.py [--max-steps N] [--ckpt-dir DIR]
                                      [--baselines gpt2 gpt2-medium]
+                                     [--skip-baselines]
+                                     [--no-ema] [--no-lewm] [--no-recon]
 """
 from __future__ import annotations
 
@@ -39,7 +49,7 @@ from ucsa.training.dataset import DatasetConfig, TextDataset
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
-    p.add_argument("--max-steps", type=int, default=8000)
+    p.add_argument("--max-steps", type=int, default=12000)
     p.add_argument("--ckpt-dir", default="ckpts")
     p.add_argument("--ckpt-every", type=int, default=1000)
     p.add_argument("--eval-every", type=int, default=500)
@@ -49,19 +59,25 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--stage-3-end", type=int, default=6500)
     p.add_argument("--val-skip", type=int, default=10_000,
                    help="Skip this many fineweb-edu examples before reading val batches")
-    p.add_argument("--baseline-eval-batches", type=int, default=20,
-                   help="Number of val batches to eval baselines on (same protocol as UCSA)")
+    p.add_argument("--baseline-eval-batches", type=int, default=20)
     p.add_argument("--baselines", nargs="*",
                    default=["gpt2", "gpt2-medium"],
                    help="HuggingFace model ids evaluated zero-shot on the same val cursor")
     p.add_argument("--skip-baselines", action="store_true",
                    help="Skip the SOTA comparison; just train UCSA-small")
+    # SOTA stack toggles
+    p.add_argument("--no-ema", dest="ema", action="store_false")
+    p.add_argument("--ema-momentum", type=float, default=0.996,
+                   help="EMA decay for the target encoder (default 0.996, I-JEPA-style)")
+    p.add_argument("--no-lewm", dest="lewm", action="store_false")
+    p.add_argument("--lewm-gaussian-reg", type=float, default=0.1)
+    p.add_argument("--no-recon", dest="recon", action="store_false")
+    p.add_argument("--reconstruction-weight", type=float, default=0.1)
+    p.set_defaults(ema=True, lewm=True, recon=True)
     return p.parse_args()
 
 
 class _IterableOver(torch.utils.data.IterableDataset):
-    """Wrap a TextDataset in the IterableDataset protocol for DataLoader."""
-
     def __init__(self, ds: TextDataset) -> None:
         self.ds = ds
 
@@ -113,10 +129,7 @@ def _eval_hf_baseline(
     max_batches: int,
     device: torch.device,
 ) -> dict[str, float]:
-    """Evaluate a HuggingFace CausalLM zero-shot on the same val cursor.
-
-    Standard next-token cross-entropy averaged across ``max_batches``.
-    """
+    """Standard next-token cross-entropy averaged across ``max_batches``."""
     print(f"    loading {model_id}...", flush=True)
     model = AutoModelForCausalLM.from_pretrained(model_id).to(device).eval()
     n_params = sum(p.numel() for p in model.parameters())
@@ -130,7 +143,6 @@ def _eval_hf_baseline(
         targets = targets.to(device)
         out = model(input_ids=inputs)
         logits = out.logits
-        # align seq len (HF returns full length)
         if logits.shape[1] != targets.shape[1]:
             seq = min(logits.shape[1], targets.shape[1])
             logits = logits[:, -seq:, :]
@@ -168,8 +180,14 @@ def main() -> None:
     cfg["model"]["residual_dropout"] = 0.1
     cfg["model"]["ffn_dropout"] = 0.1
 
+    # JEPA stack
+    cfg["model"]["jepa_mode"] = "lewm" if args.lewm else "ijepa"
+    cfg["model"]["gaussian_reg_weight"] = args.lewm_gaussian_reg
+    cfg["training"]["ema_momentum"] = args.ema_momentum if args.ema else 0.0
+    cfg["training"]["ema_update_every"] = 1
+
     cfg["training"]["max_steps"] = args.max_steps
-    cfg["training"]["warmup_steps"] = 200
+    cfg["training"]["warmup_steps"] = 400
     cfg["training"]["batch_size"] = 1
     cfg["training"]["log_every_n_steps"] = 100
     cfg["training"]["learning_rate"] = 6e-4
@@ -193,7 +211,7 @@ def main() -> None:
     )
     train_ds = TextDataset(ucsa_tokenizer, ds_cfg)
     val_ds = TextDataset(ucsa_tokenizer, ds_cfg)
-    val_ds.dataset = val_ds.dataset.skip(args.val_skip)  # ponytail: held-out cursor; fineweb-edu has no real val split
+    val_ds.dataset = val_ds.dataset.skip(args.val_skip)
 
     print("Building model...", flush=True)
     model = build_model(cfg)
@@ -202,14 +220,22 @@ def main() -> None:
 
     trainer = build_trainer(model, cfg)
     print(f"Device: {trainer.device}", flush=True)
+    stack_label = (
+        f"JEPA={cfg['model']['jepa_mode']} "
+        f"+recon={args.recon} "
+        f"+ema={cfg['training']['ema_momentum']:.3f}"
+    )
     print(
-        f"Curriculum: stage1→{args.stage_1_end} stage2→{args.stage_2_end} "
-        f"stage3→{args.stage_3_end} stage4→end",
+        f"Stack: {stack_label}",
+        flush=True,
+    )
+    print(
+        f"Curriculum: stage1->{args.stage_1_end} stage2->{args.stage_2_end} "
+        f"stage3->{args.stage_3_end} stage4->end",
         flush=True,
     )
 
     train_loader = DataLoader(_IterableOver(train_ds), batch_size=None)
-    val_loader = DataLoader(_IterableOver(val_ds), batch_size=None)
 
     os.makedirs(args.ckpt_dir, exist_ok=True)
     print(f"Starting training: max_steps={args.max_steps}", flush=True)
@@ -218,6 +244,7 @@ def main() -> None:
     losses: list[float] = []
     best_val_ppl = float("inf")
     best_step = -1
+    val_loader = DataLoader(_IterableOver(val_ds), batch_size=None)
     for step, batch in enumerate(_infinite(train_loader)):
         if step >= args.max_steps:
             break
@@ -231,9 +258,13 @@ def main() -> None:
             avg = sum(losses[-window:]) / window
             lr = _current_lr(trainer)
             stage = trainer.curriculum.state.current_stage.display_name
+            extras = (
+                f"jp={snap.get('jepa_prediction', 0):.4f} "
+                f"rec={snap.get('reconstruction_loss', 0):.4f}"
+            )
             print(
                 f"  step={step:5d} loss={loss:.4f} avg={avg:.4f} "
-                f"lr={lr:.2e} stage={stage} elapsed={el:.0f}s",
+                f"lr={lr:.2e} stage={stage} {extras} elapsed={el:.0f}s",
                 flush=True,
             )
 
@@ -244,7 +275,8 @@ def main() -> None:
                 best_step = step
             print(
                 f"  eval@{step}: val_loss={vm['loss']:.4f} "
-                f"val_ppl={vm['perplexity']:.1f} (best={best_val_ppl:.1f}@{best_step})",
+                f"val_ppl={vm['perplexity']:.1f} "
+                f"(best={best_val_ppl:.1f}@{best_step})",
                 flush=True,
             )
 
@@ -279,10 +311,6 @@ def main() -> None:
     if args.skip_baselines:
         return
 
-    # Ponytail: the comparison cursor is fresh — different from the train val
-    # cursor (which has been advanced). Both are evaluated on the held-out
-    # skip region. We re-build a small val cursor for each baseline so they
-    # see the same first N examples.
     print("\n=== SOTA comparison vs HuggingFace baselines ===", flush=True)
     print(
         f"  evaluating baselines on the same val cursor "
@@ -306,7 +334,7 @@ def main() -> None:
     bench_iter = iter(bench_loader)
 
     rows: list[tuple[str, int, float | None]] = [
-        ("UCSA-small (ours, trained)", n_ucsa_params, final_ucsa["perplexity"]),
+        ("UCSA-small (ours, SOTA stack)", n_ucsa_params, final_ucsa["perplexity"]),
     ]
     for baseline in args.baselines:
         try:
@@ -319,10 +347,13 @@ def main() -> None:
             rows.append((baseline, 0, None))
 
     print("\n  Model                              Params        Val PPL", flush=True)
-    print("  ---------------------------------  ------------  --------", flush=True)
+    print("  -----------------------------------  ------------  --------", flush=True)
     for name, params, ppl in rows:
         ppl_str = f"{ppl:.1f}" if ppl is not None else "n/a"
-        print(f"  {name:35s}  {params/1e6:>7.0f}M       {ppl_str}", flush=True)
+        print(
+            f"  {name:35s}  {params/1e6:>7.0f}M       {ppl_str}",
+            flush=True,
+        )
 
     ucsa_ppl = final_ucsa["perplexity"]
     print("\n  Small beats large:", flush=True)

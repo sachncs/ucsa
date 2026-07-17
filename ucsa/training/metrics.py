@@ -206,6 +206,7 @@ DEFAULT_METRIC_NAMES: tuple[str, ...] = (
     "jepa_loss",
     "jepa_prediction",
     "jepa_gaussian_reg",
+    "jepa_steps",
     "reconstruction_loss",
     "memory_loss",
     "router_loss",

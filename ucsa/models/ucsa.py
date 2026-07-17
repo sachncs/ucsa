@@ -208,6 +208,29 @@ class UCSA(nn.Module):
             config.hidden_size, config.hidden_size, bias=False
         )
 
+    def _condition_one(
+        self,
+        predicted: Tensor,
+        token_embeds: Tensor,
+        k_proj: Tensor,
+        v: Tensor,
+    ) -> Tensor:
+        """Apply the TC-JEPA sparse cross-attention to a single prediction."""
+        q = self._text_q(predicted.unsqueeze(0)).unsqueeze(1)
+        scores = torch.matmul(q, k_proj.transpose(-1, -2)) / (
+            token_embeds.shape[-1] ** 0.5
+        )
+        topk = scores.topk(
+            min(self.text_conditioner_top_k, scores.shape[-1]), dim=-1
+        )
+        attn = torch.zeros_like(scores)
+        attn.scatter_(-1, topk.indices, 1.0)
+        attn = attn / attn.sum(dim=-1, keepdim=True).clamp(min=1e-6)
+        conditioned = torch.matmul(attn, v).squeeze(1)
+        return predicted + self.text_conditioner_scale * (
+            self._text_o(conditioned).squeeze(1)
+        )
+
     def forward(
         self,
         inputs: Tensor,
@@ -232,16 +255,29 @@ class UCSA(nn.Module):
         heads_out = self.heads(new_pcs.get_bank("working").unsqueeze(0))
 
         # JEPA aux: predict next working-state from previous.
-        # Intermediates are captured clones; pick last two iterations.
+        # Intermediates are captured clones; pick last two iterations
+        # for the legacy single-step path, plus emit the full chain as
+        # ``jepa_multi_step`` so multi-step prediction losses can fire.
         intermediates = self.reasoning_loop.get_intermediates()
         jepa_predicted: Tensor | None = None
         jepa_target: Tensor | None = None
+        jepa_multi_step: list[tuple[Tensor, Tensor]] = []
         if len(intermediates) >= 2:
             jepa_predicted = intermediates[-1]
             jepa_target = intermediates[-2]
         elif len(intermediates) == 1:
             jepa_predicted = intermediates[0]
             jepa_target = new_pcs.get_bank("working").detach()
+        # ponytail: chain the reasoning-loop intermediates into
+        # (predicted_k, target_{k+1}) pairs. Targets are detached so
+        # gradients flow only through the predictor. When the EMA
+        # target encoder is active, the trainer swaps these for its
+        # own intermediates, which keeps the chain aligned with the
+        # EMA-tracked latents.
+        for k in range(len(intermediates) - 1):
+            jepa_multi_step.append(
+                (intermediates[k], intermediates[k + 1].detach())
+            )
 
         # TC-JEPA: condition the predicted embedding on input tokens via a
         # sparse (top-k) cross-attention. Queries = JEPA prediction;
@@ -252,22 +288,25 @@ class UCSA(nn.Module):
             token_embeds = self.perception.embed_tokens(
                 inputs.to(self.pcs.get_bank("working").device)
             )
-            q = self._text_q(jepa_predicted.unsqueeze(0)).unsqueeze(1)
-            k = self._text_k(token_embeds).unsqueeze(1)
+            k_proj = self._text_k(token_embeds).unsqueeze(1)
             v = self._text_v(token_embeds).unsqueeze(1)
-            scores = torch.matmul(q, k.transpose(-1, -2)) / (
-                token_embeds.shape[-1] ** 0.5
+            jepa_predicted = self._condition_one(
+                jepa_predicted, token_embeds, k_proj, v
             )
-            topk = scores.topk(
-                min(self.text_conditioner_top_k, scores.shape[-1]), dim=-1
-            )
-            attn = torch.zeros_like(scores)
-            attn.scatter_(-1, topk.indices, 1.0)
-            attn = attn / attn.sum(dim=-1, keepdim=True).clamp(min=1e-6)
-            conditioned = torch.matmul(attn, v).squeeze(1)
-            jepa_predicted = jepa_predicted + self.text_conditioner_scale * (
-                self._text_o(conditioned).squeeze(1)
-            )
+            # Apply the same conditioner offset to every predicted
+            # latent in the multi-step chain so the conditioning signal
+            # is consistent across steps. Loop-by-loop keeps the shapes
+            # trivially aligned without any tensor re-tiling tricks.
+            if len(jepa_multi_step) > 0:
+                jepa_multi_step = [
+                    (
+                        self._condition_one(
+                            p, token_embeds, k_proj, v
+                        ),
+                        t,
+                    )
+                    for p, t in jepa_multi_step
+                ]
 
         # Long-term memory + MoE router logits are direct reads.
         long_term = new_pcs.get_bank("long_term")
@@ -280,6 +319,7 @@ class UCSA(nn.Module):
 
         heads_out["jepa_predicted"] = jepa_predicted
         heads_out["jepa_target"] = jepa_target
+        heads_out["jepa_multi_step"] = jepa_multi_step
         heads_out["long_term"] = long_term
         heads_out["router_logits"] = router_logits
         return heads_out

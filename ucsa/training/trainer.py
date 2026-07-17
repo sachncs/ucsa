@@ -268,23 +268,36 @@ class Trainer:
         if "jepa" in active:
             jp = outputs.get("jepa_predicted") if isinstance(outputs, dict) else None
             jt = outputs.get("jepa_target") if isinstance(outputs, dict) else None
-            # ponytail: when an EMA target encoder is active, use its
-            # forward output as ``jepa_target``. The predictor learns to
-            # match a stable EMA-stable latent; collapse-prevention comes
-            # for free without multi-term tuning.
-            if (
-                self.target_encoder is not None
-                and jp is not None
+            multi_step = (
+                outputs.get("jepa_multi_step") if isinstance(outputs, dict) else None
+            )
+            # ponytail: when an EMA target encoder is active, swap the
+            # targets in the multi-step list (or the single pair) for
+            # the EMA model's intermediates — keeps the prediction
+            # chain aligned with EMA-tracked latents.
+            if self.target_encoder is not None and (
+                multi_step is not None or jp is not None
             ):
                 with torch.no_grad():
                     tgt_out = self.target_encoder(inputs)
+                if isinstance(tgt_out, dict) and multi_step is not None:
+                    ema_ms = tgt_out.get("jepa_multi_step") or []
+                    if len(ema_ms) == len(multi_step) and len(ema_ms) > 0:
+                        multi_step = [
+                            (p, ema_ms[k][1].detach())
+                            for k, (p, _) in enumerate(multi_step)
+                        ]
                 if isinstance(tgt_out, dict):
                     jt = tgt_out.get("jepa_predicted", jt)
-            if jp is None or jt is None:
-                jp = torch.randn_like(logits[..., :32])
-                jt = torch.randn_like(logits[..., :32])
-            kwargs["jepa_predicted"] = jp
-            kwargs["jepa_target"] = jt
+            if multi_step is not None and len(multi_step) > 0:
+                kwargs["jepa_multi_step"] = multi_step
+            elif jp is not None and jt is not None:
+                kwargs["jepa_predicted"] = jp
+                kwargs["jepa_target"] = jt
+            else:
+                dummy = torch.randn_like(logits[..., :32])
+                kwargs["jepa_predicted"] = dummy
+                kwargs["jepa_target"] = dummy
         # ponytail: pass the input-reconstruction projection so the
         # combined loss can compute the capacity-bottleneck term.
         # The reconstruction head emits ``(B, working_bank, hidden)``;
@@ -372,6 +385,7 @@ class Trainer:
                 "jepa": "jepa_loss",
                 "jepa_jepa_pred": "jepa_prediction",
                 "jepa_jepa_gaussian_reg": "jepa_gaussian_reg",
+                "jepa_jepa_steps": "jepa_steps",
                 "reconstruction": "reconstruction_loss",
                 "memory": "memory_loss",
                 "router": "router_loss",
