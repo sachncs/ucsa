@@ -68,3 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ucsa.training.curriculum`: `Curriculum`, `CurriculumSchedule`,
   `CurriculumStage`, `CurriculumState`. Four-stage step-gated training
   curriculum with component gating per stage.
+- `ucsa.training.metrics`: `MetricsRegistry`, `MetricState`,
+  `DEFAULT_METRIC_NAMES`, helpers for perplexity, expert utilisation,
+  attention entropy, throughput, GPU memory, memory utilisation, and
+  replacement rate. TensorBoard logging hook.
