@@ -12,7 +12,9 @@ from torch import nn
 
 from ucsa.utils.checkpoint import (
     CheckpointMetadata,
+    adapt_legacy_state_dict,
     load_checkpoint,
+    load_state_dict_compat,
     metadata_from_dict,
     save_checkpoint,
 )
@@ -149,6 +151,109 @@ class TestCheckpoint:
             with open(meta_path, encoding="utf-8") as fp:
                 payload = json.load(fp)
             assert payload["step"] == 1
+
+
+class TestLegacyStateDictAdapter:
+    """Tests for :func:`adapt_legacy_state_dict`."""
+
+    @pytest.fixture
+    def operator(self):
+        """Provide an operator whose bank-id embedding covers every bank."""
+        from ucsa.models.transformer_operator import (
+            TransformerOperator,
+            TransformerOperatorConfig,
+        )
+
+        torch.manual_seed(0)
+        return TransformerOperator(
+            TransformerOperatorConfig(
+                hidden_size=32,
+                num_layers=2,
+                num_q_heads=4,
+                num_kv_heads=2,
+                intermediate_size=64,
+            )
+        )
+
+    def legacy_state_dict(self, operator: nn.Module, drop: int = 1) -> dict:
+        """internal: a state dict as written before ``drop`` banks existed."""
+        state = {
+            name: tensor.clone()
+            for name, tensor in operator.state_dict().items()
+        }
+        key = "bank_id_embedding.weight"
+        rows = state[key].shape[0]
+        old = torch.arange(
+            (rows - drop) * state[key].shape[1], dtype=state[key].dtype
+        ).reshape(rows - drop, state[key].shape[1])
+        state[key] = old
+        return state
+
+    def test_bank_rows_kept_and_observation_row_moved(
+        self, operator: nn.Module
+    ) -> None:
+        """Existing bank rows keep their index; observation moves last."""
+        legacy = self.legacy_state_dict(operator)
+        key = "bank_id_embedding.weight"
+        old = legacy[key]
+        adapted, notes = adapt_legacy_state_dict(operator, legacy)
+        new = adapted[key]
+        assert new.shape == operator.bank_id_embedding.weight.shape
+        n_old_banks = old.shape[0] - 1
+        assert torch.allclose(new[:n_old_banks], old[:n_old_banks])
+        assert torch.allclose(new[-1], old[-1])
+        assert notes
+
+    def test_new_bank_rows_keep_initialisation(
+        self, operator: nn.Module
+    ) -> None:
+        """Rows for banks the checkpoint never had stay at their init."""
+        legacy = self.legacy_state_dict(operator)
+        key = "bank_id_embedding.weight"
+        initialised = operator.bank_id_embedding.weight.detach().clone()
+        adapted, _ = adapt_legacy_state_dict(operator, legacy)
+        n_old_banks = legacy[key].shape[0] - 1
+        assert torch.allclose(
+            adapted[key][n_old_banks:-1], initialised[n_old_banks:-1]
+        )
+
+    def test_matching_shapes_are_untouched(self, operator: nn.Module) -> None:
+        """A current-generation checkpoint is passed through unchanged."""
+        current = operator.state_dict()
+        adapted, notes = adapt_legacy_state_dict(operator, current)
+        assert notes == []
+        for name, tensor in current.items():
+            assert torch.equal(adapted[name], tensor)
+
+    def test_legacy_checkpoint_loads_into_new_bank_layout(self) -> None:
+        """A UCSA saved before the intent bank still loads."""
+        from ucsa.models.ucsa import UCSA, UCSAConfig
+
+        torch.manual_seed(0)
+        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
+        full = model.state_dict()
+        legacy = {
+            name: tensor.clone()
+            for name, tensor in full.items()
+            if "intent" not in name
+        }
+        for name in list(legacy):
+            if name.endswith("bank_id_embedding.weight"):
+                legacy[name] = legacy[name][:-1].clone()
+        fresh = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
+        intent_before = fresh.pcs.get_bank("intent").detach().clone()
+        notes = load_state_dict_compat(fresh, legacy, strict=False)
+        assert notes
+        assert torch.allclose(
+            fresh.pcs.get_bank("working").detach(), full["pcs.banks.working"]
+        )
+        # The absent bank keeps its initialisation rather than being zeroed.
+        assert torch.allclose(
+            fresh.pcs.get_bank("intent").detach(), intent_before
+        )
+        with torch.no_grad():
+            out = fresh(torch.randint(0, 100, (1, 4)))
+        assert torch.isfinite(out["language"]).all()
 
 
 class TestLogging:

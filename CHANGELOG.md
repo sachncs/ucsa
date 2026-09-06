@@ -8,6 +8,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ucsa.models.state`: the `intent` bank (16 tokens, trainable), the
+  origination signal from which the reasoning loop generates the next
+  iteration's input. Appended last in `BANK_NAMES` so every existing
+  bank keeps its token offset and bank id.
+- `ucsa.models.projection_heads.OriginationHead`: the generator `G`. A
+  cross-attention read with keys/values from `concat(intent, working)`
+  and queries from the current input stream, which is what fixes the
+  generated stream's token count and order. Attached to
+  `ProjectionHeads.origination` but deliberately excluded from
+  `ProjectionHeads.forward`, whose contract is working-memory-only.
+- `ucsa.models.reasoning_loop`: `observation_mix` (`alpha_0`) and
+  `observation_mix_decay` on `ReasoningLoopConfig`, plus
+  `observation_weight`, `next_observation`, and `read_bank`. The loop
+  feeds `O_{k+1} = (1 - alpha_k) * G + alpha_k * O_0`, records
+  `last_observation_weights` and `last_generated_inputs`, and mixes
+  against the original observation so the exogenous signal cannot decay
+  faster than `alpha_k` says. Defaults keep `alpha_k = 1`, never call
+  `G`, and reproduce the previous behaviour exactly.
+- `ucsa.models.ucsa.UCSAConfig`: `observation_mix` and
+  `observation_mix_decay`, plumbed through `build_ucsa`. The heads are
+  now built before the loop because the loop calls `G`.
+- `ucsa.utils.checkpoint.adapt_legacy_state_dict` and
+  `load_state_dict_compat`: load checkpoints written before a bank
+  existed. Adding a bank changes one saved shape, the operator's
+  `bank_id_embedding`, which holds one row per bank plus a final
+  observation row. Existing bank rows keep their index and the
+  observation row is moved to the new last index; copying positionally
+  would have put the observation embedding into the intent slot.
+  `scripts/eval.py` and `scripts/probe_banks.py` use it and log what
+  was adapted. Verified against the real 352 MB `ckpts/ucsa-step1000`.
+- `scripts/probe_banks.py`: imports `BANK_NAMES` instead of hardcoding
+  six names, so the intent bank is probed like any other.
+- `tests`: intent-bank shape/metadata/override coverage, the legacy
+  state-dict adapter, `OriginationHead` shapes and validation, the
+  `alpha_k` schedule, and the strict-generalisation check that
+  `alpha=1` gives the same state as attaching no generator.
 - `tests/test_reasoning_loop.TestDifferentiableStateCarry`: covers
   `differentiable_bank`, differentiable JEPA intermediates, carried
   tensors reaching every operator weight, `reset` clearing the carry,

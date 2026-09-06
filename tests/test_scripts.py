@@ -268,6 +268,57 @@ class TestUCSAModel:
         # unnoticed: the loss still went down.
         assert model.pcs.get_bank("working").grad is not None
 
+    def test_origination_defaults_to_off(self) -> None:
+        """The default model never generates its own input.
+
+        The intent bank and generator exist, but ``alpha_k = 1`` keeps the
+        exogenous observation, so the default configuration is unchanged.
+        """
+        model = UCSA(
+            UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2)
+        )
+        assert model.reasoning_loop.origination is model.heads.origination
+        model(torch.randint(0, 100, (1, 4)))
+        assert model.reasoning_loop.last_generated_inputs == []
+        assert set(model.reasoning_loop.last_observation_weights) == {1.0}
+
+    def test_origination_generates_input_when_enabled(self) -> None:
+        """A sub-1.0 mix routes later iterations through the generator."""
+        model = UCSA(
+            UCSAConfig(
+                hidden_size=32,
+                vocab_size=100,
+                num_layers=2,
+                reasoning_iterations=4,
+                observation_mix=0.5,
+                observation_mix_decay=0.5,
+            )
+        )
+        out = model(torch.randint(0, 100, (1, 4)))
+        loop = model.reasoning_loop
+        assert loop.last_observation_weights == [0.5, 0.25, 0.125]
+        assert len(loop.last_generated_inputs) == 3
+        assert torch.isfinite(out["language"]).all()
+
+    def test_origination_trains_from_the_language_loss(self) -> None:
+        """The generator and the intent bank both receive gradient."""
+        model = UCSA(
+            UCSAConfig(
+                hidden_size=32,
+                vocab_size=100,
+                num_layers=2,
+                reasoning_iterations=3,
+                observation_mix=0.5,
+            )
+        )
+        out = model(torch.randint(0, 100, (1, 4)))
+        out["language"].pow(2).mean().backward()
+        assert all(
+            p.grad is not None
+            for p in model.heads.origination.parameters()
+        )
+        assert model.pcs.banks["intent"].grad is not None
+
     def test_ucsa_with_moe(self) -> None:
         """UCSA can be constructed with MoE configured."""
         from ucsa.models.moe import MoEConfig

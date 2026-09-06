@@ -135,11 +135,19 @@ makes that signal explicit, localisable, and optimisable.
 
 ### Phase 11.A — origination exists
 
-- [ ] feat(pcs): add the `intent` bank (16 tokens, trainable, last in
+- [x] feat(pcs): add the `intent` bank (16 tokens, trainable, last in
       `BANK_NAMES` so existing bank offsets and bank ids are unchanged)
-- [ ] feat(heads): add the origination generator `G`
-- [ ] feat(loop): mix `obs_{k+1} = (1 - alpha_k) * G + alpha_k * observation`,
+- [x] fix(ckpt): `adapt_legacy_state_dict` loads pre-intent checkpoints by
+      remapping the `bank_id_embedding` observation row; verified against the
+      real `ckpts/ucsa-step1000.safetensors`
+- [x] feat(heads): add the origination generator `G` (`OriginationHead`)
+- [x] feat(loop): mix `obs_{k+1} = (1 - alpha_k) * G + alpha_k * observation`,
       defaults reducing exactly to the current behaviour
+- [x] test: `alpha=1` matches attaching no generator; generated stream tracks
+      the observation's token count; the language loss trains `G` and the
+      intent bank; 100-step smoke on four `alpha` schedules, no NaN, and the
+      generated stream's RMS stays at or below the observation's rather than
+      growing (drift measured, not assumed)
 
 ### Phase 11.B — origination is localisable
 

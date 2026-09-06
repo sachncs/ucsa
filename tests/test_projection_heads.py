@@ -9,6 +9,7 @@ from ucsa.models.projection_heads import (
     HeadConfig,
     LanguageHead,
     MemoryHead,
+    OriginationHead,
     PlanningHead,
     ProjectionHeads,
     ToolHead,
@@ -132,6 +133,71 @@ class TestMemoryHead:
         assert head.proj.weight.grad is not None
 
 
+class TestOriginationHead:
+    """Tests for :class:`OriginationHead` (the generator ``G``)."""
+
+    @pytest.fixture
+    def head(self) -> OriginationHead:
+        """Provide a tiny origination generator."""
+        return OriginationHead(hidden_size=32)
+
+    def test_output_matches_the_observation_shape(
+        self, head: OriginationHead
+    ) -> None:
+        """``G`` emits one token per input token, whatever the count."""
+        for tokens in (1, 4, 13):
+            out = head(
+                torch.randn(16, 32), torch.randn(64, 32),
+                torch.randn(1, tokens, 32),
+            )
+            assert out.shape == (1, tokens, 32)
+
+    def test_gradient_reaches_intent_and_working(
+        self, head: OriginationHead
+    ) -> None:
+        """Both context banks receive gradient from the generated stream."""
+        intent = torch.randn(16, 32, requires_grad=True)
+        working = torch.randn(64, 32, requires_grad=True)
+        head(intent, working, torch.randn(1, 4, 32)).sum().backward()
+        assert intent.grad is not None
+        assert working.grad is not None
+
+    def test_output_depends_on_intent(self, head: OriginationHead) -> None:
+        """Changing the intent bank changes the generated stream.
+
+        If this ever fails, ``G`` has learned to ignore its origination
+        input, which is the collapse mode the Phase C diagnostic watches.
+        """
+        working = torch.randn(64, 32)
+        observation = torch.randn(1, 4, 32)
+        first = head(torch.randn(16, 32), working, observation)
+        second = head(torch.randn(16, 32), working, observation)
+        assert not torch.allclose(first, second)
+
+    def test_rejects_non_3d_observation(self, head: OriginationHead) -> None:
+        """A 2D observation raises."""
+        with pytest.raises(ValueError):
+            head(torch.randn(16, 32), torch.randn(64, 32), torch.randn(4, 32))
+
+    def test_rejects_batched_banks(self, head: OriginationHead) -> None:
+        """Banks must be 2D ``(tokens, hidden)``."""
+        with pytest.raises(ValueError):
+            head(
+                torch.randn(1, 16, 32), torch.randn(64, 32),
+                torch.randn(1, 4, 32),
+            )
+
+    def test_rejects_hidden_size_mismatch(
+        self, head: OriginationHead
+    ) -> None:
+        """A hidden-size disagreement raises rather than broadcasting."""
+        with pytest.raises(ValueError):
+            head(
+                torch.randn(16, 8), torch.randn(64, 32),
+                torch.randn(1, 4, 32),
+            )
+
+
 class TestProjectionHeads:
     """Tests for :class:`ProjectionHeads`."""
 
@@ -146,6 +212,17 @@ class TestProjectionHeads:
         assert isinstance(heads.planning, PlanningHead)
         assert isinstance(heads.tool, ToolHead)
         assert isinstance(heads.memory, MemoryHead)
+        assert isinstance(heads.origination, OriginationHead)
+
+    def test_origination_is_not_a_forward_output(
+        self, heads: ProjectionHeads
+    ) -> None:
+        """``G`` stays out of the head dict; the loop calls it directly.
+
+        It reads the intent bank and the input stream, so it cannot share
+        the working-memory-only head signature.
+        """
+        assert "origination" not in heads(torch.randn(2, 4, 32))
 
     def test_forward_returns_all_outputs(
         self, heads: ProjectionHeads

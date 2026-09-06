@@ -1,7 +1,7 @@
 """Persistent Cognitive State (PCS).
 
 The PCS is the single persistent differentiable representation in UCSA.
-It consists of six token banks, each a learnable tensor of shape
+It consists of seven token banks, each a learnable tensor of shape
 ``(num_tokens, hidden_size)``. Every operator in the system reads from and
 writes to the PCS; no other structure stores knowledge.
 
@@ -20,7 +20,14 @@ Bank               Default tokens Role
 ``episode``        32             Per-request context buffer.
 ``task``           16             Long-running task state.
 ``memory_index``   32             Retrieval index, cross-attended each block.
+``intent``         16             Origination signal for the next input.
 ================== ============== ============================================
+
+``intent`` is the origination bank: the reasoning loop generates iteration
+``k + 1``'s input from it, so it is the one place where the signal that
+*causes* the next state lives. It is deliberately last in
+:data:`BANK_NAMES` so that adding it leaves every other bank's offset and
+bank id inside the operator's token stream unchanged.
 
 Retention metadata
 ------------------
@@ -51,6 +58,7 @@ BANK_NAMES: tuple[str, ...] = (
     "episode",
     "task",
     "memory_index",
+    "intent",
 )
 
 
@@ -122,6 +130,7 @@ DEFAULT_BANK_SIZES: dict[str, int] = {
     "episode": 32,
     "task": 16,
     "memory_index": 32,
+    "intent": 16,
 }
 
 
@@ -214,7 +223,7 @@ def retention_score(
 class PersistentCognitiveState(nn.Module):
     """The single persistent differentiable cognitive state.
 
-    The PCS holds six token banks as :class:`torch.nn.ParameterDict` entries
+    The PCS holds its token banks as :class:`torch.nn.ParameterDict` entries
     plus retention metadata as registered buffers. It exposes a uniform API
     for operators to read all tokens as a single concatenated tensor and for
     the memory subsystem to mutate individual banks.

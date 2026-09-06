@@ -83,6 +83,75 @@ class TestResolveBankSizes:
             resolve_bank_sizes({"working": 0})
 
 
+class TestIntentBank:
+    """Tests for the origination (``intent``) bank."""
+
+    def test_intent_bank_exists_with_default_size(self) -> None:
+        """The intent bank is present, trainable, and 16 tokens by default."""
+        state = PersistentCognitiveState(PCSConfig(hidden_size=32))
+        assert "intent" in state.bank_specs
+        assert state.bank_size("intent") == 16
+        assert DEFAULT_BANK_SIZES["intent"] == 16
+        assert isinstance(state.banks["intent"], torch.nn.Parameter)
+        assert state.banks["intent"].requires_grad
+
+    def test_intent_is_last_so_other_offsets_are_unchanged(self) -> None:
+        """Appending the bank must not move any existing bank's offset.
+
+        The operator derives bank ids and token offsets from the order of
+        :data:`BANK_NAMES`, and checkpoints encode those ids, so the new
+        bank has to go last.
+        """
+        assert BANK_NAMES[-1] == "intent"
+        legacy_order = (
+            "working",
+            "long_term",
+            "goal",
+            "episode",
+            "task",
+            "memory_index",
+        )
+        assert BANK_NAMES[: len(legacy_order)] == legacy_order
+
+    def test_intent_bank_size_override(self) -> None:
+        """``bank_sizes`` can resize the intent bank like any other."""
+        state = PersistentCognitiveState(
+            PCSConfig(hidden_size=16, bank_sizes={"intent": 4})
+        )
+        assert state.bank_size("intent") == 4
+        assert state.get_bank("intent").shape == (4, 16)
+
+    def test_legacy_bank_sizes_mapping_still_works(self) -> None:
+        """A config written before the bank existed still constructs.
+
+        Callers passing ``bank_sizes`` for the original six banks must keep
+        working, with the intent bank falling back to its default.
+        """
+        state = PersistentCognitiveState(
+            PCSConfig(
+                hidden_size=16,
+                bank_sizes={
+                    "working": 8,
+                    "long_term": 8,
+                    "goal": 4,
+                    "episode": 4,
+                    "task": 4,
+                    "memory_index": 4,
+                },
+            )
+        )
+        assert state.bank_size("intent") == DEFAULT_BANK_SIZES["intent"]
+        assert state.bank_size("working") == 8
+
+    def test_intent_bank_has_retention_metadata(self) -> None:
+        """The bank carries the same metadata buffers as every other bank."""
+        state = PersistentCognitiveState(PCSConfig(hidden_size=16))
+        snapshot = state.get_all_metadata()
+        assert "intent" in snapshot
+        for field_name in ("importance", "usage", "age", "retention"):
+            assert snapshot["intent"][field_name].shape == (16,)
+
+
 class TestRetentionScore:
     """Tests for :func:`retention_score`."""
 
@@ -373,7 +442,7 @@ class TestPersistentCognitiveState:
         config = PCSConfig(hidden_size=16, bank_sizes={"working": 8})
         state = PersistentCognitiveState(config)
         assert state.bank_size("working") == 8
-        assert state.total_tokens == 8 + 128 + 16 + 32 + 16 + 32
+        assert state.total_tokens == 8 + 128 + 16 + 32 + 16 + 32 + 16
 
     def test_device_movement(self, state: PersistentCognitiveState) -> None:
         """``.to(device)`` moves banks and metadata together."""

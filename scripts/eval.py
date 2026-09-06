@@ -81,11 +81,14 @@ def main():
         cfg["model"]["max_seq_len"] = args.max_seq_len
         model = build_model(cfg)
         from safetensors.torch import load_file
+
+        from ucsa.utils.checkpoint import load_state_dict_compat
         sd = load_file(args.ucsa_ckpt)
         renamed = {
             name.removeprefix("model."): t for name, t in sd.items()
         }
-        model.load_state_dict(renamed, strict=False)
+        for note in load_state_dict_compat(model, renamed, strict=False):
+            print(f"  ckpt compat: {note}", flush=True)
         n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         report["ucsa_params"] = n_params
         model = model.to(device).eval()

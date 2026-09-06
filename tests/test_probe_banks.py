@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from scripts.probe_banks import probe_banks
 
+from ucsa.models.state import BANK_NAMES
 from ucsa.models.ucsa import UCSA, UCSAConfig
 
 
-def test_probe_banks_returns_six_bank_summaries():
+def test_probe_banks_summarises_every_bank():
     cfg = UCSAConfig(
         hidden_size=32, vocab_size=200, num_layers=2,
         reasoning_iterations=2,
@@ -16,12 +17,10 @@ def test_probe_banks_returns_six_bank_summaries():
     report = probe_banks(model, top_k=3)
     assert "banks" in report
     assert "centroid_cosine_sim" in report
-    assert len(report["banks"]) == 6
+    assert len(report["banks"]) == len(BANK_NAMES)
     bank_names = {s["name"] for s in report["banks"]}
-    assert bank_names == {
-        "working", "long_term", "goal", "episode",
-        "task", "memory_index",
-    }
+    assert bank_names == set(BANK_NAMES)
+    assert "intent" in bank_names
 
 
 def test_probe_banks_centroid_matrix_is_symmetric_self_one():

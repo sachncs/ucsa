@@ -6,6 +6,7 @@ import pytest
 import torch
 from torch import Tensor
 
+from ucsa.models.projection_heads import OriginationHead
 from ucsa.models.reasoning_loop import ReasoningLoop, ReasoningLoopConfig
 from ucsa.models.state import PCSConfig, PersistentCognitiveState
 from ucsa.models.transformer_operator import (
@@ -200,6 +201,164 @@ class TestReasoningLoop:
         copy2 = loop.get_intermediates()
         assert copy1 == copy2
         assert copy1 is not copy2
+
+
+class TestObservationMixConfig:
+    """Tests for the ``alpha_k`` schedule."""
+
+    def test_defaults_keep_the_real_observation(self) -> None:
+        """Defaults hold ``alpha_k`` at 1.0 for every iteration."""
+        config = ReasoningLoopConfig(num_iterations=4)
+        assert config.observation_mix == 1.0
+        assert config.observation_mix_decay == 1.0
+        assert [config.observation_weight(k) for k in range(4)] == [1.0] * 4
+
+    def test_decay_is_geometric(self) -> None:
+        """``alpha_k = observation_mix * decay ** k``."""
+        config = ReasoningLoopConfig(
+            observation_mix=0.8, observation_mix_decay=0.5
+        )
+        weights = [config.observation_weight(k) for k in range(4)]
+        assert weights == pytest.approx([0.8, 0.4, 0.2, 0.1])
+
+    @pytest.mark.parametrize("mix", [-0.1, 1.1])
+    def test_invalid_mix_rejected(self, mix: float) -> None:
+        """``observation_mix`` outside [0, 1] raises."""
+        with pytest.raises(ValueError):
+            ReasoningLoopConfig(observation_mix=mix)
+
+    @pytest.mark.parametrize("decay", [-0.1, 1.1])
+    def test_invalid_decay_rejected(self, decay: float) -> None:
+        """``observation_mix_decay`` outside [0, 1] raises."""
+        with pytest.raises(ValueError):
+            ReasoningLoopConfig(observation_mix_decay=decay)
+
+    def test_negative_iteration_rejected(self) -> None:
+        """``observation_weight`` rejects a negative iteration index."""
+        with pytest.raises(ValueError):
+            ReasoningLoopConfig().observation_weight(-1)
+
+
+class TestEndogenousOrigination:
+    """Tests for the generated-input path."""
+
+    def loop_with_generator(
+        self, **config_kwargs: object
+    ) -> tuple[ReasoningLoop, OriginationHead]:
+        """internal: a loop wired to a real origination generator."""
+        generator = OriginationHead(32)
+        loop = ReasoningLoop(
+            tiny_operator(),
+            ReasoningLoopConfig(**config_kwargs),  # type: ignore[arg-type]
+            origination=generator,
+        )
+        return loop, generator
+
+    def test_default_mix_never_calls_the_generator(self) -> None:
+        """With ``alpha=1`` the loop is the pre-origination loop.
+
+        This is the strict-generalisation check: the generator is attached
+        but must not be consulted, so behaviour cannot have changed.
+        """
+        loop, _ = self.loop_with_generator(num_iterations=4)
+        loop(tiny_pcs(), torch.randn(1, 4, 32))
+        assert loop.last_observation_weights == [1.0, 1.0, 1.0]
+        assert loop.last_generated_inputs == []
+
+    def test_default_mix_matches_no_generator(self) -> None:
+        """``alpha=1`` gives the same state as attaching no generator."""
+        torch.manual_seed(0)
+        operator = tiny_operator()
+        config = ReasoningLoopConfig(num_iterations=3)
+        plain = ReasoningLoop(operator, config)
+        wired = ReasoningLoop(operator, config, origination=OriginationHead(32))
+        observation = torch.randn(1, 4, 32)
+        torch.manual_seed(1)
+        plain_out = plain(tiny_pcs(), observation).get_bank("working").clone()
+        torch.manual_seed(1)
+        wired_out = wired(tiny_pcs(), observation).get_bank("working").clone()
+        assert torch.allclose(plain_out, wired_out)
+
+    def test_generator_called_when_mix_below_one(self) -> None:
+        """A sub-1.0 ``alpha`` routes the next input through ``G``."""
+        loop, _ = self.loop_with_generator(
+            num_iterations=3, observation_mix=0.5
+        )
+        loop(tiny_pcs(), torch.randn(1, 4, 32))
+        assert loop.last_observation_weights == [0.5, 0.5]
+        assert len(loop.last_generated_inputs) == 2
+        for generated in loop.last_generated_inputs:
+            assert generated.shape == (1, 4, 32)
+
+    def test_generated_input_shape_follows_the_observation(self) -> None:
+        """The generated stream keeps the observation's token count."""
+        loop, _ = self.loop_with_generator(
+            num_iterations=2, observation_mix=0.0
+        )
+        loop(tiny_pcs(), torch.randn(1, 11, 32))
+        assert loop.last_generated_inputs[0].shape == (1, 11, 32)
+
+    def test_fully_endogenous_input_drops_the_observation(self) -> None:
+        """``alpha=0`` feeds the generated stream verbatim."""
+        loop, _ = self.loop_with_generator(
+            num_iterations=2, observation_mix=0.0
+        )
+        loop(tiny_pcs(), torch.randn(1, 5, 32))
+        weights = loop.last_observation_weights
+        assert weights == [0.0]
+
+    def test_mix_is_against_the_original_observation(self) -> None:
+        """The blend uses ``O_0``, not the previous generated stream."""
+        generator = OriginationHead(32)
+        loop = ReasoningLoop(
+            tiny_operator(),
+            ReasoningLoopConfig(num_iterations=2, observation_mix=0.25),
+            origination=generator,
+        )
+        pcs = tiny_pcs()
+        observation = torch.randn(1, 4, 32)
+        drifted = torch.randn(1, 4, 32)
+        # ``current`` is deliberately unrelated to ``observation`` so a mix
+        # against the wrong tensor would show up.
+        mixed = loop.next_observation(pcs, observation, drifted, 0)
+        generated = loop.last_generated_inputs[-1]
+        expected = 0.25 * observation + 0.75 * generated
+        assert torch.allclose(mixed, expected)
+        assert not torch.allclose(mixed, 0.25 * drifted + 0.75 * generated)
+
+    def test_generator_gradient_reaches_the_intent_bank(self) -> None:
+        """A loss after the loop trains the origination generator."""
+        generator = OriginationHead(32)
+        operator = tiny_operator()
+        loop = ReasoningLoop(
+            operator,
+            ReasoningLoopConfig(num_iterations=3, observation_mix=0.5),
+            origination=generator,
+        )
+        loop(tiny_pcs(), torch.randn(1, 4, 32))
+        working = loop.differentiable_bank("working")
+        assert working is not None
+        working.pow(2).mean().backward()
+        assert all(p.grad is not None for p in generator.parameters())
+
+    def test_no_generator_ignores_a_low_mix(self) -> None:
+        """Without ``G`` the loop still feeds the real observation."""
+        loop = ReasoningLoop(
+            tiny_operator(),
+            ReasoningLoopConfig(num_iterations=3, observation_mix=0.0),
+        )
+        loop(tiny_pcs(), torch.randn(1, 4, 32))
+        assert loop.last_generated_inputs == []
+
+    def test_reset_clears_origination_traces(self) -> None:
+        """``reset`` drops the recorded weights and generated inputs."""
+        loop, _ = self.loop_with_generator(
+            num_iterations=3, observation_mix=0.5
+        )
+        loop(tiny_pcs(), torch.randn(1, 4, 32))
+        loop.reset()
+        assert loop.last_observation_weights == []
+        assert loop.last_generated_inputs == []
 
 
 class TestDifferentiableStateCarry:

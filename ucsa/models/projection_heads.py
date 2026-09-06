@@ -11,12 +11,18 @@ PCS and produce:
 
 Heads never share parameters, never communicate, and never store state
 beyond their own projection matrices.
+
+Two further modules live here but sit outside that contract because they
+read more than working memory: **InputReconstructionHead** (the LeWM
+capacity bottleneck) and **OriginationHead** (``G``, which generates the
+next iteration's input from the ``intent`` bank).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+import torch
 from torch import Tensor, nn
 
 
@@ -197,6 +203,95 @@ class InputReconstructionHead(nn.Module):
         return self.proj(working_memory)
 
 
+class OriginationHead(nn.Module):
+    """Generate the next iteration's input from the origination state.
+
+    This is ``G`` in ``obs_{k+1} = (1 - alpha_k) * G + alpha_k * obs``. It
+    is the one place where the signal that *causes* the next state is
+    computed, which is what makes that signal addressable: an intent slot
+    either contributes here or it does not affect the next input at all.
+
+    The generated stream is a cross-attention read whose keys and values
+    come from ``concat(intent, working)`` -- the spec's ``G(intent,
+    working)`` -- and whose queries come from the current input stream.
+    The query side exists because the generated tensor has to line up with
+    a variable-length observation: 16 intent slots cannot by themselves say
+    how many input tokens to emit, or in what order. No observation content
+    reaches the output except through the attention weights, so the mix in
+    :class:`~ucsa.models.reasoning_loop.ReasoningLoop` remains the only
+    path by which the real observation survives.
+    """
+
+    def __init__(self, hidden_size: int) -> None:
+        """Initialise the origination generator.
+
+        Args:
+            hidden_size: Hidden dimensionality.
+        """
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.q_proj = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.k_proj = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.v_proj = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.out_proj = nn.Linear(hidden_size, hidden_size, bias=False)
+
+    def forward(
+        self,
+        intent: Tensor,
+        working: Tensor,
+        observation: Tensor,
+    ) -> Tensor:
+        """Generate the next input stream.
+
+        Args:
+            intent: Origination bank of shape ``(intent_tokens,
+                hidden_size)``.
+            working: Working bank of shape ``(working_tokens,
+                hidden_size)``.
+            observation: Current input stream of shape ``(batch, tokens,
+                hidden_size)``, used for the query positions only.
+
+        Returns:
+            Tensor of shape ``(batch, tokens, hidden_size)``.
+
+        Raises:
+            ValueError: If ``observation`` is not 3D or the hidden sizes
+                disagree.
+        """
+        if observation.dim() != 3:
+            raise ValueError(
+                f"observation must be 3D (batch, seq, hidden), got "
+                f"{tuple(observation.shape)}."
+            )
+        if intent.dim() != 2 or working.dim() != 2:
+            raise ValueError(
+                f"intent and working must be 2D (tokens, hidden), got "
+                f"{tuple(intent.shape)} and {tuple(working.shape)}."
+            )
+        if (
+            intent.shape[-1] != self.hidden_size
+            or working.shape[-1] != self.hidden_size
+            or observation.shape[-1] != self.hidden_size
+        ):
+            raise ValueError(
+                f"hidden size mismatch: head={self.hidden_size}, "
+                f"intent={intent.shape[-1]}, working={working.shape[-1]}, "
+                f"observation={observation.shape[-1]}."
+            )
+        batch = observation.shape[0]
+        context = torch.cat([intent, working], dim=0)
+        context = context.unsqueeze(0).expand(batch, -1, -1)
+        queries = self.q_proj(observation)
+        keys = self.k_proj(context)
+        values = self.v_proj(context)
+        scores = torch.matmul(queries, keys.transpose(-1, -2)) / (
+            self.hidden_size**0.5
+        )
+        weights = torch.softmax(scores, dim=-1)
+        generated: Tensor = self.out_proj(torch.matmul(weights, values))
+        return generated
+
+
 class ProjectionHeads(nn.Module):
     """Bundle of all four projection heads."""
 
@@ -219,6 +314,11 @@ class ProjectionHeads(nn.Module):
         self.input_reconstruct = InputReconstructionHead(
             config.hidden_size, config.reconstruction_dim
         )
+        # ponytail: the origination generator. Deliberately *not* part of
+        # ``forward``: it reads the intent bank and the input stream rather
+        # than working memory alone, so it cannot share the head contract.
+        # The reasoning loop calls it directly.
+        self.origination = OriginationHead(config.hidden_size)
 
     def forward(self, working_memory: Tensor) -> dict[str, Tensor]:
         """Run every head on ``working_memory``.
@@ -248,6 +348,7 @@ __all__ = [
     "InputReconstructionHead",
     "LanguageHead",
     "MemoryHead",
+    "OriginationHead",
     "PlanningHead",
     "ProjectionHeads",
     "ToolHead",

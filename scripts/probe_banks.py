@@ -1,8 +1,8 @@
 """Memory-bank probing utility.
 
-For each of the six PCS banks, project the bank tokens back into
-vocabulary space via the tied LM head and report the top-k tokens
-the bank "remembers". Plus:
+For each PCS bank, project the bank tokens back into vocabulary space
+via the tied LM head and report the top-k tokens the bank
+"remembers". Plus:
 
 - Per-bank L2 norm snapshot.
 - Per-bank retention-score distribution statistics.
@@ -25,17 +25,10 @@ import torch.nn.functional as F
 import yaml
 from safetensors.torch import load_file
 
+from ucsa.models.state import BANK_NAMES
 from ucsa.train import build_model
+from ucsa.utils.checkpoint import load_state_dict_compat
 from ucsa.utils.seed import set_seed
-
-BANK_NAMES = (
-    "working",
-    "long_term",
-    "goal",
-    "episode",
-    "task",
-    "memory_index",
-)
 
 
 def parse_args() -> argparse.Namespace:
@@ -148,7 +141,8 @@ def main() -> None:
     model = build_model(cfg)
     sd = load_file(args.ckpt)
     renamed = {name.removeprefix("model."): t for name, t in sd.items()}
-    model.load_state_dict(renamed, strict=False)
+    for note in load_state_dict_compat(model, renamed, strict=False):
+        print(f"ckpt compat: {note}", flush=True)
 
     report = probe_banks(model, top_k=args.top_k)
     report["ckpt"] = args.ckpt

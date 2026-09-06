@@ -72,6 +72,11 @@ class UCSAConfig:
             next iteration and to the heads. ``False`` reproduces the
             severed graph, in which no loss can reach the operator; kept
             for the ablation.
+        observation_mix: ``alpha_0`` for the origination mix. ``1.0`` (the
+            default) feeds the exogenous observation to every iteration,
+            reproducing the behaviour from before the ``intent`` bank
+            existed.
+        observation_mix_decay: Geometric per-iteration decay of ``alpha``.
     """
 
     hidden_size: int = 128
@@ -89,6 +94,8 @@ class UCSAConfig:
     ffn_dropout: float = 0.0
     moe: MoEConfig | None = None
     differentiable_state_carry: bool = True
+    observation_mix: float = 1.0
+    observation_mix_decay: float = 1.0
     # TC-JEPA text conditioner config; arXiv 2605.03245 (May 2026).
     text_conditioner_top_k: int = 4
     text_conditioner_scale: float = 0.1
@@ -167,15 +174,20 @@ class UCSA(nn.Module):
                 )
             )
         self.operator = operator
+        self.heads = heads or ProjectionHeads(
+            build_head_config_from_cfg(config)
+        )
+        # The heads are built before the loop because the loop calls the
+        # origination generator that lives on them.
         self.reasoning_loop = ReasoningLoop(
             operator=self.operator,
             config=ReasoningLoopConfig(
                 num_iterations=config.reasoning_iterations,
                 capture_intermediates=True,  # ponytail: needed for JEPA aux loss; intermediates are detached clones, no extra graph
+                observation_mix=config.observation_mix,
+                observation_mix_decay=config.observation_mix_decay,
             ),
-        )
-        self.heads = heads or ProjectionHeads(
-            build_head_config_from_cfg(config)
+            origination=self.heads.origination,
         )
         self.memory = Memory(self.pcs)
         self.verifier = verifier or HeuristicVerifier()
@@ -415,6 +427,10 @@ def build_ucsa(cfg: Any) -> UCSA:
             moe=moe_cfg,
             differentiable_state_carry=bool(
                 model_section.get("differentiable_state_carry", True)
+            ),
+            observation_mix=float(model_section.get("observation_mix", 1.0)),
+            observation_mix_decay=float(
+                model_section.get("observation_mix_decay", 1.0)
             ),
             text_conditioner_top_k=int(
                 model_section.get("text_conditioner_top_k", 4)

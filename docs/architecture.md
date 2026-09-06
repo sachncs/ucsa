@@ -2,7 +2,7 @@
 
 ## Persistent Cognitive State (PCS)
 
-A single, persistent, differentiable representation consisting of six token
+A single, persistent, differentiable representation consisting of seven token
 banks. Every bank is a learnable tensor of shape
 ``(num_tokens, hidden_size)``:
 
@@ -14,9 +14,14 @@ banks. Every bank is a learnable tensor of shape
 | Episode         | 32     | Per-request context buffer.                     |
 | Task            | 16     | Long-running task state.                        |
 | MemoryIndex     | 32     | Retrieval index, cross-attended each block.     |
+| Intent          | 16     | Origination signal for the next input.          |
 
 Banks ship with retention metadata (``importance``, ``usage``, ``age``,
 ``retention_score``) that drive the long-term memory recycle policy.
+
+``Intent`` is last in ``BANK_NAMES`` on purpose: the operator derives token
+offsets and bank ids from that order, and checkpoints encode the ids, so
+appending is the only change that leaves existing banks where they were.
 
 ## State Transition Operator
 
@@ -39,8 +44,37 @@ Each forward pass:
 
 1. Inject observation into WorkingMemory.
 2. For ``N`` iterations (default 4):
-   ``C' = F(C, O)``.
+   ``C' = F(C, O_k)``.
 3. Project WorkingMemory through the heads to produce outputs.
+
+The operator's write-back copies under ``torch.no_grad``, so the loop also
+carries the operator's differentiable bank tensors from one iteration to the
+next and out to the heads (``ReasoningLoop.differentiable_bank``). Without
+that carry the autograd graph ends at every transition and no loss can reach
+the operator at all. ``differentiable_state_carry=False`` restores the old
+severed behaviour for ablations.
+
+## Endogenous Origination
+
+``O_k`` need not be the same exogenous observation every iteration:
+
+```
+O_{k+1} = (1 - alpha_k) * G(intent, working_k) + alpha_k * O_0
+alpha_k = observation_mix * observation_mix_decay ** k
+```
+
+``G`` is the ``OriginationHead``: a cross-attention read whose keys and
+values come from ``concat(intent, working)`` and whose queries come from the
+current input stream (the query side only fixes how many tokens to emit and
+in what order). This makes the signal that *causes* the next state an
+explicit, addressable variable rather than something smeared across the
+operator's weights — the analogue of the neural signal that precedes a
+reach.
+
+``alpha_k`` is the brake on the loop running away on its own output. The
+defaults (``observation_mix=1.0``, ``observation_mix_decay=1.0``) hold
+``alpha_k = 1``, never call ``G``, and reproduce the previous behaviour
+exactly, so origination is opt-in.
 
 ## Memory Pipeline
 
