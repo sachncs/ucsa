@@ -132,7 +132,8 @@ class LanguageHead(nn.Module):
         Returns:
             Logits of shape ``(batch, seq, vocab_size)``.
         """
-        return self.proj(working_memory)
+        projected: Tensor = self.proj(working_memory)
+        return projected
 
 
 class PlanningHead(nn.Module):
@@ -158,7 +159,8 @@ class PlanningHead(nn.Module):
         Returns:
             Logits of shape ``(batch, seq, num_plan_tokens)``.
         """
-        return self.proj(working_memory)
+        projected: Tensor = self.proj(working_memory)
+        return projected
 
 
 class ToolHead(nn.Module):
@@ -184,7 +186,8 @@ class ToolHead(nn.Module):
         Returns:
             Logits of shape ``(batch, seq, num_tools)``.
         """
-        return self.proj(working_memory)
+        projected: Tensor = self.proj(working_memory)
+        return projected
 
 
 class MemoryHead(nn.Module):
@@ -211,7 +214,8 @@ class MemoryHead(nn.Module):
         Returns:
             Queries of shape ``(batch, seq, memory_query_dim)``.
         """
-        return self.proj(working_memory)
+        projected: Tensor = self.proj(working_memory)
+        return projected
 
 
 class InputReconstructionHead(nn.Module):
@@ -230,7 +234,8 @@ class InputReconstructionHead(nn.Module):
         self.reconstruction_dim = reconstruction_dim
 
     def forward(self, working_memory: Tensor) -> Tensor:
-        return self.proj(working_memory)
+        projected: Tensor = self.proj(working_memory)
+        return projected
 
 
 class IntentUpdate(nn.Module):
@@ -531,7 +536,8 @@ class ProjectionHeads(nn.Module):
 
     def head_outputs(self, working_memory: Tensor) -> dict[str, Tensor]:
         """Alias for :meth:`forward` matching the spec's vocabulary."""
-        return self.forward(working_memory)
+        outputs: dict[str, Tensor] = self.forward(working_memory)
+        return outputs
 
 
 __all__ = [
@@ -551,7 +557,8 @@ def collect_head_outputs(  # internal: convenient accessor for tests
     heads: ProjectionHeads, working_memory: Tensor
 ) -> dict[str, Tensor]:
     """internal: run all heads and return their outputs."""
-    return heads(working_memory)
+    outputs: dict[str, Tensor] = heads(working_memory)
+    return outputs
 
 
 def head_parameter_count(heads: ProjectionHeads) -> dict[str, int]:

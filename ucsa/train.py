@@ -12,9 +12,11 @@ then runs the configured number of training steps.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from typing import Any
 
 import torch
+from torch import Tensor
 
 from ucsa.models.losses import UCSACombinedLoss
 from ucsa.training.curriculum import Curriculum, CurriculumSchedule
@@ -44,7 +46,7 @@ def build_model(cfg: Any) -> torch.nn.Module:
     try:
         from omegaconf import DictConfig, OmegaConf
     except Exception:  # pragma: no cover - environment-dependent
-        DictConfig = None  # type: ignore[assignment]
+        DictConfig = None
     if DictConfig is not None and isinstance(cfg, DictConfig):
         merged = OmegaConf.to_container(cfg, resolve=True)
         assert isinstance(merged, dict)
@@ -76,7 +78,7 @@ def _config_to_dict(cfg: Any) -> dict[str, Any]:
     try:
         from omegaconf import DictConfig, OmegaConf
     except Exception:  # pragma: no cover - environment-dependent
-        DictConfig = None  # type: ignore[assignment]
+        DictConfig = None
     if DictConfig is not None and isinstance(cfg, DictConfig):
         merged = OmegaConf.to_container(cfg, resolve=True)
         assert isinstance(merged, dict)
@@ -200,12 +202,16 @@ def _make_dataloader(dataset: TextDataset, cfg: Any) -> Any:
     cfg_dict = _config_to_dict(cfg)
     batch_size = int(cfg_dict["training"]["batch_size"])
 
-    class IterableDatasetAdapter(torch.utils.data.IterableDataset):
-        def __init__(self_inner) -> None:  # type: ignore[override]
+    class IterableDatasetAdapter(
+        torch.utils.data.IterableDataset[tuple[Tensor, Tensor]]
+    ):
+        """internal: wraps the streaming dataset for a DataLoader."""
+
+        def __init__(self_inner) -> None:
             super().__init__()
             self_inner.dataset = dataset
 
-        def __iter__(self_inner):  # type: ignore[override]
+        def __iter__(self_inner) -> Iterator[tuple[Tensor, Tensor]]:
             return iter(dataset)
 
     return DataLoader(IterableDatasetAdapter(), batch_size=batch_size)

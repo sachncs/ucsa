@@ -294,7 +294,7 @@ class GroupedQueryAttention(nn.Module):
         self.out_proj = nn.Linear(num_q_heads * self.head_dim, hidden_size, bias=False)
         self.attention_dropout = attention_dropout
         self.rotary = RotaryEmbedding(self.head_dim, base=rope_base)
-        self.kv_cache: dict[str, Tensor | None] = {
+        self.kv_cache: dict[str, Tensor | int | None] = {
             "k": None,
             "v": None,
             "length": 0,
@@ -338,12 +338,18 @@ class GroupedQueryAttention(nn.Module):
         q = RotaryEmbedding.apply_rotary(q, cos_q, sin_q)
         k_new = RotaryEmbedding.apply_rotary(k_new, cos_c, sin_c)
 
-        if is_first_step or self.kv_cache["k"] is None:
+        cached_k = self.kv_cache["k"]
+        cached_v = self.kv_cache["v"]
+        if (
+            is_first_step
+            or not isinstance(cached_k, Tensor)
+            or not isinstance(cached_v, Tensor)
+        ):
             k_full = k_new
             v_full = v_new
         else:
-            k_full = torch.cat([self.kv_cache["k"], k_new], dim=2)
-            v_full = torch.cat([self.kv_cache["v"], v_new], dim=2)
+            k_full = torch.cat([cached_k, k_new], dim=2)
+            v_full = torch.cat([cached_v, v_new], dim=2)
 
         if k_full.shape[2] > self.sliding_window:
             k_full = k_full[:, :, -self.sliding_window:]
@@ -365,7 +371,8 @@ class GroupedQueryAttention(nn.Module):
             is_causal=False,
         )
         attn_output = attn_output.transpose(1, 2).contiguous().view(batch, q_seq, -1)
-        return self.out_proj(attn_output)
+        projected: Tensor = self.out_proj(attn_output)
+        return projected
 
     def _expand_kv(self, kv: Tensor) -> Tensor:
         """Expand KV heads to match the number of query heads.
@@ -465,7 +472,8 @@ class CrossAttention(nn.Module):
             is_causal=False,
         )
         attn_output = attn_output.transpose(1, 2).contiguous().view(batch, q_seq, -1)
-        return self.out_proj(attn_output)
+        projected: Tensor = self.out_proj(attn_output)
+        return projected
 
 
 class FeedForward(nn.Module):
@@ -504,7 +512,8 @@ class FeedForward(nn.Module):
         """
         gate = torch.nn.functional.silu(self.gate_proj(x))
         up = self.up_proj(x)
-        return self.dropout(self.down_proj(gate * up))
+        activated: Tensor = self.dropout(self.down_proj(gate * up))
+        return activated
 
 
 @dataclass
@@ -681,9 +690,9 @@ class TransformerOperator(StateTransitionOperator):
             for i in range(config.num_layers)
         )
         if config.moe is not None:
-            for block in self.blocks:
+            for block in self.transformer_blocks():
                 if block.is_moe_layer:
-                    moe_module = MixtureOfExperts(
+                    moe_module: nn.Module = MixtureOfExperts(
                         hidden_size=config.hidden_size,
                         intermediate_size=config.intermediate_size,
                         config=config.moe,
@@ -722,8 +731,23 @@ class TransformerOperator(StateTransitionOperator):
         """Clear the KV cache, step counter, and carried state per block."""
         self.is_first_step = True
         self.last_bank_tensors = None
-        for block in self.blocks:
+        for block in self.transformer_blocks():
             block.self_attn.reset_cache()
+
+    def transformer_blocks(self) -> list[TransformerBlock]:
+        """Return the block stack typed as blocks.
+
+        Indexing an ``nn.ModuleList`` yields ``Tensor | Module``, so the
+        narrowing happens here once rather than at every call site.
+
+        Returns:
+            The operator's transformer blocks in order.
+        """
+        blocks: list[TransformerBlock] = []
+        for block in self.blocks:
+            assert isinstance(block, TransformerBlock)
+            blocks.append(block)
+        return blocks
 
     def carried_bank_tensors(self) -> dict[str, Tensor] | None:
         """Return the differentiable banks carried from the previous call.
@@ -811,7 +835,7 @@ class TransformerOperator(StateTransitionOperator):
         positions = torch.arange(seq, device=tokens.device).unsqueeze(0).expand(
             batch, seq
         )
-        pos_emb = self.position_embedding(positions)
+        pos_emb: Tensor = self.position_embedding(positions)
 
         bank_ids = torch.full(
             (batch, seq), bank_id_base, device=tokens.device, dtype=torch.long
@@ -820,8 +844,9 @@ class TransformerOperator(StateTransitionOperator):
             start, end = offsets[bank_name]
             if end <= seq:
                 bank_ids[:, start:end] = index
-        bank_emb = self.bank_id_embedding(bank_ids)
-        return tokens + pos_emb + bank_emb
+        bank_emb: Tensor = self.bank_id_embedding(bank_ids)
+        combined: Tensor = tokens + pos_emb + bank_emb
+        return combined
 
     def forward(
         self,
@@ -880,7 +905,7 @@ class TransformerOperator(StateTransitionOperator):
 
         total_aux = torch.zeros(())
         router_pieces: list[Tensor] = []
-        for block in self.blocks:
+        for block in self.transformer_blocks():
             all_tokens, aux = block(
                 all_tokens,
                 is_first_step=self.is_first_step,
@@ -890,7 +915,7 @@ class TransformerOperator(StateTransitionOperator):
             total_aux = total_aux + aux.moe_load
             if block.is_moe_layer and hasattr(block.ffn, "last_router_logits"):
                 rl = block.ffn.last_router_logits
-                if rl is not None:
+                if isinstance(rl, Tensor):
                     router_pieces.append(rl)
         all_tokens = self.final_norm(all_tokens)
         self.is_first_step = False

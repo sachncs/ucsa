@@ -210,7 +210,7 @@ class GraphService:
             The constructed :class:`GraphMemory`.
         """
         long_term = cstate.get_bank("long_term")
-        usage = cstate.meta_usage_long_term
+        usage = cstate.metadata("long_term", "usage")
         used_mask = usage > 0
         if not used_mask.any():
             self.last_graph = GraphMemory()

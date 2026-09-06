@@ -63,7 +63,9 @@ class EvaluationLoop:
         return inputs.to(self.device), targets.to(self.device)
 
     def evaluate(
-        self, dataloader: DataLoader, max_batches: int | None = None
+        self,
+        dataloader: DataLoader[tuple[Tensor, Tensor]],
+        max_batches: int | None = None,
     ) -> dict[str, float]:
         """Run evaluation.
 

@@ -49,7 +49,7 @@ def build_head_config_from_cfg(cfg: Mapping[str, object] | object) -> HeadConfig
     update_scale = float(getattr(cfg, "intent_update_scale", 0.1))
     head_section = getattr(cfg, "heads", None)
     if head_section is None and isinstance(cfg, Mapping):
-        head_section = cfg.get("heads")  # type: ignore[union-attr]
+        head_section = cfg.get("heads")
     if head_section is None:
         return HeadConfig(
             hidden_size=hidden_size,

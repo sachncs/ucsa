@@ -275,14 +275,17 @@ class UCSA(nn.Module):
         attn.scatter_(-1, topk.indices, 1.0)
         attn = attn / attn.sum(dim=-1, keepdim=True).clamp(min=1e-6)
         conditioned = torch.matmul(attn, v).squeeze(1)
-        offset = self._text_o(conditioned).reshape(predicted.shape)
-        return predicted + self.text_conditioner_scale * offset
+        offset: Tensor = self._text_o(conditioned).reshape(predicted.shape)
+        conditioned_prediction: Tensor = (
+            predicted + self.text_conditioner_scale * offset
+        )
+        return conditioned_prediction
 
     def forward(
         self,
         inputs: Tensor,
         modality: int = 0,
-    ) -> dict[str, Tensor]:
+    ) -> dict[str, Any]:
         """Run a forward pass.
 
         Args:
@@ -306,7 +309,7 @@ class UCSA(nn.Module):
         working = self.reasoning_loop.differentiable_bank("working")
         if working is None:
             working = new_pcs.get_bank("working")
-        heads_out = self.heads(working.unsqueeze(0))
+        heads_out: dict[str, Any] = self.heads(working.unsqueeze(0))
 
         # JEPA aux: predict next working-state from previous.
         # Intermediates are captured clones; pick last two iterations
@@ -412,7 +415,7 @@ def build_ucsa(cfg: Any) -> UCSA:
     try:
         from omegaconf import DictConfig, OmegaConf
     except Exception:
-        DictConfig = None  # type: ignore[assignment]
+        DictConfig = None
     if DictConfig is not None and isinstance(cfg, DictConfig):
         merged = OmegaConf.to_container(cfg, resolve=True)
         assert isinstance(merged, dict)

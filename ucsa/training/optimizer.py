@@ -12,6 +12,9 @@ Usage:
 """
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
+from typing import Any
+
 import torch
 from torch import Tensor
 
@@ -36,7 +39,8 @@ def _newton_schulz_5(G: Tensor, steps: int = 5) -> Tensor:
         X = a * X + B @ X
     if transposed:
         X = X.T
-    return X.to(G.dtype)
+    orthogonalised: Tensor = X.to(G.dtype)
+    return orthogonalised
 
 
 class Muon(torch.optim.Optimizer):
@@ -57,7 +61,7 @@ class Muon(torch.optim.Optimizer):
 
     def __init__(
         self,
-        params,
+        params: Iterable[Tensor] | Iterable[dict[str, Any]],
         lr: float = 2e-2,
         momentum: float = 0.95,
         weight_decay: float = 0.0,
@@ -72,8 +76,10 @@ class Muon(torch.optim.Optimizer):
         super().__init__(params, defaults)
 
     @torch.no_grad()
-    def step(self, closure=None):  # type: ignore[override]
-        loss = None
+    def step(  # type: ignore[override]
+        self, closure: Callable[[], Tensor] | None = None
+    ) -> Tensor | None:
+        loss: Tensor | None = None
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()

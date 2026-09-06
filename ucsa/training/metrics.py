@@ -46,9 +46,17 @@ import time
 from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import Protocol
 
 import torch
 from torch import Tensor
+
+
+class SummaryWriterLike(Protocol):
+    """The one method the metrics registry needs from a TB writer."""
+
+    def add_scalar(self, tag: str, value: float, step: int) -> None:
+        """Record a scalar under ``tag`` at ``step``."""
 
 
 @dataclass
@@ -118,7 +126,7 @@ class MetricsRegistry:
         """Return a snapshot of every metric's running average."""
         return {name: self.value(name) for name in self.names}
 
-    def tensorboard_log(self, writer: object, step: int) -> None:
+    def tensorboard_log(self, writer: SummaryWriterLike, step: int) -> None:
         """Log every metric to a TensorBoard writer.
 
         Args:

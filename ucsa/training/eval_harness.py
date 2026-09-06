@@ -25,6 +25,8 @@ from typing import Any
 
 import torch
 from datasets import load_dataset
+from torch import Tensor
+from transformers import PreTrainedTokenizerBase
 
 from ucsa.models.ucsa import UCSA
 
@@ -158,7 +160,7 @@ def _normalize_scores(scores: list[float]) -> list[float]:
 @torch.no_grad()
 def _conditional_loglik(
     model: UCSA,
-    tokenizer,
+    tokenizer: PreTrainedTokenizerBase,
     context: str,
     choice: str,
     device: torch.device,
@@ -190,9 +192,12 @@ def _conditional_loglik(
     ignore[:, :ctx_len] = targets[:, :ctx_len]
     out = model(ids)
     if isinstance(out, dict):
-        logits = out.get("language", out.get("logits"))
+        maybe_logits = out.get("language", out.get("logits"))
     else:
-        logits = out
+        maybe_logits = out
+    if maybe_logits is None:
+        return 0.0
+    logits: Tensor = maybe_logits
     # Align lengths the same way compute_loss does (target the
     # dataset's last logit -> next-token prediction).
     seq = min(logits.shape[1], targets.shape[1])
@@ -214,7 +219,7 @@ def _conditional_loglik(
 def evaluate_task(
     spec: TaskSpec,
     model: UCSA,
-    tokenizer,
+    tokenizer: PreTrainedTokenizerBase,
     device: torch.device,
 ) -> EvalResult:
     """Run one task, return its ``EvalResult``."""
@@ -252,7 +257,7 @@ def evaluate_task(
 def evaluate_all(
     names: list[str] | None,
     model: UCSA,
-    tokenizer,
+    tokenizer: PreTrainedTokenizerBase,
     device: torch.device,
 ) -> list[EvalResult]:
     """Evaluate a list of tasks (or all registered)."""

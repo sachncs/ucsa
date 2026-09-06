@@ -233,7 +233,9 @@ class JEPALoss(nn.Module):
                 }
             return loss
         if predicted is None or target is None:
-            return torch.zeros((), device=predicted.device if predicted is not None else target.device)
+            reference = predicted if predicted is not None else target
+            device = reference.device if reference is not None else None
+            return torch.zeros((), device=device)
         if predicted.shape != target.shape:
             raise ValueError(
                 f"predicted and target must share shape; got "

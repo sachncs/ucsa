@@ -240,6 +240,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lint fixes: ruff clean on the entire `ucsa/` and `tests/` tree.
 
 ### Changed
+- `mypy --strict ucsa/` is now clean: 0 errors across 34 source files,
+  down from 92 in 21 files. The literal gate command previously aborted
+  before checking anything, because the installed numpy ships stubs
+  written with 3.12 `type` statements that mypy refuses to parse under
+  `python_version = "3.11"`; numpy is now `follow_imports = "skip"` in
+  `pyproject.toml` rather than dropping 3.11 as the target. The fixes are
+  typing-only and behaviour-preserving; the full origination measurement
+  reproduces to 4 decimal places afterwards. Two are small API additions
+  rather than casts:
+  `PersistentCognitiveState.metadata(bank, field)` returns a metadata
+  buffer typed as a tensor, and
+  `TransformerOperator.transformer_blocks()` returns the block stack
+  typed as blocks, so the `Tensor | Module` narrowing that
+  `nn.Module.__getattr__` and `nn.ModuleList` force happens once instead
+  of at ~30 call sites. `METADATA_FIELDS` is exported alongside
+  `BANK_NAMES`.
 - `ucsa.models.projection_heads.OriginationHead`: the intent read and the
   working read now get their *own* softmax. Sharing one softmax over the
   concatenation put a handful of gated intent slots in direct competition

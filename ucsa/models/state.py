@@ -53,6 +53,13 @@ from torch import Tensor, nn
 
 INTENT_BANK = "intent"
 
+METADATA_FIELDS: tuple[str, ...] = (
+    "importance",
+    "usage",
+    "age",
+    "retention",
+)
+
 BANK_NAMES: tuple[str, ...] = (
     "working",
     "long_term",
@@ -246,7 +253,7 @@ class PersistentCognitiveState(nn.Module):
             config = PCSConfig()
         self.config = config
 
-        bank_parameter_dict: nn.ParameterDict[str, nn.Parameter] = nn.ParameterDict()
+        bank_parameter_dict: nn.ParameterDict = nn.ParameterDict()
         bank_specs = build_bank_specs(config)
         for spec in bank_specs:
             tensor = torch.empty(spec.num_tokens, config.hidden_size)
@@ -326,9 +333,40 @@ class PersistentCognitiveState(nn.Module):
         if name not in self.bank_specs:
             raise KeyError(f"Unknown bank '{name}'.")
         if name in self.banks:
-            return self.banks[name]
-        buffer_name = f"bank_{name}"
-        return getattr(self, buffer_name)
+            parameter = self.banks[name]
+            assert isinstance(parameter, Tensor)
+            return parameter
+        buffer = getattr(self, f"bank_{name}")
+        assert isinstance(buffer, Tensor)
+        return buffer
+
+    def metadata(self, name: str, field: str) -> Tensor:
+        """Return one metadata buffer for ``name``, typed as a tensor.
+
+        Buffers are reached through ``nn.Module.__getattr__``, which is
+        typed as ``Tensor | Module``. Callers need the tensor, so the cast
+        happens here once instead of at every call site.
+
+        Args:
+            name: Bank identifier.
+            field: One of :data:`METADATA_FIELDS`.
+
+        Returns:
+            The metadata buffer of shape ``(num_tokens,)``.
+
+        Raises:
+            KeyError: If the bank or the field does not exist.
+        """
+        if name not in self.bank_specs:
+            raise KeyError(f"Unknown bank '{name}'.")
+        if field not in METADATA_FIELDS:
+            raise KeyError(
+                f"Unknown metadata field '{field}'; expected one of "
+                f"{METADATA_FIELDS}."
+            )
+        buffer = getattr(self, f"meta_{field}_{name}")
+        assert isinstance(buffer, Tensor)
+        return buffer
 
     def set_bank(self, name: str, tensor: Tensor) -> None:
         """Replace the contents of ``name`` with ``tensor`` in-place.
@@ -376,26 +414,21 @@ class PersistentCognitiveState(nn.Module):
         snapshot: dict[str, dict[str, Tensor]] = {}
         for name in self.bank_order:
             snapshot[name] = {
-                "importance": getattr(self, f"meta_importance_{name}").clone(),
-                "usage": getattr(self, f"meta_usage_{name}").clone(),
-                "age": getattr(self, f"meta_age_{name}").clone(),
-                "retention": getattr(self, f"meta_retention_{name}").clone(),
+                name_field: self.metadata(name, name_field).clone()
+                for name_field in METADATA_FIELDS
             }
         return snapshot
 
     def reset_metadata(self) -> None:
         """Zero every metadata field for every bank."""
         for name in self.bank_order:
-            getattr(self, f"meta_importance_{name}").zero_()
-            getattr(self, f"meta_usage_{name}").zero_()
-            getattr(self, f"meta_age_{name}").zero_()
-            getattr(self, f"meta_retention_{name}").zero_()
+            for name_field in METADATA_FIELDS:
+                self.metadata(name, name_field).zero_()
 
     def step_age(self) -> None:
         """Increment the age of every token in every bank by one request."""
         for name in self.bank_order:
-            buffer = getattr(self, f"meta_age_{name}")
-            buffer.add_(1)
+            self.metadata(name, "age").add_(1)
 
     def record_usage(self, name: str, indices: Tensor, increment: float = 1.0) -> None:
         """Increment the usage counter for specific slots in ``name``.
@@ -407,20 +440,21 @@ class PersistentCognitiveState(nn.Module):
         """
         if name not in self.bank_specs:
             raise KeyError(f"Unknown bank '{name}'.")
-        usage_buffer = getattr(self, f"meta_usage_{name}")
+        usage_buffer = self.metadata(name, "usage")
         usage_buffer[indices] = usage_buffer[indices] + increment
-        age_buffer = getattr(self, f"meta_age_{name}")
-        age_buffer[indices] = 0
+        self.metadata(name, "age")[indices] = 0
 
     def update_retention(self) -> None:
         """Recompute retention scores for every bank."""
         weights = self.config
         for name in self.bank_order:
-            importance = getattr(self, f"meta_importance_{name}")
-            usage = getattr(self, f"meta_usage_{name}")
-            age = getattr(self, f"meta_age_{name}").float()
-            score = retention_score(importance, usage, age, weights)
-            getattr(self, f"meta_retention_{name}").copy_(score)
+            score = retention_score(
+                self.metadata(name, "importance"),
+                self.metadata(name, "usage"),
+                self.metadata(name, "age").float(),
+                weights,
+            )
+            self.metadata(name, "retention").copy_(score)
 
     def recycle_bottom_k(
         self,
@@ -449,7 +483,7 @@ class PersistentCognitiveState(nn.Module):
         if name not in self.bank_specs:
             raise KeyError(f"Unknown bank '{name}'.")
         spec = self.bank_specs[name]
-        retention = getattr(self, f"meta_retention_{name}")
+        retention = self.metadata(name, "retention")
         k_eff = min(k, spec.num_tokens)
         if k_eff <= 0:
             return torch.empty(0, dtype=torch.long)
@@ -473,9 +507,9 @@ class PersistentCognitiveState(nn.Module):
         with torch.no_grad():
             target[indices] = replacement_tensor
 
-        for metadata_field in ("importance", "usage", "age", "retention"):
-            buffer = getattr(self, f"meta_{metadata_field}_{name}")
-            buffer[indices] = 0.0 if metadata_field != "age" else 0
+        for name_field in METADATA_FIELDS:
+            buffer = self.metadata(name, name_field)
+            buffer[indices] = 0.0 if name_field != "age" else 0
         return indices
 
     def extra_repr(self) -> str:
@@ -491,6 +525,7 @@ __all__ = [
     "BANK_NAMES",
     "DEFAULT_BANK_SIZES",
     "INTENT_BANK",
+    "METADATA_FIELDS",
     "BankSpec",
     "PCSConfig",
     "PersistentCognitiveState",

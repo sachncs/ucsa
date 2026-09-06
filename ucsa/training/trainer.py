@@ -18,7 +18,7 @@ import math
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import torch
 from torch import Tensor, nn
@@ -198,7 +198,7 @@ class Trainer:
         self.device = device
         self.model.to(self.device)
         if config.compile_model and hasattr(torch, "compile"):
-            self.model = torch.compile(self.model)
+            self.model = cast(nn.Module, torch.compile(self.model))
         self.scheduler = CosineWarmupScheduler(
             optimizer=optimizer,
             warmup_steps=config.warmup_steps,
@@ -239,7 +239,9 @@ class Trainer:
         expose an ``embed_tokens`` helper (e.g. in tests).
         """
         try:
-            return self.model.perception.embed_tokens(inputs)
+            perception = cast(Any, self.model).perception
+            embedded: Tensor = perception.embed_tokens(inputs)
+            return embedded
         except AttributeError:
             # ponytail: tests use a fake model; don't crash the train loop.
             return torch.zeros(
@@ -362,7 +364,10 @@ class Trainer:
         )
         if isinstance(aux, Tensor) and aux.requires_grad:
             kwargs["origination_aux_loss"] = aux
-        return self.loss_fn(logits, targets, **kwargs)
+        combined: tuple[Tensor, dict[str, float]] = self.loss_fn(
+            logits, targets, **kwargs
+        )
+        return combined
 
     def train_step(
         self, batch: tuple[Tensor, Tensor]
@@ -384,7 +389,7 @@ class Trainer:
         )
         with autocast_ctx:
             loss, components = self.compute_loss(inputs, targets)
-        loss.backward()
+        loss.backward()  # type: ignore[no-untyped-call]
         if self.config.grad_clip_norm > 0.0:
             torch.nn.utils.clip_grad_norm_(
                 self.model.parameters(), self.config.grad_clip_norm
@@ -397,7 +402,7 @@ class Trainer:
             self.target_encoder is not None
             and self.state.global_step % self.config.ema_update_every == 0
         ):
-            self.target_encoder.update(self.model)
+            self.target_encoder.update(self.model)  # type: ignore[operator]
         self.state.global_step += 1
         self.state.last_loss = float(loss.item())
         self.state.last_components = components
@@ -409,9 +414,12 @@ class Trainer:
             and hasattr(self.model, "memory_baseline")
             and self.state.global_step % 50 == 0
         ):
-            lt = self.model.pcs.get_bank("long_term")
+            pcs = cast(Any, self.model).pcs
+            lt = pcs.get_bank("long_term")
+            baseline = self.model.memory_baseline
+            assert isinstance(baseline, Tensor)
             if lt.numel() > 0:
-                self.model.memory_baseline.copy_(lt.detach().mean(dim=0))
+                baseline.copy_(lt.detach().mean(dim=0))
 
         self.metrics.update("training_loss", float(loss.item()))
         self.metrics.update(
@@ -487,7 +495,7 @@ class Trainer:
 
     def train(
         self,
-        dataloader: DataLoader,
+        dataloader: DataLoader[tuple[Tensor, Tensor]],
         num_steps: int | None = None,
     ) -> list[dict[str, float]]:
         """Run the training loop.

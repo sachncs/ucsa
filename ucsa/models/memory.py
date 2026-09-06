@@ -176,7 +176,7 @@ class Memory:
         """
         long_term = self.cstate.get_bank("long_term")
         capacity = self.long_term_capacity
-        usage_buffer = self.cstate.meta_usage_long_term
+        usage_buffer = self.cstate.metadata("long_term", "usage")
         already_used = int((usage_buffer > 0).sum().item())
         remaining = max(0, capacity - already_used)
         k = candidate.tokens.shape[0]
@@ -190,29 +190,28 @@ class Memory:
             device=long_term.device, dtype=long_term.dtype
         )
         importance_to_write = candidate.importance[:k].to(
-            device=long_term.device, dtype=self.cstate.meta_importance_long_term.dtype
+            device=long_term.device, dtype=self.cstate.metadata("long_term", "importance").dtype
         )
-        empty_indices = self._empty_long_term_indices(limit=k)
-        if len(empty_indices) < k:
+        empty = self._empty_long_term_indices(limit=k)
+        empty_indices = torch.tensor(empty, dtype=torch.long)
+        if len(empty) < k:
             # Recycle the lowest-retention slots to make room.
-            recycled = self.cstate.recycle_bottom_k("long_term", k - len(empty_indices))
-            empty_indices = torch.cat(
-                [torch.tensor(empty_indices), recycled]
-            )[:k]
+            recycled = self.cstate.recycle_bottom_k("long_term", k - len(empty))
+            empty_indices = torch.cat([empty_indices, recycled])[:k]
 
         with torch.no_grad():
             long_term[empty_indices] = tokens_to_write
-            self.cstate.meta_importance_long_term[empty_indices] = (
+            self.cstate.metadata("long_term", "importance")[empty_indices] = (
                 importance_to_write
             )
-            self.cstate.meta_age_long_term[empty_indices] = 0
-            self.cstate.meta_usage_long_term[empty_indices] = 1.0
+            self.cstate.metadata("long_term", "age")[empty_indices] = 0
+            self.cstate.metadata("long_term", "usage")[empty_indices] = 1.0
         self.cstate.update_retention()
         return [int(i) for i in empty_indices]
 
     def _empty_long_term_indices(self, limit: int) -> list[int]:
         """Return up to ``limit`` long-term slots with zero usage."""
-        usage = self.cstate.meta_usage_long_term
+        usage = self.cstate.metadata("long_term", "usage")
         empty = torch.nonzero(usage == 0, as_tuple=False).squeeze(-1)
         return [int(i) for i in empty[:limit].tolist()]
 
@@ -248,7 +247,7 @@ class Memory:
 
     def long_term_usage(self) -> int:
         """Return the number of used long-term slots."""
-        usage = self.cstate.meta_usage_long_term
+        usage = self.cstate.metadata("long_term", "usage")
         return int((usage > 0).sum().item())
 
     def long_term_capacity_used(self) -> float:
@@ -267,7 +266,7 @@ class Memory:
         if bank not in self.cstate.bank_specs:
             raise KeyError(f"Unknown bank '{bank}'.")
         self.cstate.update_retention()
-        return getattr(self.cstate, f"meta_retention_{bank}").clone()
+        return self.cstate.metadata(bank, "retention").clone()
 
     def recycle_fifo(self, k: int) -> list[int]:
         """Recycle the ``k`` oldest (highest-age) slots in long-term.
@@ -283,7 +282,7 @@ class Memory:
         """
         if k <= 0:
             return []
-        age = self.cstate.meta_age_long_term
+        age = self.cstate.metadata("long_term", "age")
         num_tokens = age.shape[0]
         k_eff = min(k, num_tokens)
         _, indices = torch.topk(age.float(), k_eff, largest=True)
@@ -329,7 +328,7 @@ class Memory:
         Returns:
             Indices of recycled slots.
         """
-        scores = self.cstate.meta_retention_long_term
+        scores = self.cstate.metadata("long_term", "retention")
         mask = scores < threshold
         if not mask.any():
             return []

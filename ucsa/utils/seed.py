@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import random
+from collections.abc import Iterator
 from contextlib import contextmanager
 
 import numpy as np
@@ -40,7 +41,7 @@ def get_seed() -> int:
 
 
 @contextmanager
-def seed_context(seed: int):
+def seed_context(seed: int) -> Iterator[None]:
     """Temporarily seed every RNG.
 
     Args:

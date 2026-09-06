@@ -326,6 +326,19 @@ makes that signal explicit, localisable, and optimisable.
          less at late steps than early ones, which is the ordering the spec
          predicts, but the sign is not an improvement.
 
+## Gate status
+
+- [x] `ruff check ucsa tests scripts` clean.
+- [x] `mypy --strict ucsa/` clean -- 0 errors in 34 files, from 92 in 21.
+      Required resolving the numpy stub abort (`follow_imports = "skip"`,
+      keeping 3.11 as the target) and two typed accessors,
+      `PersistentCognitiveState.metadata` and
+      `TransformerOperator.transformer_blocks`, so the `Tensor | Module`
+      narrowing happens once rather than at ~30 call sites.
+- [x] `pytest -q` green: 572 passed.
+- [x] `CHANGELOG.md` and `TODO.md` updated in the same commit as the work.
+- [x] Smoke runs with no NaN before each phase was called done.
+
 ## Exit criteria
 
 - All checkboxes above are ticked.

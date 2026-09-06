@@ -140,7 +140,8 @@ class Expert(nn.Module):
         """
         gate = torch.nn.functional.silu(self.gate_proj(x))
         up = self.up_proj(x)
-        return self.down_proj(gate * up)
+        projected: Tensor = self.down_proj(gate * up)
+        return projected
 
 
 class MixtureOfExperts(nn.Module):

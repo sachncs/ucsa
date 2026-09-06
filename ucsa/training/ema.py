@@ -20,6 +20,7 @@ References:
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Any
 
 import torch
 from torch import Tensor, nn
@@ -46,7 +47,7 @@ class EMATargetEncoder(nn.Module):
         # sits on the same device as the teacher.
         self.target.eval()
 
-    @torch.no_grad()  # type: ignore[arg-type]
+    @torch.no_grad()
     def update(self, teacher: nn.Module) -> None:
         """Blend target weights toward teacher's weights (in place)."""
         m = self.momentum
@@ -60,9 +61,10 @@ class EMATargetEncoder(nn.Module):
         # at their initial-deep-copied values to avoid drift.
         # ponytail: skips buffers on purpose; EMA-only on parameters.
 
-    def forward(self, *args, **kwargs) -> dict[str, Tensor]:
+    def forward(self, *args: Any, **kwargs: Any) -> dict[str, Tensor]:
         """Run the target encoder; no grads."""
-        return self.target(*args, **kwargs)
+        outputs: dict[str, Tensor] = self.target(*args, **kwargs)
+        return outputs
 
 
 __all__ = ["EMATargetEncoder"]

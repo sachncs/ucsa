@@ -88,8 +88,10 @@ class TokenizerWrapper:
             pad_token_id: Override for the pad token id. Defaults to EOS
                 when the tokenizer lacks a pad token.
         """
-        self.tokenizer: PreTrainedTokenizerBase = AutoTokenizer.from_pretrained(
-            tokenizer_name
+        self.tokenizer: PreTrainedTokenizerBase = (
+            AutoTokenizer.from_pretrained(  # type: ignore[no-untyped-call]
+                tokenizer_name
+            )
         )
         if self.tokenizer.pad_token_id is None:
             if self.tokenizer.eos_token_id is None:
@@ -150,7 +152,8 @@ class TokenizerWrapper:
             padding=True,
             return_tensors="pt",
         )
-        return encoded["input_ids"]
+        input_ids: Tensor = encoded["input_ids"]
+        return input_ids
 
 
 class Perception(nn.Module):
@@ -193,7 +196,7 @@ class Perception(nn.Module):
             padding_idx=config.pad_token_id,
         )
         if config.add_modality_embedding:
-            self.modality_embedding = nn.Embedding(
+            self.modality_embedding: nn.Embedding | None = nn.Embedding(
                 len(config.modalities), config.hidden_size
             )
         else:
@@ -212,7 +215,8 @@ class Perception(nn.Module):
         Returns:
             Tensor of shape ``(batch, seq, hidden_size)``.
         """
-        return self.token_embedding(token_ids)
+        embedded: Tensor = self.token_embedding(token_ids)
+        return embedded
 
     def project(
         self,
@@ -243,7 +247,8 @@ class Perception(nn.Module):
                 dtype=torch.long,
             )
             projected = projected + self.modality_embedding(modality_ids)
-        return projected
+        result: Tensor = projected
+        return result
 
     def forward(
         self,

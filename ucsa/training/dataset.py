@@ -12,8 +12,9 @@ training. Streaming keeps memory pressure low for any dataset size.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
+from typing import Any
 
 import torch
 from datasets import load_dataset
@@ -76,7 +77,7 @@ class TextDataset:
         self.dataset = self._initialise_dataset()
         self.text_field = self._detect_text_field()
 
-    def _initialise_dataset(self) -> object:
+    def _initialise_dataset(self) -> Iterable[Mapping[str, Any]]:
         """Try to load the primary dataset; fall back on failure.
 
         Returns:
@@ -84,20 +85,22 @@ class TextDataset:
         """
         last_error: Exception | None = None
         try:
-            return load_dataset(
+            primary: Iterable[Mapping[str, Any]] = load_dataset(
                 self.config.primary_dataset,
                 split=self.config.primary_split,
                 streaming=self.config.streaming,
             )
+            return primary
         except Exception as exc:
             last_error = exc
         for dataset_name, split in self.config.fallback_chain:
             try:
-                return load_dataset(
+                fallback: Iterable[Mapping[str, Any]] = load_dataset(
                     dataset_name,
                     split=split,
                     streaming=self.config.streaming,
                 )
+                return fallback
             except Exception as exc:
                 last_error = exc
                 continue
@@ -220,7 +223,9 @@ def dataset_tokenizer(  # internal: helper for tests
     )
 
     class FakeDataset(TextDataset):
-        def _initialise_dataset(self_inner) -> object:  # type: ignore[override]
+        def _initialise_dataset(
+            self_inner,
+        ) -> Iterable[Mapping[str, Any]]:
             data = {
                 "text": [
                     "hello world " * 10,
@@ -228,9 +233,10 @@ def dataset_tokenizer(  # internal: helper for tests
                     "yet more tokens for the loader " * 12,
                 ]
             }
-            return Dataset.from_dict(data)
+            built: Iterable[Mapping[str, Any]] = Dataset.from_dict(data)
+            return built
 
-        def _detect_text_field(self_inner) -> str:  # type: ignore[override]
+        def _detect_text_field(self_inner) -> str:
             return "text"
 
     return FakeDataset(wrapper, config)

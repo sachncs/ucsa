@@ -21,7 +21,8 @@ import asyncio
 import contextlib
 import logging
 import threading
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
+from concurrent.futures import Future
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -224,7 +225,7 @@ class MemoryService:
         candidate: MemoryUpdate,
         cstate: PersistentCognitiveState,
         on_complete: VerificationHandler | None = None,
-    ) -> Awaitable[Any] | None:
+    ) -> Future[None] | None:
         """Submit a verification task.
 
         Args:
@@ -242,22 +243,26 @@ class MemoryService:
         )
         return self.submit(task)
 
-    def submit_prune(self, k: int) -> Awaitable[Any] | None:
+    def submit_prune(self, k: int) -> Future[None] | None:
         """Submit a pruning task."""
         return self.submit(PruneTask(k=k))
 
-    def submit(self, task: Task) -> Awaitable[Any] | None:
+    def submit(self, task: Task) -> Future[None] | None:
         """Submit a generic task to the queue.
 
         Args:
             task: The task to enqueue.
 
         Returns:
-            ``asyncio.Future`` if the service is running, else ``None``.
+            A ``concurrent.futures.Future`` if the service is running, else
+            ``None``. It is a thread-safe future rather than an
+            ``asyncio.Future`` because the worker owns its own loop.
         """
         if self.loop is None or not self.loop.is_running():
             return None
-        return asyncio.run_coroutine_threadsafe(self.queue.put(task), self.loop)
+        return asyncio.run_coroutine_threadsafe(
+            self.queue.put(task), self.loop
+        )
 
     def submit_sync_inline(self, task: Task) -> None:
         """internal: synchronously process a task without the worker.

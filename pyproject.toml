@@ -113,6 +113,15 @@ ignore_missing_imports = true
 plugins = []
 exclude = ["build/", "dist/", ".venv/"]
 
+# The installed numpy ships stubs written with 3.12 `type` statements,
+# which mypy refuses to parse under python_version 3.11 and then aborts
+# before checking anything. We only use numpy for RNG seeding, so skip
+# following its stubs rather than dropping 3.11 as the target.
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = false

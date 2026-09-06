@@ -122,7 +122,7 @@ class HeuristicVerifier(Verifier):
             Tuple ``(score, accepted)``.
         """
         long_term = cstate.get_bank("long_term")
-        usage = cstate.meta_usage_long_term
+        usage = cstate.metadata("long_term", "usage")
         novelty = HeuristicVerifier.novelty(candidate.tokens, long_term, usage)
         recency = HeuristicVerifier.recency(candidate.importance)
         usage_score = HeuristicVerifier.usage_signal(candidate.importance)
@@ -250,7 +250,8 @@ class LearnedVerifier(Verifier):
         """
         all_tokens = cstate.get_all_tokens()
         pooled = all_tokens.mean(dim=0)
-        return self.summarizer(pooled)
+        summary: Tensor = self.summarizer(pooled)
+        return summary
 
     def verify(
         self,
