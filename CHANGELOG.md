@@ -26,6 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ucsa.models.intent_descent.jepa_step_errors`: chain error per step, so
   the "late steps improve more than early ones" signature can be checked
   rather than assumed. Reported by `scripts/probe_origination.py`.
+- `ucsa.models.intent_descent`: `grad_norm_relative_threshold`, an early
+  stop measured against the input's own first-step gradient, plus
+  `intent_grad_norm_relative_threshold` on
+  `generate_with_intent_descent`. The absolute threshold cannot adapt:
+  intent gradient norms sit in a narrow band across inputs, so across 24
+  inputs any absolute value produced step counts of exactly `{1}`. The
+  relative criterion produced `{2, 3, 4, 5}`, dropping latency mean from
+  463 ms to 202 ms against a fixed `K=8` budget while raising its
+  coefficient of variation from 0.040 to 0.243.
 - `ucsa/infer.py`: `generate_with_intent_descent` and
   `sample_next_token`; `run_inference(intent_steps=...)` and
   `--intent-steps` / `--intent-learning-rate` on the CLI. `K=0` default.

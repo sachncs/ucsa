@@ -232,6 +232,56 @@ class TestOptimizeIntent:
         assert report.stopped_early
         assert len(report.steps) == 1
 
+    def test_relative_early_stop_is_configurable(self) -> None:
+        """A relative threshold stops against the input's own gradient.
+
+        An absolute threshold cannot adapt: intent gradient norms sit in a
+        narrow band across inputs, so any value stops every input at the
+        same step or none of them. Measured: absolute thresholds produced
+        step counts of exactly {1} across 24 inputs, while a relative
+        threshold produced {2, 3, 4, 5}.
+        """
+        model = tiny_model()
+        inputs, targets = tiny_inputs()
+        report = optimize_intent(
+            model,
+            inputs,
+            num_steps=6,
+            learning_rate=0.05,
+            targets=targets,
+            restore=True,
+            grad_norm_relative_threshold=0.99,
+        )
+        assert 1 <= len(report.steps) <= 6
+
+    def test_relative_threshold_of_zero_is_disabled(self) -> None:
+        """``0.0`` must not stop the loop."""
+        model = tiny_model()
+        report = optimize_intent(
+            model,
+            tiny_inputs()[0],
+            num_steps=3,
+            learning_rate=0.05,
+            restore=True,
+            grad_norm_relative_threshold=0.0,
+        )
+        assert len(report.steps) == 3
+        assert not report.stopped_early
+
+    def test_relative_threshold_of_one_stops_immediately(self) -> None:
+        """A threshold at the starting norm stops on the first check."""
+        model = tiny_model()
+        report = optimize_intent(
+            model,
+            tiny_inputs()[0],
+            num_steps=6,
+            learning_rate=0.05,
+            restore=True,
+            grad_norm_relative_threshold=1.0,
+        )
+        assert report.stopped_early
+        assert len(report.steps) == 1
+
     def test_forward_passes_are_counted(self) -> None:
         """The cost is reported so claims can be made at matched compute."""
         model = tiny_model()

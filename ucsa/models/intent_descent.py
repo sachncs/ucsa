@@ -325,6 +325,7 @@ def optimize_intent(
     num_steps: int = 0,
     learning_rate: float = 0.05,
     grad_norm_threshold: float = 0.0,
+    grad_norm_relative_threshold: float = 0.0,
     targets: Tensor | None = None,
     restore: bool = False,
     normalize_gradient: bool = True,
@@ -340,7 +341,15 @@ def optimize_intent(
             does nothing beyond one scoring pass.
         learning_rate: Step size on the intent bank.
         grad_norm_threshold: Stop once the intent gradient norm falls to or
-            below this. ``0.0`` disables the early stop.
+            below this absolute value. ``0.0`` disables it. An absolute
+            threshold does not adapt: intent gradient norms sit in a narrow
+            band across inputs, so any given value stops every input at the
+            same step or none of them.
+        grad_norm_relative_threshold: Stop once the gradient norm falls to
+            or below this fraction of its value at the first step. ``0.0``
+            disables it. This is the criterion that actually varies per
+            input, because it is measured against that input's own starting
+            gradient.
         targets: Optional target token ids. When given, the realised
             outcome is measured before and after so the caller can see
             whether the forward model was gamed.
@@ -382,6 +391,7 @@ def optimize_intent(
     was_training = model.training
     model.eval()
     report = DescentReport()
+    initial_grad_norm = 0.0
     snapshot = pcs_snapshot(model)
     context = {
         name: tensor for name, tensor in snapshot.items() if name != INTENT_BANK
@@ -418,7 +428,17 @@ def optimize_intent(
                     critic_score=critic_score(model, outputs),
                 )
             )
+            if step == 0:
+                initial_grad_norm = grad_norm
             if grad_norm <= grad_norm_threshold:
+                report.stopped_early = True
+                break
+            if (
+                grad_norm_relative_threshold > 0.0
+                and initial_grad_norm > 0.0
+                and grad_norm
+                <= grad_norm_relative_threshold * initial_grad_norm
+            ):
                 report.stopped_early = True
                 break
             if gradient is not None:

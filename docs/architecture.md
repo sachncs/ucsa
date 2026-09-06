@@ -76,6 +76,22 @@ defaults (``observation_mix=1.0``, ``observation_mix_decay=1.0``) hold
 ``alpha_k = 1``, never call ``G``, and reproduce the previous behaviour
 exactly, so origination is opt-in.
 
+## Inference-Time Origination Descent
+
+``ucsa.models.intent_descent.optimize_intent`` runs ``K`` steps of gradient
+descent on the ``intent`` bank alone, weights frozen, against the multi-step
+JEPA chain with EMA targets. ``K=0`` by default. Three properties matter:
+
+- Every candidate is evaluated from the *same* PCS. A forward pass rewrites
+  the banks, so speculative rollouts must be restored or the measured
+  improvement is state drift.
+- EMA targets are required. Without them both sides of each JEPA pair move
+  with the origination and the objective is self-consistency, not
+  prediction.
+- ``grad_norm_relative_threshold`` stops against the input's own starting
+  gradient, which is what makes the step count -- and therefore the cost --
+  vary per input. An absolute threshold does not adapt.
+
 ## Memory Pipeline
 
 ```

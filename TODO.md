@@ -292,6 +292,26 @@ makes that signal explicit, localisable, and optimisable.
       far below the granularity that reorders a multiple-choice ranking.
       That is the same finding as "no intervention flips the arg-max
       token", seen from the evaluation side.
+- [x] feat(descent): `grad_norm_relative_threshold` -- stop once the intent
+      gradient falls to a fraction of its own first-step value. An absolute
+      threshold cannot adapt; measured across 24 inputs it produced step
+      counts of exactly `{1}`, whatever the value.
+- [x] **`reasoning_iterations` adaptive and the latency signature confirmed.**
+      Trained model, 24 probe inputs, `K=8` budget:
+
+      | early stop | steps taken | distinct | latency mean | cv |
+      | --- | --- | --- | --- | --- |
+      | none (`K=0`) | 0.00 | {0} | 55.5 ms | 0.091 |
+      | none (fixed `K=8`) | 8.00 | {8} | 463.2 ms | 0.040 |
+      | absolute @2e-3 | 1.00 | {1} | 101.3 ms | 0.054 |
+      | relative @0.98 | 2.83 | {2,3,4,5} | 201.6 ms | **0.243** |
+      | relative @0.90 | 4.58 | {4,5,6,8} | 290.9 ms | 0.150 |
+
+      With the relative criterion the step count genuinely varies per input,
+      latency *mean* drops (463 -> 202 ms against the fixed budget) and its
+      *variance* rises (cv 0.040 -> 0.243) -- exactly the signature the spec
+      predicted. Fixed `K=8` costs 8.3x `K=0`, in line with the spec's "K=5
+      is roughly 10x".
 - [ ] **honest caveats, left open.**
       1. No intervention flips the arg-max token (0/16 in every config). The
          action *logits* move measurably and specifically, but at ppl 1.13

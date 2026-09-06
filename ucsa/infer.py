@@ -67,6 +67,7 @@ def generate_with_intent_descent(
     intent_steps: int = 0,
     intent_learning_rate: float = 0.05,
     intent_grad_norm_threshold: float = 0.0,
+    intent_grad_norm_relative_threshold: float = 0.0,
     target_encoder: torch.nn.Module | None = None,
 ) -> tuple[Tensor, list[DescentReport]]:
     """Generate tokens, optionally revising the origination before each one.
@@ -81,8 +82,12 @@ def generate_with_intent_descent(
         intent_steps: ``K``, inner descent steps per token. ``0`` disables
             the inner loop entirely, which is the default.
         intent_learning_rate: Step size on the intent bank.
-        intent_grad_norm_threshold: Early-stop threshold on the intent
-            gradient norm. ``0.0`` disables it.
+        intent_grad_norm_threshold: Absolute early-stop threshold on the
+            intent gradient norm. ``0.0`` disables it.
+        intent_grad_norm_relative_threshold: Early stop once the gradient
+            norm falls to this fraction of its first-step value. This is
+            the criterion that makes the step count vary per token, and so
+            makes the descent's cost adaptive.
         target_encoder: Optional EMA target encoder supplying the JEPA
             targets. Strongly recommended when ``intent_steps > 0``:
             without it the objective's targets move with the origination
@@ -110,6 +115,9 @@ def generate_with_intent_descent(
                     num_steps=intent_steps,
                     learning_rate=intent_learning_rate,
                     grad_norm_threshold=intent_grad_norm_threshold,
+                    grad_norm_relative_threshold=(
+                        intent_grad_norm_relative_threshold
+                    ),
                     target_encoder=target_encoder,
                 )
             )
