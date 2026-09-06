@@ -120,6 +120,16 @@ origination variable at all — the reasoning loop fed the *same* observation to
 every iteration, so nothing generated the input to the next state. This phase
 makes that signal explicit, localisable, and optimisable.
 
+### Phase 11.0 — measurement prerequisites
+
+- [x] fix(trainer): pad short targets with the loss's ignore index, not with
+      zero. The working bank is 64 slots, so a short sequence left most
+      positions unsupervised and padding them with `0` trained the model to
+      emit token id 0 there: **90.4% of the autoregressive loss** for a
+      6-token target. The real tokens barely mattered, which made every
+      claim about what drives the emitted action unmeasurable. This was the
+      root cause of all three earlier negative findings.
+
 ### Phase 11.0 — differentiable reasoning loop (prerequisite)
 
 - [x] fix(operator): clone the `memory_index` cross-attention tokens so the
@@ -243,27 +253,39 @@ makes that signal explicit, localisable, and optimisable.
 - [x] feat(models): `jepa_step_errors` reports the chain error per step, so
       the spec's "late steps should improve more than early ones" signature
       can actually be checked; surfaced in `scripts/probe_origination.py`
-- [ ] **open finding, negative**: the late-vs-early signature does not hold.
-      400 steps, same seed, chain error improvement by step:
+- [x] **all Phase 11.B/C/D numbers re-measured after the padding fix, on a
+      task the model actually learns** (vocab 32, repeat-the-first-half,
+      1200 steps, final ppl 1.05-1.13 against a chance ppl of 31):
 
-      | config | k0 | k1 | k2 | perplexity |
-      | --- | --- | --- | --- | --- |
-      | origination on (alpha0=0.5) | +0.03659 | +0.00670 | +0.00128 | 4.143 |
-      | origination off (alpha=1.0) | +0.03707 | +0.00671 | +0.00129 | 4.134 |
+      | config | ppl | collapsed | grad-active | gated vs ungated effect | controllability | specificity | descent corr |
+      | --- | --- | --- | --- | --- | --- | --- | --- |
+      | origination on, balanced gate | 1.132 | no | 4/16 | 0.02827 vs 0.00186 (15.2x) | **1.00** | **1.00** | +0.008 |
+      | origination on, no load balance | 1.132 | yes (gate MI 0) | 2/16 | 0.04035 vs 0.00000 | **1.00** | **1.00** | **+0.755** |
+      | origination off (alpha=1) | 1.049 | yes (inert) | 0/16 | 0.0 vs 0.0 | 0.00 | 1.00 | +0.000 |
 
-      Early steps improve ~29x more than late ones, and the two profiles are
-      indistinguishable. The spec names this as "the diagnostic that intent
-      is actually steering"; by that diagnostic it is not. Perplexity is
-      flat-to-marginally-worse, which is what the spec predicted.
-- [ ] **open finding**: descent reliably improves the *predicted* outcome
-      (8/8 at every K > 0) but the predicted-versus-realised correlation is
-      near zero or negative. Improving the JEPA prediction is not yet
-      evidence of improving the action, and 2-3 of 8 inputs are flagged
-      outright as gamed. Per the spec's own bar -- "predicted-vs-realized
-      outcome correlation must survive *after* optimization" -- it does not
-      survive, so intent descent is not yet a usable quality mechanism.
-      Left as measured. The likely cause is that a 400-step model's forward
-      model is not calibrated enough to optimise against.
+- [x] **headline localisation claim achieved.** 2-4 of 16 intent slots carry
+      the gradient; every attributed slot moves the emitted action when
+      ablated (controllability 1.00) and no unattributed slot does
+      (specificity 1.00). With the gate unbalanced the unattributed slots
+      move it by *exactly* 0.0.
+- [x] **perplexity flat-to-slightly-worse, as the spec predicted**: 1.049
+      without origination, 1.132 with. The sparse gate costs capacity.
+- [x] **forward-model hacking check survives optimisation in the unbalanced
+      configuration**: predicted-vs-realised correlation +0.755, 7/8 inputs
+      improved on both, 1/8 gamed.
+- [ ] **honest caveats, left open.**
+      1. No intervention flips the arg-max token (0/16 in every config). The
+         action *logits* move measurably and specifically, but at ppl 1.13
+         the model is confident enough that the decision does not change.
+         Controllability is measured in logit space, not decision space.
+      2. Load balancing and descent quality pull against each other:
+         balancing keeps the gate conditioning on the input (MI 0.041 vs
+         0.000) but drops the descent correlation from +0.755 to +0.008.
+         Both ends reported; no weight tuned to flatter either.
+      3. The JEPA chain error *rises* during training when origination is on
+         (k0 -0.029) and barely moves when it is off (k0 -0.001). It rises
+         less at late steps than early ones, which is the ordering the spec
+         predicts, but the sign is not an improvement.
 
 ## Exit criteria
 

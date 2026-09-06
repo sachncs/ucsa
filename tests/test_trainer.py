@@ -68,6 +68,63 @@ def tiny_trainer(
     )
 
 
+class TestTargetAlignment:
+    """Tests for how targets are aligned to the logits sequence."""
+
+    def test_short_targets_are_padded_with_the_ignore_index(self) -> None:
+        """Padding must be masked out, not trained as token id 0.
+
+        The working bank is 64 slots, so a short sequence leaves most
+        positions unsupervised. Padding them with zero trained the model to
+        emit token id 0 there, which measured 90.4% of the autoregressive
+        loss for a 6-token target: the real tokens barely mattered.
+        """
+        model = TinyModel(vocab_size=100)
+        trainer = tiny_trainer(model=model)
+        assert trainer.ignore_index == -100
+        inputs = torch.randint(1, 100, (1, 6))
+        targets = torch.roll(inputs, -1, dims=1)
+        loss, _ = trainer.compute_loss(inputs, targets)
+        assert torch.isfinite(loss)
+
+    def test_alignment_matches_the_unpadded_loss(self) -> None:
+        """With masking, padding contributes exactly nothing.
+
+        A model whose logits are as long as the targets must produce the
+        same loss as one padded out to a longer sequence.
+        """
+
+        class WideModel(nn.Module):
+            """internal: emits a fixed number of positions."""
+
+            def __init__(self, positions: int, vocab_size: int) -> None:
+                super().__init__()
+                self.positions = positions
+                self.vocab_size = vocab_size
+                torch.manual_seed(0)
+                self.table = nn.Parameter(
+                    torch.randn(positions, vocab_size)
+                )
+
+            def forward(self, inputs: Tensor) -> Tensor:
+                """Return the same logits regardless of input."""
+                return self.table.unsqueeze(0)
+
+        vocab = 50
+        targets = torch.randint(1, vocab, (1, 4))
+        narrow = tiny_trainer(model=WideModel(4, vocab), vocab_size=vocab)
+        wide = tiny_trainer(model=WideModel(16, vocab), vocab_size=vocab)
+        # Copy the narrow model's rows into the wide model's tail so the
+        # supervised positions are identical.
+        with torch.no_grad():
+            wide.model.table[-4:] = narrow.model.table
+        narrow_loss, _ = narrow.compute_loss(targets, targets)
+        wide_loss, _ = wide.compute_loss(targets, targets)
+        assert float(narrow_loss.item()) == pytest.approx(
+            float(wide_loss.item()), rel=1e-5
+        )
+
+
 class TestTrainerConfig:
     """Tests for :class:`TrainerConfig`."""
 

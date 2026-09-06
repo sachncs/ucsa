@@ -179,6 +179,9 @@ class Trainer:
         # usages. Variance and mutual information are only meaningful
         # across *differing* inputs, and consecutive steps see different
         # batches.
+        self.ignore_index: int = int(
+            getattr(getattr(loss_fn, "ar", None), "ignore_index", -100)
+        )
         self.intent_state_window: deque[Tensor] = deque(
             maxlen=config.intent_window_size
         )
@@ -279,7 +282,16 @@ class Trainer:
             targets = targets[:, -logits.shape[1]:]
         elif targets.shape[1] < logits.shape[1]:
             pad = logits.shape[1] - targets.shape[1]
-            targets = torch.nn.functional.pad(targets, (pad, 0))
+            # Pad with the loss's ignore index, not with zero. Padding with
+            # zero trains every spare working slot to emit token id 0, and
+            # with a 64-slot working bank against a short sequence that is
+            # the overwhelming majority of the objective: measured at 90.4%
+            # of the autoregressive loss for a 6-token target. The real
+            # tokens then barely matter, which makes any claim about what
+            # drives the emitted action unmeasurable.
+            targets = torch.nn.functional.pad(
+                targets, (pad, 0), value=self.ignore_index
+            )
         active = self.curriculum.active_components()
         kwargs: dict[str, Any] = {}
         # Prefer real model aux outputs over randn dummies. Fall back only

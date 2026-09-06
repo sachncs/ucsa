@@ -295,6 +295,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   would now be wrong because `UCSA.forward` returns extra keys.
 
 ### Fixed
+- `Trainer.compute_loss` padded short targets with `0` instead of with the
+  loss's ignore index. The working bank is 64 slots, so a short sequence
+  left most positions unsupervised, and padding them with zero trained the
+  model to emit token id 0 there: **90.4% of the autoregressive loss** for
+  a 6-token target came from padding. The real tokens barely mattered,
+  which made every claim about what drives the emitted action
+  unmeasurable, and it was the root cause of the earlier negative
+  origination findings. `Trainer.ignore_index` now supplies the pad value.
 - The reasoning loop was not differentiable end to end. Because
   `PersistentCognitiveState.set_bank` copies under `torch.no_grad`,
   the autograd graph was severed at every operator write-back: an AR
