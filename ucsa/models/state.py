@@ -51,6 +51,8 @@ from dataclasses import dataclass, field
 import torch
 from torch import Tensor, nn
 
+INTENT_BANK = "intent"
+
 BANK_NAMES: tuple[str, ...] = (
     "working",
     "long_term",
@@ -488,6 +490,7 @@ class PersistentCognitiveState(nn.Module):
 __all__ = [
     "BANK_NAMES",
     "DEFAULT_BANK_SIZES",
+    "INTENT_BANK",
     "BankSpec",
     "PCSConfig",
     "PersistentCognitiveState",

@@ -18,6 +18,24 @@ Implements the eleven metrics called out in the project specification:
 - ``throughput``        -- tokens processed per second.
 - ``inference_latency`` -- wall-clock seconds per inference step.
 
+Plus the intent-collapse diagnostics, which answer one question: is the
+origination generator actually *using* the intent bank, or has it learned to
+ignore it so the reasoning loop quietly degenerates to feeding the same
+observation every iteration while every loss still looks healthy? That
+failure is silent in every other metric here, so it gets its own readings:
+
+- ``intent_state_variance`` -- how much the origination state differs
+  across differing inputs. Zero means one constant signal precedes every
+  action.
+- ``intent_gate_entropy``   -- entropy of the gate's slot usage. Zero means
+  one slot wins everything; ``log(num_slots)`` means the gate is uniform and
+  carries no information.
+- ``intent_gate_mutual_info`` -- mutual information between which input was
+  seen and which slots were gated. Zero is the collapse signature: the gate
+  is not conditioning on the input.
+- ``intent_read_share``     -- fraction of the generator's output magnitude
+  contributed by the intent read rather than the working read.
+
 Each metric supports ``update``, ``reset``, ``value``, and
 ``tensorboard_log``.
 """
@@ -187,12 +205,124 @@ def memory_replacement_rate(
     return float(num_recycled) / float(total_slots)
 
 
+def intent_state_variance(states: Sequence[Tensor]) -> float:
+    """Mean per-feature variance of the origination state across inputs.
+
+    Args:
+        states: One origination-state tensor per input, each of shape
+            ``(intent_tokens, hidden_size)``.
+
+    Returns:
+        Mean variance across inputs, or ``0.0`` for fewer than two inputs.
+        Exactly ``0.0`` means the same signal preceded every action, which
+        is what a static bank gives you.
+    """
+    if len(states) < 2:
+        return 0.0
+    stacked = torch.stack([state.detach().float() for state in states])
+    return float(stacked.var(dim=0, unbiased=False).mean().item())
+
+
+def intent_gate_usage(gate_weights: Tensor, num_slots: int) -> Tensor:
+    """Fraction of query tokens routed to each intent slot.
+
+    Args:
+        gate_weights: Gate weights of shape ``(..., num_slots)``.
+        num_slots: Number of intent slots.
+
+    Returns:
+        Tensor of shape ``(num_slots,)`` summing to ``1.0`` when any slot
+        was used.
+    """
+    if gate_weights.numel() == 0:
+        return torch.zeros(num_slots)
+    used = (gate_weights.detach() > 0).float().reshape(-1, num_slots)
+    counts = used.sum(dim=0)
+    total = counts.sum()
+    if float(total) <= 0.0:
+        return torch.zeros(num_slots)
+    return counts / total
+
+
+def intent_gate_entropy(usage: Tensor) -> float:
+    """Entropy of the gate's slot-usage distribution, in nats.
+
+    Args:
+        usage: Slot-usage distribution of shape ``(num_slots,)``.
+
+    Returns:
+        Entropy in nats. ``0.0`` means a single slot absorbed every query;
+        ``log(num_slots)`` means the gate is uniform and therefore carries
+        no information about the input.
+    """
+    if usage.numel() == 0:
+        return 0.0
+    probabilities = usage.detach().float()
+    support = probabilities > 0.0
+    if not bool(support.any()):
+        return 0.0
+    kept = probabilities[support]
+    return float(-(kept * kept.log()).sum().item())
+
+
+def intent_gate_mutual_info(usages: Sequence[Tensor]) -> float:
+    """Mutual information between input identity and gated slot, in nats.
+
+    Treats each input as equally likely and each per-input usage vector as
+    ``p(slot | input)``. ``I(input; slot) = H(slot) - E_input[H(slot |
+    input)]``. Zero means the gate routes the same way whatever it is
+    shown, which is the collapse signature: the origination is not
+    conditioning on the situation.
+
+    Args:
+        usages: One usage distribution per input, from
+            :func:`intent_gate_usage`.
+
+    Returns:
+        Mutual information in nats, or ``0.0`` for fewer than two inputs.
+    """
+    if len(usages) < 2:
+        return 0.0
+    stacked = torch.stack([usage.detach().float() for usage in usages])
+    if float(stacked.sum()) <= 0.0:
+        return 0.0
+    marginal = stacked.mean(dim=0)
+    conditional = float(
+        sum(intent_gate_entropy(usage) for usage in usages) / len(usages)
+    )
+    return max(0.0, intent_gate_entropy(marginal) - conditional)
+
+
+def intent_read_share(intent_read: Tensor, working_read: Tensor) -> float:
+    """Fraction of the generator's read magnitude coming from intent.
+
+    Args:
+        intent_read: The gated intent read.
+        working_read: The dense working-memory read.
+
+    Returns:
+        Value in ``[0, 1]``. Near ``0.0`` means the generator is driven by
+        working memory and is ignoring the origination bank.
+    """
+    intent_norm = float(intent_read.detach().float().norm())
+    working_norm = float(working_read.detach().float().norm())
+    total = intent_norm + working_norm
+    if total <= 0.0:
+        return 0.0
+    return intent_norm / total
+
+
 __all__ = [
     "MetricState",
     "MetricsRegistry",
     "attention_entropy",
     "expert_utilization",
     "gpu_memory_bytes",
+    "intent_gate_entropy",
+    "intent_gate_mutual_info",
+    "intent_gate_usage",
+    "intent_read_share",
+    "intent_state_variance",
     "memory_replacement_rate",
     "memory_utilization",
     "perplexity_from_loss",
@@ -219,6 +349,10 @@ DEFAULT_METRIC_NAMES: tuple[str, ...] = (
     "gpu_memory",
     "throughput",
     "inference_latency",
+    "intent_state_variance",
+    "intent_gate_entropy",
+    "intent_gate_mutual_info",
+    "intent_read_share",
 )
 
 

@@ -35,7 +35,7 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor, nn
 
-from ucsa.models.state import PersistentCognitiveState
+from ucsa.models.state import INTENT_BANK, PersistentCognitiveState
 from ucsa.models.transition_operator import StateTransitionOperator
 
 
@@ -121,6 +121,7 @@ class ReasoningLoop(nn.Module):
         operator: StateTransitionOperator,
         config: ReasoningLoopConfig | None = None,
         origination: nn.Module | None = None,
+        intent_update: nn.Module | None = None,
     ) -> None:
         """Initialise the reasoning loop.
 
@@ -130,6 +131,10 @@ class ReasoningLoop(nn.Module):
             origination: Optional origination generator ``G``, called as
                 ``G(intent, working, observation)``. When ``None`` the loop
                 feeds the exogenous observation to every iteration.
+            intent_update: Optional module refreshing the origination state
+                per iteration, called as ``update(intent, working)``. When
+                ``None`` the origination state stays at the bank's
+                parameter value and is therefore identical for every input.
         """
         super().__init__()
         if config is None:
@@ -137,11 +142,14 @@ class ReasoningLoop(nn.Module):
         self.config = config
         self.operator = operator
         self.origination = origination
+        self.intent_update = intent_update
         self.iteration_count: int = 0
         self.last_intermediates: list[Tensor] = []
         self.last_bank_tensors: dict[str, Tensor] | None = None
         self.last_observation_weights: list[float] = []
         self.last_generated_inputs: list[Tensor] = []
+        self.intent_state: Tensor | None = None
+        self.last_intent_states: list[Tensor] = []
 
     def reset(self) -> None:
         """Reset per-request state (KV cache) and clear intermediates."""
@@ -151,6 +159,8 @@ class ReasoningLoop(nn.Module):
         self.last_bank_tensors = None
         self.last_observation_weights = []
         self.last_generated_inputs = []
+        self.intent_state = None
+        self.last_intent_states = []
 
     def differentiable_bank(self, name: str) -> Tensor | None:
         """Return the differentiable post-loop tensor for one bank.
@@ -236,6 +246,8 @@ class ReasoningLoop(nn.Module):
         self.last_bank_tensors = None
         self.last_observation_weights = []
         self.last_generated_inputs = []
+        self.intent_state = None
+        self.last_intent_states = []
         cstate = self.inject_observation(cstate, observation)
         current = observation
         for iteration in range(self.config.num_iterations):
@@ -279,13 +291,40 @@ class ReasoningLoop(nn.Module):
         self.last_observation_weights.append(weight)
         if self.origination is None or weight >= 1.0:
             return observation
-        intent = self.read_bank(cstate, "intent")
         working = self.read_bank(cstate, "working")
+        intent = self.current_intent(cstate, working)
         generated: Tensor = self.origination(intent, working, current)
         self.last_generated_inputs.append(generated)
         if weight <= 0.0:
             return generated
         return weight * observation + (1.0 - weight) * generated
+
+    def current_intent(
+        self,
+        cstate: PersistentCognitiveState,
+        working: Tensor,
+    ) -> Tensor:
+        """Return the origination state for this iteration.
+
+        The state starts from the ``intent`` bank -- which is a parameter,
+        and therefore the same for every input -- and is then refreshed
+        residually from working memory, so the signal that precedes an
+        action depends on the situation. The residual form keeps the
+        learned or inference-time-optimised bank value intact.
+
+        Args:
+            cstate: The current PCS.
+            working: The working bank for this iteration.
+
+        Returns:
+            Tensor of shape ``(intent_tokens, hidden_size)``.
+        """
+        if self.intent_state is None:
+            self.intent_state = self.read_bank(cstate, INTENT_BANK)
+        if self.intent_update is not None:
+            self.intent_state = self.intent_update(self.intent_state, working)
+        self.last_intent_states.append(self.intent_state)
+        return self.intent_state
 
     def read_bank(self, cstate: PersistentCognitiveState, name: str) -> Tensor:
         """Read a bank for the generator, preferring the differentiable one.

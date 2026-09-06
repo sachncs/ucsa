@@ -43,10 +43,17 @@ from typing import TYPE_CHECKING, Any
 import torch
 from torch import Tensor
 
+from ucsa.models.state import INTENT_BANK
+from ucsa.training.metrics import (
+    intent_gate_entropy,
+    intent_gate_mutual_info,
+    intent_gate_usage,
+    intent_read_share,
+    intent_state_variance,
+)
+
 if TYPE_CHECKING:
     from ucsa.models.ucsa import UCSA
-
-INTENT_BANK = "intent"
 
 
 @dataclass
@@ -405,14 +412,167 @@ def counterfactual_controllability(
     )
 
 
+@dataclass
+class CollapseReport:
+    """Whether the generator is actually using the origination bank.
+
+    Attributes:
+        state_variance: Mean variance of the origination state across the
+            probed inputs. Exactly ``0.0`` means one constant signal
+            preceded every action.
+        gate_entropy: Mean entropy of the gate's slot usage, in nats.
+        gate_entropy_max: ``log(num_slots)``, the uniform-gate ceiling.
+        gate_mutual_info: Mutual information between input identity and
+            gated slot, in nats. ``0.0`` is the collapse signature.
+        read_share: Mean fraction of the generator's read magnitude coming
+            from intent rather than working memory.
+        slots_used: Number of distinct slots gated across all inputs.
+        num_slots: Size of the intent bank.
+        collapsed: ``True`` when the diagnostic says the bank is being
+            ignored.
+        reasons: Human-readable reasons behind ``collapsed``.
+    """
+
+    state_variance: float
+    gate_entropy: float
+    gate_entropy_max: float
+    gate_mutual_info: float
+    read_share: float
+    slots_used: int
+    num_slots: int
+    collapsed: bool
+    reasons: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serialisable view."""
+        return {
+            "state_variance": self.state_variance,
+            "gate_entropy": self.gate_entropy,
+            "gate_entropy_max": self.gate_entropy_max,
+            "gate_mutual_info": self.gate_mutual_info,
+            "read_share": self.read_share,
+            "slots_used": self.slots_used,
+            "num_slots": self.num_slots,
+            "collapsed": self.collapsed,
+            "reasons": self.reasons,
+        }
+
+
+def intent_collapse_report(
+    model: UCSA,
+    inputs: Sequence[Tensor],
+    variance_floor: float = 1e-8,
+    mutual_info_floor: float = 1e-4,
+    read_share_floor: float = 0.05,
+) -> CollapseReport:
+    """Measure whether ``G`` is ignoring the intent bank.
+
+    This is the diagnostic that has to be read *before* trusting any other
+    origination number. Collapse is silent everywhere else: the generator
+    learns to ignore the bank, the loop degenerates to feeding the same
+    observation every iteration, and every loss still looks healthy.
+
+    Args:
+        model: The model to probe.
+        inputs: Two or more differing token batches. Variance and mutual
+            information are measured across them.
+        variance_floor: Origination-state variance at or below this counts
+            as a constant signal.
+        mutual_info_floor: Gate mutual information at or below this counts
+            as a gate that ignores its input.
+        read_share_floor: Intent read share at or below this counts as a
+            generator driven by working memory alone.
+
+    Returns:
+        The :class:`CollapseReport`.
+
+    Raises:
+        ValueError: If fewer than two inputs are given.
+    """
+    if len(inputs) < 2:
+        raise ValueError(
+            f"need at least two differing inputs, got {len(inputs)}."
+        )
+    num_slots = model.pcs.bank_size(INTENT_BANK)
+    generator = model.heads.origination
+    states: list[Tensor] = []
+    usages: list[Tensor] = []
+    shares: list[float] = []
+    used_slots: set[int] = set()
+    snapshot = pcs_snapshot(model)
+    try:
+        for batch in inputs:
+            with torch.no_grad():
+                action_logits(model, batch)
+            pcs_restore(model, snapshot)
+            loop_states = model.reasoning_loop.last_intent_states
+            if loop_states:
+                states.append(loop_states[-1].detach())
+            gate_weights = generator.last_gate_weights
+            if gate_weights is not None:
+                usage = intent_gate_usage(gate_weights, num_slots)
+                usages.append(usage)
+                used_slots.update(
+                    int(i) for i in (usage > 0.0).nonzero().flatten()
+                )
+            intent_read = generator.last_intent_read
+            working_read = generator.last_working_read
+            if intent_read is not None and working_read is not None:
+                shares.append(intent_read_share(intent_read, working_read))
+    finally:
+        pcs_restore(model, snapshot)
+
+    variance = intent_state_variance(states)
+    entropy = (
+        float(sum(intent_gate_entropy(u) for u in usages) / len(usages))
+        if usages
+        else 0.0
+    )
+    mutual_info = intent_gate_mutual_info(usages)
+    share = float(sum(shares) / len(shares)) if shares else 0.0
+    ceiling = float(torch.tensor(float(num_slots)).log()) if num_slots else 0.0
+
+    reasons: list[str] = []
+    if not states:
+        reasons.append("generator never ran: no origination state observed")
+    if variance <= variance_floor:
+        reasons.append(
+            f"origination state is constant across inputs "
+            f"(variance {variance:.3e} <= {variance_floor:.3e})"
+        )
+    if mutual_info <= mutual_info_floor:
+        reasons.append(
+            f"gate does not condition on the input "
+            f"(mutual info {mutual_info:.3e} <= {mutual_info_floor:.3e})"
+        )
+    if share <= read_share_floor:
+        reasons.append(
+            f"generator is driven by working memory, not intent "
+            f"(read share {share:.3f} <= {read_share_floor:.3f})"
+        )
+    return CollapseReport(
+        state_variance=variance,
+        gate_entropy=entropy,
+        gate_entropy_max=ceiling,
+        gate_mutual_info=mutual_info,
+        read_share=share,
+        slots_used=len(used_slots),
+        num_slots=num_slots,
+        collapsed=bool(reasons),
+        reasons=reasons,
+    )
+
+
 __all__ = [
     "INTENT_BANK",
     "AttributionReport",
+    "CollapseReport",
     "ControllabilityReport",
     "InterventionReport",
     "action_logits",
     "action_readout",
     "counterfactual_controllability",
+    "intent_collapse_report",
     "intent_attribution",
     "intervene_intent",
 ]

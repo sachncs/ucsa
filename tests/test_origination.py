@@ -8,6 +8,7 @@ import torch
 from ucsa.models.origination import (
     counterfactual_controllability,
     intent_attribution,
+    intent_collapse_report,
     intervene_intent,
 )
 from ucsa.models.ucsa import UCSA, UCSAConfig
@@ -168,3 +169,86 @@ class TestControllability:
         before = model.pcs.get_bank("intent").detach().clone()
         counterfactual_controllability(model, tiny_inputs())
         assert torch.allclose(model.pcs.get_bank("intent").detach(), before)
+
+
+def probe_batches(count: int = 4) -> list[torch.Tensor]:
+    """Return several differing token batches."""
+    generator = torch.Generator().manual_seed(3)
+    return [
+        torch.randint(0, 100, (1, 6), generator=generator) for _ in range(count)
+    ]
+
+
+class TestCollapseReport:
+    """Tests for :func:`intent_collapse_report`."""
+
+    def test_flags_a_generator_that_never_ran(self) -> None:
+        """With ``alpha=1`` the origination path is inert, so it collapses."""
+        report = intent_collapse_report(
+            tiny_model(observation_mix=1.0), probe_batches()
+        )
+        assert report.collapsed
+        assert any("never ran" in reason for reason in report.reasons)
+
+    def test_flags_a_static_intent_bank(self) -> None:
+        """``intent_update_scale=0`` gives one signal for every input.
+
+        A bank that cannot vary across inputs is a constant bias, not an
+        origination signal, and its variance is zero by construction.
+        """
+        report = intent_collapse_report(
+            tiny_model(intent_update_scale=0.0), probe_batches()
+        )
+        assert report.state_variance == 0.0
+        assert report.collapsed
+        assert any("constant across inputs" in r for r in report.reasons)
+
+    def test_active_origination_varies_across_inputs(self) -> None:
+        """With the refresh enabled the state depends on the input."""
+        report = intent_collapse_report(
+            tiny_model(intent_update_scale=0.1), probe_batches()
+        )
+        assert report.state_variance > 0.0
+
+    def test_entropy_is_bounded_by_the_uniform_ceiling(self) -> None:
+        """Gate entropy cannot exceed ``log(num_slots)``."""
+        report = intent_collapse_report(tiny_model(), probe_batches())
+        assert 0.0 <= report.gate_entropy <= report.gate_entropy_max + 1e-6
+        assert report.num_slots == 16
+
+    def test_sparse_gate_uses_a_subset_of_slots(self) -> None:
+        """A ``top_k`` gate cannot route to every slot for one input."""
+        report = intent_collapse_report(
+            tiny_model(origination_top_k=1), probe_batches(2)
+        )
+        assert 0 < report.slots_used <= report.num_slots
+
+    def test_requires_two_inputs(self) -> None:
+        """Variance and mutual information need differing inputs."""
+        with pytest.raises(ValueError):
+            intent_collapse_report(tiny_model(), probe_batches(1))
+
+    def test_probe_restores_the_pcs(self) -> None:
+        """The diagnostic is read-only."""
+        model = tiny_model()
+        before = {
+            name: model.pcs.get_bank(name).detach().clone()
+            for name in model.pcs.bank_order
+        }
+        intent_collapse_report(model, probe_batches())
+        for name, tensor in before.items():
+            assert torch.allclose(model.pcs.get_bank(name).detach(), tensor)
+
+    def test_report_is_serialisable(self) -> None:
+        """``to_dict`` returns plain Python values."""
+        payload = intent_collapse_report(
+            tiny_model(), probe_batches()
+        ).to_dict()
+        assert set(payload) >= {
+            "state_variance",
+            "gate_entropy",
+            "gate_mutual_info",
+            "read_share",
+            "collapsed",
+            "reasons",
+        }

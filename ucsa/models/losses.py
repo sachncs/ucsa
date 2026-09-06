@@ -31,16 +31,25 @@ class LossWeights:
         router: Coefficient for the MoE load-balancing loss.
         reconstruction: Coefficient for the input-reconstruction loss
             (LeWM-style capacity bottleneck).
+        origination: Coefficient for the origination gate's load-balancing
+            loss. Without it the gate collapses onto a fixed pair of intent
+            slots and stops conditioning on the input, which the
+            ``intent_gate_mutual_info`` diagnostic reports as zero.
     """
 
     jepa: float = 0.1
     memory: float = 0.01
     router: float = 0.01
     reconstruction: float = 0.1
+    origination: float = 0.01
 
     def __post_init__(self) -> None:
         if self.jepa < 0.0:
             raise ValueError(f"jepa must be non-negative, got {self.jepa}.")
+        if self.origination < 0.0:
+            raise ValueError(
+                f"origination must be non-negative, got {self.origination}."
+            )
         if self.memory < 0.0:
             raise ValueError(f"memory must be non-negative, got {self.memory}.")
         if self.router < 0.0:
@@ -347,6 +356,7 @@ class UCSACombinedLoss(nn.Module):
         reconstructed: Tensor | None = None,
         target_embeddings: Tensor | None = None,
         jepa_multi_step: list[tuple[Tensor, Tensor]] | None = None,
+        origination_aux_loss: Tensor | None = None,
     ) -> tuple[Tensor, dict[str, float]]:
         """Compute the combined loss.
 
@@ -363,6 +373,8 @@ class UCSACombinedLoss(nn.Module):
             jepa_multi_step: Optional list of multi-step JEPA pairs.
                 When provided, this takes precedence over the
                 single-step ``jepa_predicted``/``jepa_target`` pair.
+            origination_aux_loss: Optional pre-weighted load-balancing loss
+                from the origination gate.
         """
         total = self.ar(logits, targets)
         components = {"ar": float(total.item())}
@@ -401,6 +413,9 @@ class UCSACombinedLoss(nn.Module):
             rec_loss = self.reconstruction(reconstructed, target_embeddings)
             total = total + self.weights.reconstruction * rec_loss
             components["reconstruction"] = float(rec_loss.item())
+        if origination_aux_loss is not None:
+            total = total + self.weights.origination * origination_aux_loss
+            components["origination"] = float(origination_aux_loss.item())
         return total, components
 
 

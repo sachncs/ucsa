@@ -407,8 +407,12 @@ class TestTransformerOperator:
         first_lengths = [b.self_attn.kv_cache["length"] for b in operator.blocks]
         operator(state, torch.randn(1, 5, 32))
         second_lengths = [b.self_attn.kv_cache["length"] for b in operator.blocks]
-        # Second call adds (state.total_tokens + 5) tokens to the cache.
-        expected_delta = state.total_tokens + 5
+        # Second call adds (streamed PCS tokens + 5) to the cache. The intent
+        # bank is not streamed, so it does not contribute.
+        streamed = sum(
+            state.bank_size(name) for name in operator.stream_bank_names
+        )
+        expected_delta = streamed + 5
         assert all(
             s == f + expected_delta
             for s, f in zip(second_lengths, first_lengths, strict=False)

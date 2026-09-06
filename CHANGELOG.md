@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ucsa.training.metrics`: the intent-collapse diagnostics --
+  `intent_state_variance`, `intent_gate_usage`, `intent_gate_entropy`,
+  `intent_gate_mutual_info`, `intent_read_share` -- added to
+  `DEFAULT_METRIC_NAMES` alongside `jepa_loss`. `Trainer` records them
+  every step, computing variance and mutual information over a rolling
+  window (`TrainerConfig.intent_window_size`, default 16) because those
+  two are only meaningful *across differing inputs* and consecutive
+  steps see different batches.
+- `ucsa.models.origination.intent_collapse_report`: the combined reading,
+  with an explicit `collapsed` verdict and human-readable reasons.
+- `ucsa.models.projection_heads.IntentUpdate`: refreshes the origination
+  state per iteration from working memory,
+  `intent_{k+1} = intent_k + scale * Attn(q=intent_k, kv=working_k)`.
+  Residual on purpose so the learned or inference-time-optimised bank
+  value survives. `intent_update_scale` (default 0.1) on `HeadConfig`,
+  `HeadSpec`, and `UCSAConfig`; `0.0` restores the static bank.
+- `ucsa.models.losses.LossWeights.origination` (default 0.01) and the
+  `origination_aux_loss` term in `UCSACombinedLoss`, wired by the
+  trainer.
 - `ucsa.models.moe.load_balancing_loss` and `top_k_mask`: the routing
   machinery extracted as module-level functions so the origination gate
   reuses it with intent slots in place of experts.
@@ -180,6 +199,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lint fixes: ruff clean on the entire `ucsa/` and `tests/` tree.
 
 ### Changed
+- `ucsa.models.projection_heads.OriginationHead`: the intent read and the
+  working read now get their *own* softmax. Sharing one softmax over the
+  concatenation put a handful of gated intent slots in direct competition
+  with every working slot, so with 2 gated slots against 64 dense ones
+  the origination received about 3% of the attention mass and `G`
+  effectively ignored the bank it is meant to be driven by. Zeroing one
+  intent slot now moves `G`'s output by 39% against 2% for a working
+  slot. Also stashes `last_intent_read` / `last_working_read` for the
+  diagnostics.
+- `ucsa.models.transformer_operator`: new `stream_intent_bank` (default
+  `False`). The operator no longer attends over the `intent` bank, so the
+  origination generator is the *only* path from the bank to an action.
+  With the bank in the attention stream every slot reached every action
+  as ordinary context, all 16 slots carried gradient, and the
+  origination could not be localised at all. As a side effect the
+  streamed layout is identical to the pre-intent one, so legacy
+  checkpoints need no bank-id remap in the default configuration.
 - `ucsa.models.transformer_operator.TransformerOperator`: stashes the
   differentiable post-transition bank tensors in `last_bank_tensors`
   before the `no_grad` PCS write-back, and consumes them on the next

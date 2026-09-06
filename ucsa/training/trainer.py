@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import math
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -27,6 +28,11 @@ from ucsa.training.curriculum import Curriculum
 from ucsa.training.metrics import (
     MetricsRegistry,
     build_default_registry,
+    intent_gate_entropy,
+    intent_gate_mutual_info,
+    intent_gate_usage,
+    intent_read_share,
+    intent_state_variance,
     perplexity_from_loss,
 )
 
@@ -69,6 +75,9 @@ class TrainerConfig:
     # ponytail: hard-EMA target encoder for JEPA stability.
     ema_momentum: float = 0.0  # 0 disables EMA target; ~0.996 enables it
     ema_update_every: int = 1  # step interval for EMA blending
+    # ponytail: window of recent steps over which the intent-collapse
+    # variance and mutual-information diagnostics are computed.
+    intent_window_size: int = 16
 
 
 @dataclass
@@ -166,6 +175,16 @@ class Trainer:
         self.optimizer = optimizer
         self.curriculum = curriculum or Curriculum()
         self.metrics = metrics or build_default_registry()
+        # ponytail: rolling windows of recent origination states and gate
+        # usages. Variance and mutual information are only meaningful
+        # across *differing* inputs, and consecutive steps see different
+        # batches.
+        self.intent_state_window: deque[Tensor] = deque(
+            maxlen=config.intent_window_size
+        )
+        self.intent_usage_window: deque[Tensor] = deque(
+            maxlen=config.intent_window_size
+        )
         if device is None:
             if torch.cuda.is_available():
                 device = torch.device("cuda", 0)
@@ -324,6 +343,13 @@ class Trainer:
             if rl is None:
                 rl = torch.randn(16, 4)
             kwargs["router_logits"] = rl
+        aux = (
+            outputs.get("origination_aux_loss")
+            if isinstance(outputs, dict)
+            else None
+        )
+        if isinstance(aux, Tensor) and aux.requires_grad:
+            kwargs["origination_aux_loss"] = aux
         return self.loss_fn(logits, targets, **kwargs)
 
     def train_step(
@@ -395,7 +421,57 @@ class Trainer:
         self.metrics.update(
             "reasoning_iterations", float(self.curriculum.state.stage_step)
         )
+        self.record_intent_diagnostics()
         return self.metrics.snapshot()
+
+    def record_intent_diagnostics(self) -> None:
+        """Record the intent-collapse diagnostics for this step.
+
+        Gate entropy and read share are readable from a single step. State
+        variance and gate mutual information are only meaningful *across
+        differing inputs*, so they are computed over a rolling window of
+        recent steps -- consecutive steps see different batches, which is
+        exactly the comparison the diagnostic needs.
+
+        Collapse is silent in every other metric: the generator learns to
+        ignore the intent bank, the loop degenerates to feeding the same
+        observation every iteration, and the losses still look healthy.
+        """
+        loop = getattr(self.model, "reasoning_loop", None)
+        heads = getattr(self.model, "heads", None)
+        if loop is None or heads is None:
+            return
+        generator = getattr(heads, "origination", None)
+        if generator is None:
+            return
+        states = getattr(loop, "last_intent_states", [])
+        if states:
+            self.intent_state_window.append(states[-1].detach())
+        gate_weights = getattr(generator, "last_gate_weights", None)
+        if gate_weights is not None:
+            num_slots = gate_weights.shape[-1]
+            usage = intent_gate_usage(gate_weights, num_slots)
+            self.intent_usage_window.append(usage)
+            self.metrics.update(
+                "intent_gate_entropy", intent_gate_entropy(usage)
+            )
+        intent_read = getattr(generator, "last_intent_read", None)
+        working_read = getattr(generator, "last_working_read", None)
+        if intent_read is not None and working_read is not None:
+            self.metrics.update(
+                "intent_read_share",
+                intent_read_share(intent_read, working_read),
+            )
+        if len(self.intent_state_window) >= 2:
+            self.metrics.update(
+                "intent_state_variance",
+                intent_state_variance(list(self.intent_state_window)),
+            )
+        if len(self.intent_usage_window) >= 2:
+            self.metrics.update(
+                "intent_gate_mutual_info",
+                intent_gate_mutual_info(list(self.intent_usage_window)),
+            )
 
     def train(
         self,

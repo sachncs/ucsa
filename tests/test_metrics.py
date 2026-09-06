@@ -13,6 +13,11 @@ from ucsa.training.metrics import (
     expert_utilization,
     flatten_metrics,
     gpu_memory_bytes,
+    intent_gate_entropy,
+    intent_gate_mutual_info,
+    intent_gate_usage,
+    intent_read_share,
+    intent_state_variance,
     memory_replacement_rate,
     memory_utilization,
     perplexity_from_loss,
@@ -24,8 +29,14 @@ class TestMetricsRegistry:
     """Tests for :class:`MetricsRegistry`."""
 
     def test_default_names(self) -> None:
-        """The default metric set has 12 entries."""
-        assert len(DEFAULT_METRIC_NAMES) == 18
+        """The default metric set covers the spec plus intent diagnostics."""
+        assert len(DEFAULT_METRIC_NAMES) == 22
+        assert {
+            "intent_state_variance",
+            "intent_gate_entropy",
+            "intent_gate_mutual_info",
+            "intent_read_share",
+        } <= set(DEFAULT_METRIC_NAMES)
 
     def test_construction(self) -> None:
         """A registry with custom names initialises correctly."""
@@ -221,3 +232,85 @@ class TestFlattenMetrics:
         """All values are plain floats."""
         out = flatten_metrics({"a": 1.0, "b": 2})
         assert all(isinstance(v, float) for v in out.values())
+
+
+class TestIntentCollapseDiagnostics:
+    """Tests for the intent-collapse metric functions."""
+
+    def test_state_variance_zero_for_identical_states(self) -> None:
+        """A bank that never changes reports exactly zero variance.
+
+        This is the reading that catches a static intent parameter: one
+        constant signal preceding every action.
+        """
+        state = torch.randn(4, 8)
+        assert intent_state_variance([state, state.clone()]) == 0.0
+
+    def test_state_variance_positive_when_states_differ(self) -> None:
+        """Differing origination states report positive variance."""
+        value = intent_state_variance([torch.randn(4, 8), torch.randn(4, 8)])
+        assert value > 0.0
+
+    def test_state_variance_needs_two_inputs(self) -> None:
+        """Fewer than two inputs cannot express a variance."""
+        assert intent_state_variance([]) == 0.0
+        assert intent_state_variance([torch.randn(4, 8)]) == 0.0
+
+    def test_gate_usage_is_a_distribution(self) -> None:
+        """Usage fractions sum to one over the used slots."""
+        weights = torch.tensor([[[0.5, 0.5, 0.0, 0.0]]])
+        usage = intent_gate_usage(weights, 4)
+        assert usage.shape == (4,)
+        assert usage.sum().item() == pytest.approx(1.0)
+        assert usage[2].item() == 0.0
+
+    def test_gate_usage_empty_weights(self) -> None:
+        """No gate weights means no usage."""
+        assert intent_gate_usage(torch.zeros(0), 4).sum().item() == 0.0
+
+    def test_gate_entropy_zero_for_single_slot(self) -> None:
+        """One slot absorbing every query has zero entropy."""
+        usage = torch.tensor([1.0, 0.0, 0.0, 0.0])
+        assert intent_gate_entropy(usage) == pytest.approx(0.0)
+
+    def test_gate_entropy_maximal_for_uniform(self) -> None:
+        """A uniform gate reaches ``log(num_slots)`` and is uninformative."""
+        usage = torch.full((4,), 0.25)
+        assert intent_gate_entropy(usage) == pytest.approx(
+            float(torch.tensor(4.0).log())
+        )
+
+    def test_gate_mutual_info_zero_when_gate_ignores_input(self) -> None:
+        """Identical routing for every input carries no information.
+
+        This is the collapse signature the diagnostic exists to catch.
+        """
+        usage = torch.tensor([0.5, 0.5, 0.0, 0.0])
+        assert intent_gate_mutual_info([usage, usage.clone()]) == pytest.approx(
+            0.0
+        )
+
+    def test_gate_mutual_info_positive_when_routing_differs(self) -> None:
+        """Different inputs routing to different slots carries information."""
+        first = torch.tensor([1.0, 0.0, 0.0, 0.0])
+        second = torch.tensor([0.0, 1.0, 0.0, 0.0])
+        assert intent_gate_mutual_info([first, second]) > 0.0
+
+    def test_gate_mutual_info_needs_two_inputs(self) -> None:
+        """Fewer than two inputs cannot express mutual information."""
+        assert intent_gate_mutual_info([torch.tensor([1.0, 0.0])]) == 0.0
+
+    def test_read_share_zero_when_intent_read_is_empty(self) -> None:
+        """An all-zero intent read means the generator ignores the bank."""
+        share = intent_read_share(torch.zeros(2, 4), torch.randn(2, 4))
+        assert share == pytest.approx(0.0)
+
+    def test_read_share_half_for_equal_magnitudes(self) -> None:
+        """Equal read magnitudes split the share evenly."""
+        vector = torch.ones(2, 4)
+        assert intent_read_share(vector, vector.clone()) == pytest.approx(0.5)
+
+    def test_read_share_zero_for_two_empty_reads(self) -> None:
+        """Two empty reads report zero rather than dividing by zero."""
+        zeros = torch.zeros(2, 4)
+        assert intent_read_share(zeros, zeros.clone()) == 0.0

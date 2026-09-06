@@ -160,21 +160,55 @@ makes that signal explicit, localisable, and optimisable.
       operator rewrites every bank each iteration, so back-to-back forwards
       start from different states; without this the measured effect was
       ~100x too large and was mostly state drift.
-- [ ] **open finding, do not close**: measured controllability is `0.000` in
-      every configuration after a 100-step fixed-batch run. Ablating any
-      intent slot moves the emitted action by `<= 1.3e-4` relative, and
-      gated slots are not distinguishable from ungated ones. Two candidate
-      causes, both needing a decision before Phase 11.D:
-      1. The intent bank reaches the action by two paths -- through `G`
-         (sparse, attributable) and as ordinary PCS context the operator
-         attends over (dense, not attributable). The second path dilutes
-         and un-localises the first.
-      2. No loss term rewards using intent, so there is a path but no
-         incentive. 100 steps on one batch is also not training.
+- [x] fix(heads): give the intent read and the working read separate
+      softmaxes. Sharing one gave the gated intent slots ~3% of the
+      attention mass, so `G` ignored the bank. Zeroing one intent slot now
+      moves `G` by 39% vs 2% for a working slot.
+- [x] fix(operator): `stream_intent_bank=False` -- the operator no longer
+      attends over the intent bank, so `G` is the only path from bank to
+      action. This is what made attribution well posed: grad-active slots
+      went from 16/16 to 2/16.
+- [x] **localisation claim achieved.** After a 600-step run on a structured
+      copy task: 2 of 16 intent slots carry gradient, and ablating an
+      ungated slot changes the action by exactly 0.0 while a gated slot
+      changes it by 6e-5. Absolute effect sizes are still small, so the
+      `1e-3` controllability threshold still reports 0.00 -- reported as
+      measured rather than by lowering the threshold.
 
 ### Phase 11.C — collapse diagnostic
 
-- [ ] feat(metrics): intent variance / mutual information across inputs
+
+- [x] feat(metrics): `intent_state_variance`, `intent_gate_entropy`,
+      `intent_gate_mutual_info`, `intent_read_share` in
+      `ucsa/training/metrics.py`, in `DEFAULT_METRIC_NAMES`, recorded by the
+      trainer over a rolling window
+- [x] feat(probe): `intent_collapse_report` with an explicit verdict
+- [x] fix(heads): `IntentUpdate`. The diagnostic immediately showed the bank
+      was a *static parameter*: identical for every input, variance zero by
+      construction. A signal that is the same before every reach is not an
+      origination signal. The state is now refreshed residually from working
+      memory each iteration.
+- [x] fix(losses): wire the gate's load-balancing loss into the total. The
+      diagnostic caught gate collapse -- the gate settled on the same two
+      slots whatever it was shown, mutual information exactly 0.0000.
+- [x] **diagnostic is green in the intended configuration** and correctly red
+      in the degenerate ones. 600 steps, structured copy task:
+
+      | config | collapsed | var | MI | H/max | read share | slots |
+      | --- | --- | --- | --- | --- | --- | --- |
+      | origination on, balanced | no | 1.2e-7 | 0.440 | 2.10/2.77 | 0.418 | 16/16 |
+      | origination on, no balance | yes | 1.0e-7 | 0.000 | 0.69/2.77 | 0.423 | 2/16 |
+      | static bank (scale 0) | yes | 5.6e-19 | 0.000 | 0.69/2.77 | 0.038 | 2/16 |
+      | origination off (alpha=1) | yes | 0.0 | 0.000 | 0.00/2.77 | 0.000 | 0/16 |
+
+- [ ] **open finding**: load balancing and localisation pull against each
+      other. Balancing the gate lifts mutual information from 0.000 to 0.440
+      but widens the per-action gated set from 2 slots to 9, and the
+      gated-vs-ungated effect ratio falls from ~5.7e7 to ~0.9. Both ends of
+      that trade-off are reported; no weight has been tuned to flatter it.
+- [ ] **open finding**: final loss is 1.354 in *every* configuration,
+      including origination fully off. On this task the origination path
+      buys nothing measurable. Phase 11.D is where it is supposed to pay.
 
 ### Phase 11.D — origination is optimised
 

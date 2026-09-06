@@ -30,7 +30,11 @@ import torch
 from torch import Tensor, nn
 
 from ucsa.models.moe import MixtureOfExperts, MoEConfig
-from ucsa.models.state import BANK_NAMES, PersistentCognitiveState
+from ucsa.models.state import (
+    BANK_NAMES,
+    INTENT_BANK,
+    PersistentCognitiveState,
+)
 from ucsa.models.transition_operator import StateTransitionOperator
 
 
@@ -66,6 +70,14 @@ class TransformerOperatorConfig:
             autograd graph is severed at every transition and no loss can
             reach the operator. Set to ``False`` to reproduce the older,
             severed behaviour for ablations.
+        stream_intent_bank: Whether the ``intent`` bank is part of the
+            operator's attention stream. Default ``False``: the origination
+            generator is then the *only* path from the bank to behaviour,
+            which is what makes per-slot attribution well posed. With
+            ``True`` every intent slot also reaches every action as
+            ordinary context, so all slots carry gradient and the
+            origination cannot be localised -- kept as the ablation that
+            shows why the exclusion is necessary.
     """
 
     hidden_size: int = 128
@@ -84,6 +96,7 @@ class TransformerOperatorConfig:
     max_position: int = 4096
     moe: MoEConfig | None = None
     differentiable_state_carry: bool = True
+    stream_intent_bank: bool = False
 
     def __post_init__(self) -> None:
         if self.hidden_size <= 0:
@@ -648,8 +661,17 @@ class TransformerOperator(StateTransitionOperator):
         if config is None:
             config = TransformerOperatorConfig()
         self.config = config
+        # The intent bank is the origination signal, not context. Keeping it
+        # out of the stream leaves the streamed layout identical to the
+        # pre-intent one, which is also why legacy checkpoints need no
+        # bank-id remap in the default configuration.
+        self.stream_bank_names: tuple[str, ...] = (
+            BANK_NAMES
+            if config.stream_intent_bank
+            else tuple(name for name in BANK_NAMES if name != INTENT_BANK)
+        )
         self.bank_id_embedding = nn.Embedding(
-            len(BANK_NAMES) + 1, config.hidden_size
+            len(self.stream_bank_names) + 1, config.hidden_size
         )
         self.position_embedding = nn.Embedding(
             config.max_position, config.hidden_size
@@ -688,7 +710,7 @@ class TransformerOperator(StateTransitionOperator):
         """Compute and cache bank offsets inside the PCS token stream."""
         offsets: list[tuple[str, tuple[int, int]]] = []
         cursor = 0
-        for bank_name in BANK_NAMES:
+        for bank_name in self.stream_bank_names:
             # We don't know sizes here without PCS; offsets are bound at first
             # forward. We use placeholder offsets that get re-bound dynamically.
             offsets.append((bank_name, (cursor, cursor)))
@@ -741,8 +763,15 @@ class TransformerOperator(StateTransitionOperator):
         """
         carried = self.carried_bank_tensors()
         if carried is None:
-            return cstate.get_all_tokens()
-        return torch.cat([carried[name] for name in BANK_NAMES], dim=0)
+            if self.stream_bank_names == BANK_NAMES:
+                return cstate.get_all_tokens()
+            return torch.cat(
+                [cstate.get_bank(name) for name in self.stream_bank_names],
+                dim=0,
+            )
+        return torch.cat(
+            [carried[name] for name in self.stream_bank_names], dim=0
+        )
 
     def _bind_offsets(self, cstate: PersistentCognitiveState) -> dict[str, tuple[int, int]]:
         """Bind and return bank offsets for the given PCS.
@@ -755,7 +784,7 @@ class TransformerOperator(StateTransitionOperator):
         """
         offsets: dict[str, tuple[int, int]] = {}
         cursor = 0
-        for bank_name in BANK_NAMES:
+        for bank_name in self.stream_bank_names:
             size = cstate.bank_size(bank_name)
             offsets[bank_name] = (cursor, cursor + size)
             cursor += size
@@ -787,7 +816,7 @@ class TransformerOperator(StateTransitionOperator):
         bank_ids = torch.full(
             (batch, seq), bank_id_base, device=tokens.device, dtype=torch.long
         )
-        for index, bank_name in enumerate(BANK_NAMES):
+        for index, bank_name in enumerate(self.stream_bank_names):
             start, end = offsets[bank_name]
             if end <= seq:
                 bank_ids[:, start:end] = index
@@ -832,7 +861,7 @@ class TransformerOperator(StateTransitionOperator):
         all_tokens = torch.cat([pcs_tokens_b, observation], dim=1)
         working_start, working_end = offsets["working"]
 
-        bank_id_base = len(BANK_NAMES)
+        bank_id_base = len(self.stream_bank_names)
         all_tokens = self._add_position_signal(all_tokens, offsets, bank_id_base)
 
         # The cross-attention keys/values are saved by autograd for the K/V
@@ -870,7 +899,7 @@ class TransformerOperator(StateTransitionOperator):
 
         new_pcs = cstate
         bank_tensors: dict[str, Tensor] = {}
-        for bank_name in BANK_NAMES:
+        for bank_name in self.stream_bank_names:
             start, end = offsets[bank_name]
             bank_tensors[bank_name] = all_tokens[0, start:end, :]
         # Stash the differentiable tensors *before* the write-back, which
@@ -881,7 +910,7 @@ class TransformerOperator(StateTransitionOperator):
         self.last_bank_tensors = (
             bank_tensors if self.config.differentiable_state_carry else None
         )
-        for bank_name in BANK_NAMES:
+        for bank_name in self.stream_bank_names:
             new_pcs.set_bank(bank_name, bank_tensors[bank_name])
         return new_pcs
 

@@ -47,6 +47,10 @@ class HeadConfig:
         origination_aux_loss_weight: Weight on the origination gate's
             load-balancing loss, exposed as
             ``OriginationHead.last_aux_loss``.
+        intent_update_scale: Weight on the residual refresh of the
+            origination state from working memory. ``0.0`` freezes the
+            intent bank at its parameter value, which makes it identical
+            for every input.
     """
 
     hidden_size: int = 128
@@ -57,6 +61,7 @@ class HeadConfig:
     reconstruction_dim: int = 0  # 0 = inherit hidden_size
     origination_top_k: int = 2
     origination_aux_loss_weight: float = 0.01
+    intent_update_scale: float = 0.1
 
     def __post_init__(self) -> None:
         if self.hidden_size <= 0:
@@ -89,6 +94,11 @@ class HeadConfig:
             raise ValueError(
                 f"origination_aux_loss_weight must be non-negative, "
                 f"got {self.origination_aux_loss_weight}."
+            )
+        if self.intent_update_scale < 0.0:
+            raise ValueError(
+                f"intent_update_scale must be non-negative, "
+                f"got {self.intent_update_scale}."
             )
         if self.reconstruction_dim <= 0:
             # ponytail: default the reconstruction dim to hidden_size
@@ -223,6 +233,74 @@ class InputReconstructionHead(nn.Module):
         return self.proj(working_memory)
 
 
+class IntentUpdate(nn.Module):
+    """Refresh the origination state from working memory.
+
+    Without this the ``intent`` bank is a plain parameter: identical for
+    every input, so it can only encode an input-independent bias and its
+    variance across inputs is zero by construction. A signal that is the
+    same before every reach is not an origination signal, and it also makes
+    the collapse diagnostic unreadable.
+
+    The update is a residual attention read with the intent slots as
+    queries and working memory as keys and values:
+
+    ``intent_{k+1} = intent_k + scale * Attn(q=intent_k, kv=working_k)``
+
+    Residual on purpose. The learned (or inference-time optimised) bank
+    value has to survive, or descending on it would be pointless -- an
+    absolute rewrite would discard exactly what Phase D optimises.
+    """
+
+    def __init__(self, hidden_size: int, scale: float = 0.1) -> None:
+        """Initialise the intent updater.
+
+        Args:
+            hidden_size: Hidden dimensionality.
+            scale: Weight on the residual update. ``0.0`` freezes the
+                origination state at its parameter value.
+
+        Raises:
+            ValueError: If ``scale`` is negative.
+        """
+        super().__init__()
+        if scale < 0.0:
+            raise ValueError(f"scale must be non-negative, got {scale}.")
+        self.hidden_size = hidden_size
+        self.scale = scale
+        self.q_proj = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.k_proj = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.v_proj = nn.Linear(hidden_size, hidden_size, bias=False)
+
+    def forward(self, intent: Tensor, working: Tensor) -> Tensor:
+        """Return the refreshed origination state.
+
+        Args:
+            intent: Current origination state of shape ``(intent_tokens,
+                hidden_size)``.
+            working: Working bank of shape ``(working_tokens,
+                hidden_size)``.
+
+        Returns:
+            Tensor shaped like ``intent``.
+
+        Raises:
+            ValueError: If either tensor is not 2D.
+        """
+        if intent.dim() != 2 or working.dim() != 2:
+            raise ValueError(
+                f"intent and working must be 2D (tokens, hidden), got "
+                f"{tuple(intent.shape)} and {tuple(working.shape)}."
+            )
+        if self.scale == 0.0:
+            return intent
+        scores = torch.matmul(
+            self.q_proj(intent), self.k_proj(working).transpose(-1, -2)
+        ) / (self.hidden_size**0.5)
+        read = torch.matmul(torch.softmax(scores, dim=-1), self.v_proj(working))
+        return intent + self.scale * read
+
+
 class OriginationHead(nn.Module):
     """Generate the next iteration's input from the origination state.
 
@@ -230,23 +308,28 @@ class OriginationHead(nn.Module):
     is the one place where the signal that *causes* the next state is
     computed, which is what makes that signal addressable: an intent slot
     either contributes here or it does not affect the next input at all.
+    The operator does not attend over the intent bank
+    (``stream_intent_bank=False``), so ``G`` really is the only route from
+    the bank to an action.
 
-    The generated stream is a cross-attention read whose keys and values
-    come from ``concat(intent, working)`` -- the spec's ``G(intent,
-    working)`` -- and whose queries come from the current input stream.
-    The query side exists because the generated tensor has to line up with
-    a variable-length observation: 16 intent slots cannot by themselves say
-    how many input tokens to emit, or in what order. No observation content
-    reaches the output except through the attention weights, so the mix in
+    The generated stream is a cross-attention read over the intent bank and
+    over working memory -- the spec's ``G(intent, working)`` -- with
+    queries from the current input stream. The query side exists because
+    the generated tensor has to line up with a variable-length
+    observation: 16 intent slots cannot by themselves say how many input
+    tokens to emit, or in what order. No observation content reaches the
+    output except through the attention weights, so the mix in
     :class:`~ucsa.models.reasoning_loop.ReasoningLoop` remains the only
     path by which the real observation survives.
 
-    The intent side of the attention is routed through a **top-k sparse
-    gate**, reusing the routing machinery in :mod:`ucsa.models.moe` with
-    intent slots in place of experts. The sparsity is the point: with a
-    dense read every slot contributes a little to every action and the
-    origination cannot be attributed to anything. The working side stays
-    dense -- it is context, not origination.
+    The intent read is routed through a **top-k sparse gate**, reusing the
+    routing machinery in :mod:`ucsa.models.moe` with intent slots in place
+    of experts. The sparsity is the point: with a dense read every slot
+    contributes a little to every action and the origination cannot be
+    attributed to anything. The working read stays dense -- it is context,
+    not origination -- and is computed under its *own* softmax so that a
+    handful of gated intent slots are not made to compete for attention
+    mass against every working slot.
     """
 
     def __init__(
@@ -289,6 +372,8 @@ class OriginationHead(nn.Module):
         self.last_gate_weights: Tensor | None = None
         self.last_gate_mask: Tensor | None = None
         self.last_aux_loss: Tensor = torch.zeros(())
+        self.last_intent_read: Tensor | None = None
+        self.last_working_read: Tensor | None = None
 
     def gate_load_balancing_loss(self, gate_logits: Tensor) -> Tensor:
         """Return the load-balancing loss for the intent gate.
@@ -351,31 +436,41 @@ class OriginationHead(nn.Module):
             )
         batch = observation.shape[0]
         num_intent = intent.shape[0]
-        context = torch.cat([intent, working], dim=0)
-        context = context.unsqueeze(0).expand(batch, -1, -1)
         queries = self.q_proj(observation)
-        keys = self.k_proj(context)
-        values = self.v_proj(context)
-        scores = torch.matmul(queries, keys.transpose(-1, -2)) / (
-            self.hidden_size**0.5
-        )
-        # Sparsify the intent slots only; working memory stays dense.
-        intent_scores = scores[..., :num_intent]
+        intent_context = intent.unsqueeze(0).expand(batch, -1, -1)
+        working_context = working.unsqueeze(0).expand(batch, -1, -1)
+
+        # The intent read and the working read get their own softmax. A
+        # single softmax over the concatenation would put the few gated
+        # intent slots in direct competition with every working slot, so
+        # with 2 gated slots against 64 dense ones the origination would
+        # receive about 3% of the attention mass and `G` would effectively
+        # ignore the bank it is supposed to be driven by.
+        intent_scores = torch.matmul(
+            queries, self.k_proj(intent_context).transpose(-1, -2)
+        ) / (self.hidden_size**0.5)
         keep = top_k_mask(intent_scores, min(self.top_k, num_intent))
-        masked = scores.masked_fill(
-            torch.cat(
-                [~keep, torch.zeros_like(scores[..., num_intent:], dtype=torch.bool)],
-                dim=-1,
-            ),
-            float("-inf"),
+        intent_weights = torch.softmax(
+            intent_scores.masked_fill(~keep, float("-inf")), dim=-1
         )
-        weights = torch.softmax(masked, dim=-1)
+        intent_read = torch.matmul(intent_weights, self.v_proj(intent_context))
+
+        working_scores = torch.matmul(
+            queries, self.k_proj(working_context).transpose(-1, -2)
+        ) / (self.hidden_size**0.5)
+        working_read = torch.matmul(
+            torch.softmax(working_scores, dim=-1),
+            self.v_proj(working_context),
+        )
+
         flat_logits = intent_scores.reshape(-1, num_intent)
         self.last_gate_logits = flat_logits
-        self.last_gate_weights = weights[..., :num_intent]
+        self.last_gate_weights = intent_weights
         self.last_gate_mask = keep
         self.last_aux_loss = self.gate_load_balancing_loss(flat_logits)
-        generated: Tensor = self.out_proj(torch.matmul(weights, values))
+        self.last_intent_read = intent_read
+        self.last_working_read = working_read
+        generated: Tensor = self.out_proj(intent_read + working_read)
         return generated
 
 
@@ -410,6 +505,11 @@ class ProjectionHeads(nn.Module):
             top_k=config.origination_top_k,
             aux_loss_weight=config.origination_aux_loss_weight,
         )
+        # ponytail: refreshes the origination state per iteration so it is
+        # not the same constant before every action.
+        self.intent_update = IntentUpdate(
+            config.hidden_size, scale=config.intent_update_scale
+        )
 
     def forward(self, working_memory: Tensor) -> dict[str, Tensor]:
         """Run every head on ``working_memory``.
@@ -437,6 +537,7 @@ class ProjectionHeads(nn.Module):
 __all__ = [
     "HeadConfig",
     "InputReconstructionHead",
+    "IntentUpdate",
     "LanguageHead",
     "MemoryHead",
     "OriginationHead",

@@ -18,6 +18,7 @@ class HeadSpec:
     memory_query_dim: int = 64
     origination_top_k: int = 2
     origination_aux_loss_weight: float = 0.01
+    intent_update_scale: float = 0.1
 
 
 def build_head_config(
@@ -35,6 +36,7 @@ def build_head_config(
         memory_query_dim=spec.memory_query_dim,
         origination_top_k=spec.origination_top_k,
         origination_aux_loss_weight=spec.origination_aux_loss_weight,
+        intent_update_scale=spec.intent_update_scale,
     )
 
 
@@ -44,6 +46,7 @@ def build_head_config_from_cfg(cfg: Mapping[str, object] | object) -> HeadConfig
     vocab_size = int(getattr(cfg, "vocab_size", 50257))
     top_k = int(getattr(cfg, "origination_top_k", 2))
     aux_weight = float(getattr(cfg, "origination_aux_loss_weight", 0.01))
+    update_scale = float(getattr(cfg, "intent_update_scale", 0.1))
     head_section = getattr(cfg, "heads", None)
     if head_section is None and isinstance(cfg, Mapping):
         head_section = cfg.get("heads")  # type: ignore[union-attr]
@@ -53,6 +56,7 @@ def build_head_config_from_cfg(cfg: Mapping[str, object] | object) -> HeadConfig
             vocab_size=vocab_size,
             origination_top_k=top_k,
             origination_aux_loss_weight=aux_weight,
+            intent_update_scale=update_scale,
         )
     spec = HeadSpec(
         vocab_size=int(getattr(head_section, "vocab_size", vocab_size)),
@@ -61,6 +65,7 @@ def build_head_config_from_cfg(cfg: Mapping[str, object] | object) -> HeadConfig
         memory_query_dim=int(getattr(head_section, "memory_query_dim", 64)),
         origination_top_k=top_k,
         origination_aux_loss_weight=aux_weight,
+        intent_update_scale=update_scale,
     )
     return build_head_config(hidden_size, spec)
 

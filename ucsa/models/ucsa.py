@@ -84,6 +84,14 @@ class UCSAConfig:
         origination_aux_loss_weight: Weight on the origination gate's
             load-balancing loss. Exposed as ``origination_aux_loss`` in the
             forward dict; not yet added to the total loss.
+        intent_update_scale: Weight on the per-iteration residual refresh of
+            the origination state from working memory. ``0.0`` freezes the
+            intent bank at its parameter value, making the origination
+            signal identical for every input.
+        stream_intent_bank: Whether the operator also attends over the
+            intent bank. ``False`` (default) leaves the origination
+            generator as the only path from the bank to an action, which is
+            what makes per-slot attribution well posed.
     """
 
     hidden_size: int = 128
@@ -105,6 +113,8 @@ class UCSAConfig:
     observation_mix_decay: float = 1.0
     origination_top_k: int = 2
     origination_aux_loss_weight: float = 0.01
+    intent_update_scale: float = 0.1
+    stream_intent_bank: bool = False
     # TC-JEPA text conditioner config; arXiv 2605.03245 (May 2026).
     text_conditioner_top_k: int = 4
     text_conditioner_scale: float = 0.1
@@ -180,6 +190,7 @@ class UCSA(nn.Module):
                     differentiable_state_carry=(
                         config.differentiable_state_carry
                     ),
+                    stream_intent_bank=config.stream_intent_bank,
                 )
             )
         self.operator = operator
@@ -197,6 +208,7 @@ class UCSA(nn.Module):
                 observation_mix_decay=config.observation_mix_decay,
             ),
             origination=self.heads.origination,
+            intent_update=self.heads.intent_update,
         )
         self.memory = Memory(self.pcs)
         self.verifier = verifier or HeuristicVerifier()
@@ -366,10 +378,11 @@ class UCSA(nn.Module):
         heads_out["jepa_multi_step"] = jepa_multi_step
         heads_out["long_term"] = long_term
         heads_out["router_logits"] = router_logits
-        # The origination gate's load-balancing loss. Reported, not yet
-        # summed into the total: an unbalanced gate is a collapse pathway,
-        # but wiring a regulariser before the collapse diagnostic exists
-        # would be tuning toward a number we cannot yet read.
+        # The origination gate's load-balancing loss. Now summed into the
+        # total by the trainer: the collapse diagnostic showed the gate
+        # settling on a fixed pair of slots with zero mutual information
+        # against the input, and load balancing is the documented remedy
+        # for exactly that.
         heads_out["origination_aux_loss"] = self.heads.origination.last_aux_loss
         return heads_out
 
@@ -451,6 +464,12 @@ def build_ucsa(cfg: Any) -> UCSA:
             ),
             origination_aux_loss_weight=float(
                 model_section.get("origination_aux_loss_weight", 0.01)
+            ),
+            intent_update_scale=float(
+                model_section.get("intent_update_scale", 0.1)
+            ),
+            stream_intent_bank=bool(
+                model_section.get("stream_intent_bank", False)
             ),
             text_conditioner_top_k=int(
                 model_section.get("text_conditioner_top_k", 4)
