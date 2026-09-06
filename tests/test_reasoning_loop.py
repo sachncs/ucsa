@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 import torch
+from torch import Tensor
 
 from ucsa.models.reasoning_loop import ReasoningLoop, ReasoningLoopConfig
 from ucsa.models.state import PCSConfig, PersistentCognitiveState
@@ -11,6 +12,7 @@ from ucsa.models.transformer_operator import (
     TransformerOperator,
     TransformerOperatorConfig,
 )
+from ucsa.models.transition_operator import StateTransitionOperator
 
 
 def tiny_operator() -> TransformerOperator:
@@ -129,7 +131,9 @@ class TestReasoningLoop:
 
     def test_intermediates_empty_when_disabled(self) -> None:
         """With ``capture_intermediates=False``, no snapshots are stored."""
-        loop = ReasoningLoop(tiny_operator(), ReasoningLoopConfig(num_iterations=2))
+        loop = ReasoningLoop(
+            tiny_operator(), ReasoningLoopConfig(num_iterations=2)
+        )
         loop(tiny_pcs(), torch.randn(1, 4, 32))
         assert loop.last_intermediates == []
 
@@ -170,13 +174,17 @@ class TestReasoningLoop:
 
     def test_forward_returns_pcs(self) -> None:
         """The forward pass returns a :class:`PersistentCognitiveState`."""
-        loop = ReasoningLoop(tiny_operator(), ReasoningLoopConfig(num_iterations=1))
+        loop = ReasoningLoop(
+            tiny_operator(), ReasoningLoopConfig(num_iterations=1)
+        )
         out = loop(tiny_pcs(), torch.randn(1, 4, 32))
         assert isinstance(out, PersistentCognitiveState)
 
     def test_forward_preserves_pcs_structure(self) -> None:
         """After a forward pass the PCS still has all six banks."""
-        loop = ReasoningLoop(tiny_operator(), ReasoningLoopConfig(num_iterations=1))
+        loop = ReasoningLoop(
+            tiny_operator(), ReasoningLoopConfig(num_iterations=1)
+        )
         out = loop(tiny_pcs(), torch.randn(1, 4, 32))
         for name in ("working", "long_term", "goal", "episode", "task", "memory_index"):
             assert name in out.bank_specs
@@ -192,3 +200,117 @@ class TestReasoningLoop:
         copy2 = loop.get_intermediates()
         assert copy1 == copy2
         assert copy1 is not copy2
+
+
+class TestDifferentiableStateCarry:
+    """Tests for the loop's differentiable state hand-off."""
+
+    def test_differentiable_bank_is_none_before_forward(self) -> None:
+        """No carried tensors exist before the first forward pass."""
+        loop = ReasoningLoop(tiny_operator())
+        assert loop.differentiable_bank("working") is None
+
+    def test_differentiable_bank_has_autograd_history(self) -> None:
+        """The carried working tensor is still attached to the graph.
+
+        Reading the bank off the PCS instead returns a parameter that the
+        ``no_grad`` write-back has detached from the transition.
+        """
+        loop = ReasoningLoop(
+            tiny_operator(), ReasoningLoopConfig(num_iterations=2)
+        )
+        pcs = loop(tiny_pcs(), torch.randn(1, 4, 32))
+        working = loop.differentiable_bank("working")
+        assert working is not None
+        assert working.grad_fn is not None
+        assert working.shape == (64, 32)
+        assert pcs.get_bank("working").grad_fn is None
+
+    def test_differentiable_bank_covers_every_bank(self) -> None:
+        """Every bank is carried, not just working memory."""
+        loop = ReasoningLoop(
+            tiny_operator(), ReasoningLoopConfig(num_iterations=1)
+        )
+        loop(tiny_pcs(), torch.randn(1, 4, 32))
+        for name in (
+            "working",
+            "long_term",
+            "goal",
+            "episode",
+            "task",
+            "memory_index",
+        ):
+            bank = loop.differentiable_bank(name)
+            assert bank is not None
+            assert bank.grad_fn is not None
+
+    def test_loss_on_carried_bank_reaches_operator(self) -> None:
+        """A loss on the carried tensor trains the operator weights."""
+        op = tiny_operator()
+        loop = ReasoningLoop(op, ReasoningLoopConfig(num_iterations=3))
+        loop(tiny_pcs(), torch.randn(1, 4, 32))
+        working = loop.differentiable_bank("working")
+        assert working is not None
+        working.pow(2).mean().backward()
+        with_grad = [
+            name for name, p in op.named_parameters() if p.grad is not None
+        ]
+        assert len(with_grad) == len(list(op.named_parameters()))
+
+    def test_intermediates_are_differentiable(self) -> None:
+        """Captured JEPA intermediates carry gradients."""
+        loop = ReasoningLoop(
+            tiny_operator(),
+            ReasoningLoopConfig(num_iterations=3, capture_intermediates=True),
+        )
+        loop(tiny_pcs(), torch.randn(1, 4, 32))
+        assert len(loop.last_intermediates) == 3
+        for snapshot in loop.last_intermediates:
+            assert snapshot.grad_fn is not None
+
+    def test_reset_clears_carried_tensors(self) -> None:
+        """``reset`` drops the carried tensors along with the KV cache."""
+        loop = ReasoningLoop(
+            tiny_operator(), ReasoningLoopConfig(num_iterations=1)
+        )
+        loop(tiny_pcs(), torch.randn(1, 4, 32))
+        loop.reset()
+        assert loop.last_bank_tensors is None
+        assert loop.differentiable_bank("working") is None
+
+    def test_operator_without_carry_falls_back(self) -> None:
+        """Operators that expose no carried tensors still work.
+
+        The loop must degrade to detached PCS reads rather than raise, so
+        alternative operators (Mamba, RWKV) need no changes.
+        """
+
+        class BareOperator(StateTransitionOperator):
+            """internal: an operator that carries no differentiable state."""
+
+            @property
+            def name(self) -> str:
+                return "bare"
+
+            def forward(
+                self,
+                cstate: PersistentCognitiveState,
+                observation: Tensor,
+            ) -> PersistentCognitiveState:
+                return cstate
+
+            def initialize(self) -> None:
+                return None
+
+            def reset(self) -> None:
+                return None
+
+        loop = ReasoningLoop(
+            BareOperator(),
+            ReasoningLoopConfig(num_iterations=2, capture_intermediates=True),
+        )
+        loop(tiny_pcs(), torch.randn(1, 4, 32))
+        assert loop.differentiable_bank("working") is None
+        assert len(loop.last_intermediates) == 2
+        for snapshot in loop.last_intermediates:
+            assert snapshot.grad_fn is None

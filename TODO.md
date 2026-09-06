@@ -112,6 +112,50 @@ update `CHANGELOG.md` `[Unreleased]` and pass `ruff`, `mypy --strict`, and
 - [x] chore: smoke run 100 steps on tiny model, confirm no NaN
 - [x] chore: validate multi-epoch fineweb-edu config compiles
 
+## Phase 11 — Endogenous origination (intent bank)
+
+Motivation: before a hand reaches for an object there is a signal that
+*originates* the action, and in a brain we cannot localise it. UCSA had no
+origination variable at all — the reasoning loop fed the *same* observation to
+every iteration, so nothing generated the input to the next state. This phase
+makes that signal explicit, localisable, and optimisable.
+
+### Phase 11.0 — differentiable reasoning loop (prerequisite)
+
+- [x] fix(operator): clone the `memory_index` cross-attention tokens so the
+      in-place bank write-back cannot invalidate saved K/V tensors
+- [x] fix(jepa): `_condition_one` preserves the prediction's shape so the JEPA
+      loss stops broadcasting against its target
+- [x] feat(loop): carry the operator's differentiable bank tensors across
+      iterations and out to the heads, with a
+      `differentiable_state_carry=False` ablation for the old severed graph
+- [x] test: AR loss reaches every operator parameter (was 0 of 31); JEPA
+      predictions differentiable with detached targets; 100-step smoke run on a
+      fixed batch, no NaN, 6.46 -> 0.15 (severed: 6.46 -> 2.78)
+
+### Phase 11.A — origination exists
+
+- [ ] feat(pcs): add the `intent` bank (16 tokens, trainable, last in
+      `BANK_NAMES` so existing bank offsets and bank ids are unchanged)
+- [ ] feat(heads): add the origination generator `G`
+- [ ] feat(loop): mix `obs_{k+1} = (1 - alpha_k) * G + alpha_k * observation`,
+      defaults reducing exactly to the current behaviour
+
+### Phase 11.B — origination is localisable
+
+- [ ] feat(heads): route `G` through a top-k sparse gate over intent slots
+- [ ] feat(probe): per-slot `grad x activation` attribution + causal
+      intervention utility
+
+### Phase 11.C — collapse diagnostic
+
+- [ ] feat(metrics): intent variance / mutual information across inputs
+
+### Phase 11.D — origination is optimised
+
+- [ ] feat(infer): K steps of gradient descent on the `intent` bank only,
+      default `K=0`
+
 ## Exit criteria
 
 - All checkboxes above are ticked.

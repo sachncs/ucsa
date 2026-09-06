@@ -67,6 +67,11 @@ class UCSAConfig:
         max_seq_len: Maximum observation sequence length.
         num_concepts: Number of graph concepts.
         moe: Optional MoE configuration.
+        differentiable_state_carry: When ``True`` (default) the reasoning
+            loop hands the operator's differentiable bank tensors to the
+            next iteration and to the heads. ``False`` reproduces the
+            severed graph, in which no loss can reach the operator; kept
+            for the ablation.
     """
 
     hidden_size: int = 128
@@ -83,6 +88,7 @@ class UCSAConfig:
     residual_dropout: float = 0.0
     ffn_dropout: float = 0.0
     moe: MoEConfig | None = None
+    differentiable_state_carry: bool = True
     # TC-JEPA text conditioner config; arXiv 2605.03245 (May 2026).
     text_conditioner_top_k: int = 4
     text_conditioner_scale: float = 0.1
@@ -155,6 +161,9 @@ class UCSA(nn.Module):
                     attention_dropout=config.attention_dropout,
                     residual_dropout=config.residual_dropout,
                     ffn_dropout=config.ffn_dropout,
+                    differentiable_state_carry=(
+                        config.differentiable_state_carry
+                    ),
                 )
             )
         self.operator = operator
@@ -215,7 +224,13 @@ class UCSA(nn.Module):
         k_proj: Tensor,
         v: Tensor,
     ) -> Tensor:
-        """Apply the TC-JEPA sparse cross-attention to a single prediction."""
+        """Apply the TC-JEPA sparse cross-attention to a single prediction.
+
+        The returned tensor always has ``predicted``'s shape. The internal
+        attention math carries an extra leading axis; leaving it in place
+        used to return ``(1, S, H)`` for a ``(S, H)`` input, which made the
+        JEPA loss broadcast against its ``(S, H)`` target.
+        """
         q = self._text_q(predicted.unsqueeze(0)).unsqueeze(1)
         scores = torch.matmul(q, k_proj.transpose(-1, -2)) / (
             token_embeds.shape[-1] ** 0.5
@@ -227,9 +242,8 @@ class UCSA(nn.Module):
         attn.scatter_(-1, topk.indices, 1.0)
         attn = attn / attn.sum(dim=-1, keepdim=True).clamp(min=1e-6)
         conditioned = torch.matmul(attn, v).squeeze(1)
-        return predicted + self.text_conditioner_scale * (
-            self._text_o(conditioned).squeeze(1)
-        )
+        offset = self._text_o(conditioned).reshape(predicted.shape)
+        return predicted + self.text_conditioner_scale * offset
 
     def forward(
         self,
@@ -252,7 +266,14 @@ class UCSA(nn.Module):
             inputs.to(self.pcs.get_bank("working").device), modality=modality
         )
         new_pcs = self.reasoning_loop(self.pcs, observation)
-        heads_out = self.heads(new_pcs.get_bank("working").unsqueeze(0))
+        # Prefer the loop's differentiable tensors: reading the bank off the
+        # PCS returns a parameter that the ``no_grad`` write-back has
+        # detached from the transition, which leaves the operator without
+        # any gradient from the losses below.
+        working = self.reasoning_loop.differentiable_bank("working")
+        if working is None:
+            working = new_pcs.get_bank("working")
+        heads_out = self.heads(working.unsqueeze(0))
 
         # JEPA aux: predict next working-state from previous.
         # Intermediates are captured clones; pick last two iterations
@@ -309,7 +330,9 @@ class UCSA(nn.Module):
                 ]
 
         # Long-term memory + MoE router logits are direct reads.
-        long_term = new_pcs.get_bank("long_term")
+        long_term = self.reasoning_loop.differentiable_bank("long_term")
+        if long_term is None:
+            long_term = new_pcs.get_bank("long_term")
         router_logits = self.operator.last_router_logits
 
         # Lazy-init the memory baseline the first time we see a tensor.
@@ -390,6 +413,9 @@ def build_ucsa(cfg: Any) -> UCSA:
             residual_dropout=float(model_section.get("residual_dropout", 0.0)),
             ffn_dropout=float(model_section.get("ffn_dropout", 0.0)),
             moe=moe_cfg,
+            differentiable_state_carry=bool(
+                model_section.get("differentiable_state_carry", True)
+            ),
             text_conditioner_top_k=int(
                 model_section.get("text_conditioner_top_k", 4)
             ),

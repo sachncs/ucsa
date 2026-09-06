@@ -204,6 +204,70 @@ class TestUCSAModel:
         loss.backward()
         assert model.pcs.get_bank("working").grad is not None
 
+    def test_language_loss_reaches_the_operator(self) -> None:
+        """The AR path trains the transition operator.
+
+        The PCS write-back copies under ``no_grad``; without the loop's
+        differentiable state carry the operator received no gradient at all
+        and only the working bank plus the language head were trained.
+        """
+        model = UCSA(
+            UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2)
+        )
+        out = model(torch.randint(0, 100, (1, 4)))
+        out["language"].pow(2).mean().backward()
+        operator_params = list(model.operator.named_parameters())
+        assert operator_params
+        assert all(p.grad is not None for _, p in operator_params)
+        assert all(
+            torch.isfinite(p.grad).all()
+            for p in model.parameters()
+            if p.grad is not None
+        )
+
+    def test_jepa_chain_is_differentiable(self) -> None:
+        """JEPA predictions carry gradients; targets stay detached."""
+        model = UCSA(
+            UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2)
+        )
+        out = model(torch.randint(0, 100, (1, 4)))
+        pairs = out["jepa_multi_step"]
+        assert pairs
+        for predicted, target in pairs:
+            assert predicted.grad_fn is not None
+            assert target.grad_fn is None
+
+    def test_jepa_prediction_shape_matches_target(self) -> None:
+        """The TC-JEPA conditioner preserves the prediction's shape.
+
+        A mismatch here silently broadcasts inside the JEPA loss.
+        """
+        model = UCSA(
+            UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2)
+        )
+        out = model(torch.randint(0, 100, (1, 4)))
+        assert out["jepa_predicted"].shape == out["jepa_target"].shape
+        for predicted, target in out["jepa_multi_step"]:
+            assert predicted.shape == target.shape
+
+    def test_severed_carry_ablation_starves_the_operator(self) -> None:
+        """``differentiable_state_carry=False`` reproduces the old graph."""
+        model = UCSA(
+            UCSAConfig(
+                hidden_size=32,
+                vocab_size=100,
+                num_layers=2,
+                differentiable_state_carry=False,
+            )
+        )
+        out = model(torch.randint(0, 100, (1, 4)))
+        out["language"].pow(2).mean().backward()
+        assert all(p.grad is None for p in model.operator.parameters())
+        # The working bank is read directly by the heads, so it is the one
+        # thing that still trains. That is why the severed graph went
+        # unnoticed: the loss still went down.
+        assert model.pcs.get_bank("working").grad is not None
+
     def test_ucsa_with_moe(self) -> None:
         """UCSA can be constructed with MoE configured."""
         from ucsa.models.moe import MoEConfig

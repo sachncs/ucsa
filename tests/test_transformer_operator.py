@@ -414,6 +414,71 @@ class TestTransformerOperator:
             for s, f in zip(second_lengths, first_lengths, strict=False)
         )
 
+    def test_backward_through_router_logits_with_moe(
+        self, state: PersistentCognitiveState
+    ) -> None:
+        """A loss on the MoE router logits reaches the operator weights.
+
+        The memory-index cross-attention keys/values are saved for the
+        K/V weight gradients. Writing the banks back in place used to bump
+        the version counter of an expanded view of the ``memory_index``
+        parameter, making backward raise.
+        """
+        op = TransformerOperator(
+            tiny_config(moe=MoEConfig(num_experts=4, top_k=2))
+        )
+        op(state, torch.randn(1, 4, 32))
+        router_logits = op.last_router_logits
+        assert router_logits is not None
+        router_logits.pow(2).mean().backward()
+        assert any(
+            p.grad is not None and torch.isfinite(p.grad).all()
+            for p in op.parameters()
+        )
+
+    def test_last_bank_tensors_are_differentiable(
+        self, operator: TransformerOperator, state: PersistentCognitiveState
+    ) -> None:
+        """The stashed bank tensors precede the ``no_grad`` write-back."""
+        operator(state, torch.randn(1, 4, 32))
+        assert operator.last_bank_tensors is not None
+        for name, tensor in operator.last_bank_tensors.items():
+            assert tensor.grad_fn is not None, name
+            assert tensor.shape == (state.bank_size(name), 32)
+
+    def test_carry_used_on_second_call(
+        self, operator: TransformerOperator, state: PersistentCognitiveState
+    ) -> None:
+        """A second call consumes the carried tensors, not the parameters."""
+        operator(state, torch.randn(1, 4, 32))
+        operator(state, torch.randn(1, 4, 32))
+        working = operator.last_bank_tensors
+        assert working is not None
+        working["working"].pow(2).mean().backward()
+        # Two chained transitions both contribute, so every operator weight
+        # sees gradient.
+        assert all(p.grad is not None for p in operator.parameters())
+
+    def test_carry_disabled_severs_the_graph(
+        self, state: PersistentCognitiveState
+    ) -> None:
+        """``differentiable_state_carry=False`` restores severed behaviour."""
+        op = TransformerOperator(tiny_config(differentiable_state_carry=False))
+        op(state, torch.randn(1, 4, 32))
+        assert op.last_bank_tensors is None
+        assert op.carried_bank_tensors() is None
+        op(state, torch.randn(1, 4, 32))
+        assert op.carried_bank_tensors() is None
+
+    def test_reset_clears_carried_tensors(
+        self, operator: TransformerOperator, state: PersistentCognitiveState
+    ) -> None:
+        """``reset`` clears the carried tensors with the KV cache."""
+        operator(state, torch.randn(1, 4, 32))
+        assert operator.last_bank_tensors is not None
+        operator.reset()
+        assert operator.last_bank_tensors is None
+
     def test_parameter_count_reasonable(
         self, operator: TransformerOperator
     ) -> None:

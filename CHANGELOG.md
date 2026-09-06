@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `tests/test_reasoning_loop.TestDifferentiableStateCarry`: covers
+  `differentiable_bank`, differentiable JEPA intermediates, carried
+  tensors reaching every operator weight, `reset` clearing the carry,
+  and the fallback for operators that expose no carried state.
+- `tests/test_transformer_operator`: covers the stashed bank tensors,
+  the second-call carry, the `differentiable_state_carry=False`
+  ablation, `reset` clearing the stash, and a backward through the
+  MoE router logits that regresses the in-place cross-attention bug.
+- `tests/test_scripts`: the AR loss reaches every operator parameter,
+  the JEPA chain keeps predictions differentiable while targets stay
+  detached, TC-JEPA preserves shapes, and the severed-carry ablation
+  starves the operator.
 - `.github/workflows/ci.yml`: GitHub Actions CI on push/PR. Runs
   ruff, black, and pytest on Python 3.11 + 3.12. Integration tests
   excluded.
@@ -108,6 +120,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lint fixes: ruff clean on the entire `ucsa/` and `tests/` tree.
 
 ### Changed
+- `ucsa.models.transformer_operator.TransformerOperator`: stashes the
+  differentiable post-transition bank tensors in `last_bank_tensors`
+  before the `no_grad` PCS write-back, and consumes them on the next
+  call via `carried_bank_tensors`. New
+  `TransformerOperatorConfig.differentiable_state_carry` (default
+  `True`) and `UCSAConfig.differentiable_state_carry` gate the
+  behaviour; `False` reproduces the previous severed graph for the
+  ablation. `reset` clears the stash alongside the KV cache.
+- `ucsa.models.reasoning_loop.ReasoningLoop`: exposes
+  `differentiable_bank(name)` and `capture_working`, so the JEPA
+  intermediates carry gradients instead of being detached clones.
+  Operators that do not stash carried tensors fall back to the old
+  detached PCS reads, so alternative operators need no changes.
+- `ucsa.models.ucsa.UCSA.forward`: reads `working` and `long_term`
+  from the loop's differentiable tensors (falling back to the PCS
+  parameters) so the heads, JEPA, and memory losses all reach the
+  operator.
 - `ucsa.models.ucsa.UCSA.forward`: returns a rich dict that includes
   `jepa_predicted`, `jepa_target`, `long_term`, and `router_logits`
   alongside the head outputs. Aux losses can now be computed on real
@@ -138,6 +167,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   would now be wrong because `UCSA.forward` returns extra keys.
 
 ### Fixed
+- The reasoning loop was not differentiable end to end. Because
+  `PersistentCognitiveState.set_bank` copies under `torch.no_grad`,
+  the autograd graph was severed at every operator write-back: an AR
+  loss reached only `pcs.banks.working`, the language head, and the
+  reconstruction head (4 of 50 parameters on a tiny model), and none
+  of the 31 operator parameters. Fitting a fixed batch for 100 steps
+  went 6.46 -> 2.78 by memorising into the working bank; with the
+  differentiable state carry the same run reaches 0.15 and every
+  operator parameter receives gradient.
+- `TransformerOperator.forward`: the `memory_index` cross-attention
+  keys/values were an expanded *view* of the `memory_index`
+  parameter. The in-place bank write-back bumped its version counter,
+  so any backward that reached the cross-attention raised "one of the
+  variables needed for gradient computation has been modified by an
+  inplace operation". The tokens are now cloned, matching the
+  treatment `pcs_tokens_b` already received. This crashed the
+  full-curriculum step whenever MoE was enabled.
+- `UCSA._condition_one`: the TC-JEPA conditioner returned `(1, S, H)`
+  for an `(S, H)` prediction, so the JEPA loss silently broadcast
+  against its `(S, H)` target (`UserWarning` from `smooth_l1_loss`)
+  and the LeWM Gaussian regulariser reduced over the wrong axes. The
+  conditioner now preserves the prediction's shape.
 - Trainer on MPS: `device(type='mps', 0) != device(type='mps')` no
   longer breaks `move_batch` and embedding lookups.
 - `compute_loss` no longer fails on the latent path where CPU inputs

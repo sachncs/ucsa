@@ -59,6 +59,13 @@ class TransformerOperatorConfig:
             attention to the ``memory_index`` bank. Defaults to ``True``.
         moe: Optional Mixture of Experts configuration. When ``None``, every
             block uses a dense FFN.
+        differentiable_state_carry: When ``True`` (default) consecutive
+            operator calls consume the previous call's *differentiable*
+            bank tensors instead of re-reading the PCS parameters. The PCS
+            write-back copies under ``torch.no_grad``, so without this the
+            autograd graph is severed at every transition and no loss can
+            reach the operator. Set to ``False`` to reproduce the older,
+            severed behaviour for ablations.
     """
 
     hidden_size: int = 128
@@ -76,6 +83,7 @@ class TransformerOperatorConfig:
     use_memory_index_cross_attention: bool = True
     max_position: int = 4096
     moe: MoEConfig | None = None
+    differentiable_state_carry: bool = True
 
     def __post_init__(self) -> None:
         if self.hidden_size <= 0:
@@ -665,6 +673,10 @@ class TransformerOperator(StateTransitionOperator):
         self.is_first_step: bool = True
         self.last_aux_loss: Tensor = torch.zeros(())
         self.last_router_logits: Tensor | None = None  # ponytail: aggregated MoE router logits from blocks; None if no MoE
+        # ponytail: the differentiable post-transition bank tensors, stashed
+        # before the ``no_grad`` PCS write-back. Same lifecycle as the KV
+        # cache: written every forward, cleared by ``reset``.
+        self.last_bank_tensors: dict[str, Tensor] | None = None
         self.initialize()
 
     @property
@@ -685,10 +697,52 @@ class TransformerOperator(StateTransitionOperator):
         self.cumulative_offsets = ()
 
     def reset(self) -> None:
-        """Clear the KV cache and step counter for each block."""
+        """Clear the KV cache, step counter, and carried state per block."""
         self.is_first_step = True
+        self.last_bank_tensors = None
         for block in self.blocks:
             block.self_attn.reset_cache()
+
+    def carried_bank_tensors(self) -> dict[str, Tensor] | None:
+        """Return the differentiable banks carried from the previous call.
+
+        Returns:
+            The stashed post-transition bank tensors, or ``None`` when the
+            carry is disabled or this is the first call since
+            :meth:`reset`.
+        """
+        return self.last_bank_tensors
+
+    def _read_bank(
+        self, cstate: PersistentCognitiveState, name: str
+    ) -> Tensor:
+        """Read one bank, preferring the carried differentiable tensor.
+
+        Args:
+            cstate: The PCS to fall back to.
+            name: Bank identifier.
+
+        Returns:
+            Tensor of shape ``(num_tokens, hidden_size)``.
+        """
+        carried = self.carried_bank_tensors()
+        if carried is not None and name in carried:
+            return carried[name]
+        return cstate.get_bank(name)
+
+    def _read_pcs_tokens(self, cstate: PersistentCognitiveState) -> Tensor:
+        """Read every bank as one tensor, preferring the carried tensors.
+
+        Args:
+            cstate: The PCS to fall back to.
+
+        Returns:
+            Tensor of shape ``(total_tokens, hidden_size)``.
+        """
+        carried = self.carried_bank_tensors()
+        if carried is None:
+            return cstate.get_all_tokens()
+        return torch.cat([carried[name] for name in BANK_NAMES], dim=0)
 
     def _bind_offsets(self, cstate: PersistentCognitiveState) -> dict[str, tuple[int, int]]:
         """Bind and return bank offsets for the given PCS.
@@ -761,7 +815,7 @@ class TransformerOperator(StateTransitionOperator):
                 f"{tuple(observation.shape)}."
             )
         batch = observation.shape[0]
-        pcs_tokens = cstate.get_all_tokens()
+        pcs_tokens = self._read_pcs_tokens(cstate)
         if pcs_tokens.shape[-1] != observation.shape[-1]:
             raise ValueError(
                 f"PCS hidden size ({pcs_tokens.shape[-1]}) does not match "
@@ -781,8 +835,18 @@ class TransformerOperator(StateTransitionOperator):
         bank_id_base = len(BANK_NAMES)
         all_tokens = self._add_position_signal(all_tokens, offsets, bank_id_base)
 
-        memory_index_tokens = cstate.get_bank("memory_index").unsqueeze(0).expand(
-            batch, -1, -1
+        # The cross-attention keys/values are saved by autograd for the K/V
+        # weight gradients. ``set_bank`` below writes the banks back in
+        # place, which would bump the version counter of an expanded *view*
+        # of the ``memory_index`` parameter and make backward fail with
+        # "one of the variables needed for gradient computation has been
+        # modified by an inplace operation". Cloning detaches the storage
+        # (not the graph), exactly as ``pcs_tokens_b`` already does above.
+        memory_index_tokens = (
+            self._read_bank(cstate, "memory_index")
+            .unsqueeze(0)
+            .expand(batch, -1, -1)
+            .clone()
         )
 
         total_aux = torch.zeros(())
@@ -805,9 +869,20 @@ class TransformerOperator(StateTransitionOperator):
         self.last_router_logits = torch.cat(router_pieces, dim=0) if router_pieces else None
 
         new_pcs = cstate
+        bank_tensors: dict[str, Tensor] = {}
         for bank_name in BANK_NAMES:
             start, end = offsets[bank_name]
-            new_pcs.set_bank(bank_name, all_tokens[0, start:end, :])
+            bank_tensors[bank_name] = all_tokens[0, start:end, :]
+        # Stash the differentiable tensors *before* the write-back, which
+        # copies under ``no_grad`` and would otherwise be the end of the
+        # autograd graph for this transition. Leaving the stash empty
+        # reproduces the older severed behaviour end to end: the loop and
+        # the heads both fall back to detached PCS reads.
+        self.last_bank_tensors = (
+            bank_tensors if self.config.differentiable_state_carry else None
+        )
+        for bank_name in BANK_NAMES:
+            new_pcs.set_bank(bank_name, bank_tensors[bank_name])
         return new_pcs
 
 

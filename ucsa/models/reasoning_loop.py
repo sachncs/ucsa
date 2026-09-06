@@ -77,12 +77,35 @@ class ReasoningLoop(nn.Module):
         self.operator = operator
         self.iteration_count: int = 0
         self.last_intermediates: list[Tensor] = []
+        self.last_bank_tensors: dict[str, Tensor] | None = None
 
     def reset(self) -> None:
         """Reset per-request state (KV cache) and clear intermediates."""
         self.operator.reset()
         self.iteration_count = 0
         self.last_intermediates = []
+        self.last_bank_tensors = None
+
+    def differentiable_bank(self, name: str) -> Tensor | None:
+        """Return the differentiable post-loop tensor for one bank.
+
+        The PCS write-back copies under ``torch.no_grad``, so reading a
+        bank off the PCS after the loop yields a value with no autograd
+        history. Operators that stash their pre-write-back tensors expose
+        them here so downstream consumers (projection heads, JEPA losses)
+        can keep the graph intact.
+
+        Args:
+            name: Bank identifier.
+
+        Returns:
+            The differentiable bank tensor of shape
+            ``(num_tokens, hidden_size)``, or ``None`` when the operator
+            does not expose one.
+        """
+        if self.last_bank_tensors is None:
+            return None
+        return self.last_bank_tensors.get(name)
 
     def inject_observation(
         self,
@@ -144,15 +167,35 @@ class ReasoningLoop(nn.Module):
         self.operator.reset()
         self.iteration_count = 0
         self.last_intermediates = []
+        self.last_bank_tensors = None
         cstate = self.inject_observation(cstate, observation)
         for _ in range(self.config.num_iterations):
             cstate = self.operator(cstate, observation)
             self.iteration_count += 1
+            self.last_bank_tensors = getattr(
+                self.operator, "last_bank_tensors", None
+            )
             if self.config.capture_intermediates:
-                self.last_intermediates.append(
-                    cstate.get_bank("working").detach().clone()
-                )
+                self.last_intermediates.append(self.capture_working(cstate))
         return cstate
+
+    def capture_working(self, cstate: PersistentCognitiveState) -> Tensor:
+        """Snapshot the working bank for the JEPA chain.
+
+        Prefers the operator's differentiable pre-write-back tensor so the
+        JEPA prediction chain carries gradients. Falls back to a detached
+        clone of the PCS bank for operators that do not expose one.
+
+        Args:
+            cstate: The PCS after the current iteration.
+
+        Returns:
+            Tensor of shape ``(working_tokens, hidden_size)``.
+        """
+        working = self.differentiable_bank("working")
+        if working is not None:
+            return working
+        return cstate.get_bank("working").detach().clone()
 
     def get_intermediates(self) -> Sequence[Tensor]:
         """Return the per-iteration working-memory snapshots."""
