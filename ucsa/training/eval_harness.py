@@ -109,10 +109,13 @@ def _load_winogrande() -> Iterable[dict[str, Any]]:
     )
     for ex in ds:
         ctx = ex["sentence"]
-        # Replace the underscore with each option.
-        opts = ex["options"]
+        # The dataset exposes ``option1``/``option2``, not an ``options``
+        # list, and ``answer`` is 1-based over those two in order. Building
+        # the choices in the reverse order while keeping ``answer - 1`` as
+        # the label inverted every example.
         choices = [
-            ctx.replace("_", o) for o in [opts[1], opts[0]]
+            ctx.replace("_", ex["option1"]),
+            ctx.replace("_", ex["option2"]),
         ]
         yield {
             "context": "",

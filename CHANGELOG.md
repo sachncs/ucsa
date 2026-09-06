@@ -295,6 +295,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   would now be wrong because `UCSA.forward` returns extra keys.
 
 ### Fixed
+- `ucsa.training.eval_harness._load_winogrande` read a non-existent
+  `options` key, so the WinoGrande task raised `KeyError` and never ran.
+  The dataset exposes `option1`/`option2`. The loader also built its
+  choices in reverse while keeping `answer - 1` as the label, which
+  inverted every example, so the task would have scored anti-correlated
+  had it run at all.
 - `Trainer.compute_loss` padded short targets with `0` instead of with the
   loss's ignore index. The working bank is 64 slots, so a short sequence
   left most positions unsupervised, and padding them with zero trained the

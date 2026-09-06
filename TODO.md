@@ -273,6 +273,25 @@ makes that signal explicit, localisable, and optimisable.
 - [x] **forward-model hacking check survives optimisation in the unbalanced
       configuration**: predicted-vs-realised correlation +0.755, 7/8 inputs
       improved on both, 1/8 gamed.
+- [x] fix(eval): `_load_winogrande` read a non-existent `options` key
+      (`KeyError`, task never ran) and inverted its labels. All four named
+      tasks now run.
+- [x] **HellaSwag / ARC / PIQA / WinoGrande are flat, as the spec
+      predicted.** Real `ckpts/ucsa-step3000.safetensors` (384-hidden,
+      6-layer, fineweb-edu), 40 examples per task, origination off vs on:
+
+      | task | acc off | acc on | delta | mean ll off | mean ll on | s/example off -> on |
+      | --- | --- | --- | --- | --- | --- | --- |
+      | piqa | 0.5250 | 0.5250 | +0.0000 | -14.40213 | -14.40103 | 0.393 -> 0.406 |
+      | arc_easy | 0.2750 | 0.2750 | +0.0000 | -58.04808 | -58.05323 | 0.612 -> 0.675 |
+      | hellaswag | 0.2250 | 0.2250 | +0.0000 | -21.01121 | -21.00932 | 0.668 -> 0.663 |
+      | winogrande | 0.5250 | 0.5250 | +0.0000 | -8.58527 | -8.58428 | 0.374 -> 0.393 |
+
+      Accuracy is *exactly* unchanged while the mean log-likelihood shifts
+      by 1e-3 to 5e-3. So origination does perturb the forward pass, just
+      far below the granularity that reorders a multiple-choice ranking.
+      That is the same finding as "no intervention flips the arg-max
+      token", seen from the evaluation side.
 - [ ] **honest caveats, left open.**
       1. No intervention flips the arg-max token (0/16 in every config). The
          action *logits* move measurably and specifically, but at ppl 1.13

@@ -6,6 +6,9 @@ needs network access; that's exercised by ``scripts/eval.py``.
 """
 from __future__ import annotations
 
+import pytest
+
+from ucsa.training import eval_harness
 from ucsa.training.eval_harness import (
     TASK_REGISTRY,
     EvalResult,
@@ -129,3 +132,55 @@ def test_evaluate_task_returns_finite_accuracy_when_loader_is_empty():
         assert r.log_likelihood_mean == 0.0
     finally:
         spec.loader = saved_loader
+
+
+class TestWinograndeLoader:
+    """Tests for the WinoGrande loader's field names and label order."""
+
+    def fake_dataset(self) -> list[dict[str, str]]:
+        """internal: two rows in the real dataset's schema."""
+        return [
+            {
+                "sentence": "A beat B so _ was happy.",
+                "option1": "A",
+                "option2": "B",
+                "answer": "1",
+            },
+            {
+                "sentence": "C beat D so _ was sad.",
+                "option1": "C",
+                "option2": "D",
+                "answer": "2",
+            },
+        ]
+
+    def test_uses_option1_and_option2_keys(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The dataset has ``option1``/``option2``, not an ``options`` list.
+
+        Reading ``options`` raised ``KeyError`` and the task never ran.
+        """
+        rows = self.fake_dataset()
+        monkeypatch.setattr(
+            eval_harness, "load_dataset", lambda *a, **k: rows
+        )
+        examples = list(eval_harness._load_winogrande())
+        assert len(examples) == 2
+
+    def test_label_indexes_the_choice_it_names(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``answer`` is 1-based over ``option1``, ``option2`` in order.
+
+        Building the choices in reverse while keeping ``answer - 1`` as the
+        label inverted every example.
+        """
+        rows = self.fake_dataset()
+        monkeypatch.setattr(
+            eval_harness, "load_dataset", lambda *a, **k: rows
+        )
+        examples = list(eval_harness._load_winogrande())
+        first, second = examples
+        assert first["choices"][first["label"]] == "A beat B so A was happy."
+        assert second["choices"][second["label"]] == "C beat D so D was sad."
