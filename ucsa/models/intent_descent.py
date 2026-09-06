@@ -35,7 +35,7 @@ Two guards, because both failure modes are real:
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -266,6 +266,14 @@ def realized_outcome(
 ) -> float | None:
     """Score the action the model actually emitted.
 
+    Aligned the way the trainer aligns them. ``Trainer.compute_loss``
+    left-pads short targets, so the supervised positions are the *last*
+    ``len(targets)`` of the logits, not the first. Scoring the leading
+    positions instead reads slots the model was never trained on, which
+    pins the result near chance however well the model has learned: on a
+    model at training loss 0.13 the leading-position readout reported 3.64
+    against a chance level of 3.43.
+
     Args:
         outputs: A forward-pass result.
         targets: Target token ids of shape ``(batch, seq)``, or ``None``.
@@ -279,14 +287,15 @@ def realized_outcome(
     logits = outputs.get("language")
     if logits is None:
         return None
-    flat_logits = logits.reshape(-1, logits.shape[-1])
-    flat_targets = targets.reshape(-1).to(flat_logits.device)
-    span = min(flat_logits.shape[0], flat_targets.shape[0])
+    span = min(logits.shape[1], targets.shape[1])
     if span == 0:
         return None
+    aligned_logits = logits[:, -span:, :]
+    aligned_targets = targets[:, -span:].to(logits.device)
     return float(
         torch.nn.functional.cross_entropy(
-            flat_logits[:span], flat_targets[:span]
+            aligned_logits.reshape(-1, aligned_logits.shape[-1]),
+            aligned_targets.reshape(-1),
         ).item()
     )
 
@@ -477,6 +486,172 @@ def optimize_intent(
     return report
 
 
+@dataclass
+class MatchedComputeRow:
+    """One arm of a compute-matched comparison.
+
+    Attributes:
+        arm: ``"intent-optimization"`` or ``"more-reasoning"``.
+        operator_calls: Transition-operator invocations per input, the
+            common currency the two arms are matched on.
+        forward_passes: Model forward passes per input.
+        reasoning_iterations: Loop iterations per forward pass.
+        intent_steps: Inner descent steps per input.
+        realized: Mean realised outcome (lower is better).
+    """
+
+    arm: str
+    operator_calls: int
+    forward_passes: int
+    reasoning_iterations: int
+    intent_steps: int
+    realized: float
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serialisable view."""
+        return {
+            "arm": self.arm,
+            "operator_calls": self.operator_calls,
+            "forward_passes": self.forward_passes,
+            "reasoning_iterations": self.reasoning_iterations,
+            "intent_steps": self.intent_steps,
+            "realized": self.realized,
+        }
+
+
+def compute_matched_comparison(
+    model: UCSA,
+    pairs: Sequence[tuple[Tensor, Tensor]],
+    intent_steps: int,
+    learning_rate: float = 0.05,
+    target_encoder: torch.nn.Module | None = None,
+) -> list[MatchedComputeRow]:
+    """Compare intent optimisation against spending the same compute on
+    more reasoning.
+
+    A ``K=0`` arm is *cheaper*, not matched, so comparing against it would
+    credit intent optimisation for compute rather than for origination. The
+    honest control spends the same budget the other way the architecture
+    allows: more passes through the transition operator.
+
+    Both arms are costed in operator calls per input. The optimisation arm
+    makes ``(2 + K)`` forward passes at the model's configured
+    ``reasoning_iterations``. Two controls spend the same budget:
+
+    - ``more-reasoning`` raises the loop's iteration count. Note this runs
+      the model out of distribution -- it was trained at a fixed iteration
+      count -- so it is a weak control and its score degrades as the budget
+      grows. Reported for completeness, not relied on.
+    - ``repeat-and-average`` makes the same number of forward passes and
+      averages their logits. Every pass is in distribution, which makes
+      this the control the comparison should be judged against.
+
+    Args:
+        model: The model to measure. Restored before returning.
+        pairs: ``(inputs, targets)`` probe pairs.
+        intent_steps: ``K`` for the optimisation arm.
+        learning_rate: Step size on the intent bank.
+        target_encoder: Optional EMA target encoder for the objective.
+
+    Returns:
+        One :class:`MatchedComputeRow` per arm.
+
+    Raises:
+        ValueError: If ``intent_steps`` is not positive or ``pairs`` is
+            empty.
+    """
+    if intent_steps <= 0:
+        raise ValueError(
+            f"intent_steps must be positive to compare, got {intent_steps}."
+        )
+    if not pairs:
+        raise ValueError("need at least one probe pair.")
+    base_iterations = model.reasoning_loop.config.num_iterations
+    forward_passes = 2 + intent_steps
+    budget = forward_passes * base_iterations
+
+    optimised: list[float] = []
+    for inputs, targets in pairs:
+        report = optimize_intent(
+            model,
+            inputs,
+            num_steps=intent_steps,
+            learning_rate=learning_rate,
+            targets=targets,
+            restore=True,
+            target_encoder=target_encoder,
+        )
+        if report.final_realized is not None:
+            optimised.append(report.final_realized)
+
+    control: list[float] = []
+    original_config = model.reasoning_loop.config
+    snapshot = pcs_snapshot(model)
+    try:
+        model.reasoning_loop.config = replace(
+            original_config, num_iterations=budget
+        )
+        for inputs, targets in pairs:
+            pcs_restore(model, snapshot)
+            with torch.no_grad():
+                outputs = model(inputs)
+            value = realized_outcome(outputs, targets)
+            if value is not None:
+                control.append(value)
+    finally:
+        model.reasoning_loop.config = original_config
+        pcs_restore(model, snapshot)
+
+    ensemble: list[float] = []
+    try:
+        for inputs, targets in pairs:
+            pcs_restore(model, snapshot)
+            accumulated: Tensor | None = None
+            with torch.no_grad():
+                for _ in range(forward_passes):
+                    logits = model(inputs)["language"]
+                    accumulated = (
+                        logits.clone()
+                        if accumulated is None
+                        else accumulated + logits
+                    )
+            if accumulated is None:
+                continue
+            averaged = accumulated / float(forward_passes)
+            value = realized_outcome({"language": averaged}, targets)
+            if value is not None:
+                ensemble.append(value)
+    finally:
+        pcs_restore(model, snapshot)
+
+    return [
+        MatchedComputeRow(
+            arm="intent-optimization",
+            operator_calls=budget,
+            forward_passes=forward_passes,
+            reasoning_iterations=base_iterations,
+            intent_steps=intent_steps,
+            realized=sum(optimised) / len(optimised) if optimised else 0.0,
+        ),
+        MatchedComputeRow(
+            arm="more-reasoning",
+            operator_calls=budget,
+            forward_passes=1,
+            reasoning_iterations=budget,
+            intent_steps=0,
+            realized=sum(control) / len(control) if control else 0.0,
+        ),
+        MatchedComputeRow(
+            arm="repeat-and-average",
+            operator_calls=budget,
+            forward_passes=forward_passes,
+            reasoning_iterations=base_iterations,
+            intent_steps=0,
+            realized=sum(ensemble) / len(ensemble) if ensemble else 0.0,
+        ),
+    ]
+
+
 def outcome_correlation(reports: Sequence[DescentReport]) -> float:
     """Correlation between predicted-outcome and realised-outcome change.
 
@@ -516,6 +691,8 @@ def outcome_correlation(reports: Sequence[DescentReport]) -> float:
 __all__ = [
     "DescentReport",
     "DescentStep",
+    "MatchedComputeRow",
+    "compute_matched_comparison",
     "critic_score",
     "jepa_chain_error",
     "jepa_step_errors",

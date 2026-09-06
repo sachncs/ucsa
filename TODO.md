@@ -270,9 +270,46 @@ makes that signal explicit, localisable, and optimisable.
       move it by *exactly* 0.0.
 - [x] **perplexity flat-to-slightly-worse, as the spec predicted**: 1.049
       without origination, 1.132 with. The sparse gate costs capacity.
-- [x] **forward-model hacking check survives optimisation in the unbalanced
-      configuration**: predicted-vs-realised correlation +0.755, 7/8 inputs
-      improved on both, 1/8 gamed.
+- [x] fix(descent): `realized_outcome` scored the *leading* logit positions
+      while the trainer left-pads targets to the *trailing* ones, so it read
+      slots the model was never trained on. On a model at training loss 0.13
+      it reported 3.64 against a chance level of 3.43 -- pinned at chance
+      regardless of what the model had learned. Every "realised" number
+      before this fix was measured through that misalignment.
+- [x] feat(descent): `compute_matched_comparison`. A `K=0` arm is *cheaper*,
+      not matched, so it would credit the optimisation for compute rather
+      than for origination. Two controls now spend the same operator-call
+      budget: `more-reasoning` (raises the loop's iteration count -- weak,
+      because it runs the model out of distribution, and its score
+      accordingly blows up to 3.8-4.4) and `repeat-and-average` (same number
+      of in-distribution forward passes, logits averaged), which is the one
+      to judge against.
+- [ ] **open finding, negative: forward-model hacking does NOT survive
+      optimisation.** With the readout alignment corrected:
+
+      | config | K | predicted better | realised better | gamed | corr |
+      | --- | --- | --- | --- | --- | --- |
+      | balanced gate | 3 | 8/8 | 2/8 | **6/8** | **-0.600** |
+      | unbalanced gate | 3 | 7/8 | 6/8 | 2/8 | **-0.176** |
+
+      The spec's bar is that the predicted-vs-realised correlation must
+      survive after optimisation. It is negative in both configurations, so
+      descending the JEPA chain w.r.t. intent is exploiting the predictor.
+      The earlier +0.756 was the misaligned readout, not a result.
+- [ ] **open finding, negative: no gain at matched compute.** Equal
+      operator-call budget, 8 probe inputs, realised outcome (lower better):
+
+      | K | budget | intent-optimization | repeat-and-average | more-reasoning |
+      | --- | --- | --- | --- | --- |
+      | 1 | 12 | 0.08217 | 0.08224 | 0.08709 |
+      | 3 | 20 | 0.08217 | 0.08226 | 3.81294 |
+      | 5 | 28 | 0.08217 | 0.08227 | 4.43165 |
+
+      Intent optimisation beats the in-distribution control by 7e-5 to 1e-4
+      nats, roughly 0.1% relative -- nothing. Against the spec's own
+      standard, "any quality claim must be reported at matched compute or it
+      is not a result", there is no quality result here. The instrumentation
+      built for this phase is what caught it.
 - [x] fix(eval): `_load_winogrande` read a non-existent `options` key
       (`KeyError`, task never ran) and inverted its labels. All four named
       tasks now run.

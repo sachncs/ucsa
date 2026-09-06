@@ -23,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same reason. `DescentReport.forward_model_gamed` and
   `outcome_correlation` are the forward-model-hacking check: predicted
   gain with realised loss.
+- `ucsa.models.intent_descent.compute_matched_comparison` and
+  `MatchedComputeRow`: intent optimisation against two controls at an
+  equal operator-call budget. A `K=0` arm is cheaper, not matched, so it
+  would credit the optimisation for compute rather than for origination.
+  `repeat-and-average` (same forward-pass count, logits averaged) is the
+  in-distribution control; `more-reasoning` (higher loop iteration count)
+  is reported but weak, since it runs the model outside the iteration
+  count it was trained at. Surfaced by `scripts/probe_origination.py`.
 - `ucsa.models.intent_descent.jepa_step_errors`: chain error per step, so
   the "late steps improve more than early ones" signature can be checked
   rather than assumed. Reported by `scripts/probe_origination.py`.
@@ -320,6 +328,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   would now be wrong because `UCSA.forward` returns extra keys.
 
 ### Fixed
+- `ucsa.models.intent_descent.realized_outcome` scored the *leading* logit
+  positions while `Trainer.compute_loss` left-pads targets to the
+  *trailing* ones, so it read positions the model was never trained on. On
+  a model at training loss 0.13 it reported 3.64 against a chance level of
+  3.43, i.e. pinned at chance however well the model had learned. Every
+  "realised outcome" figure measured before this fix, including a
+  previously reported +0.756 predicted-vs-realised correlation, was an
+  artefact of it; corrected, that correlation is negative.
 - `ucsa.training.eval_harness._load_winogrande` read a non-existent
   `options` key, so the WinoGrande task raised `KeyError` and never ran.
   The dataset exposes `option1`/`option2`. The loader also built its

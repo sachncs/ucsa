@@ -7,6 +7,7 @@ import torch
 
 from ucsa.models.intent_descent import (
     DescentReport,
+    compute_matched_comparison,
     ema_outputs,
     jepa_chain_error,
     optimize_intent,
@@ -96,6 +97,98 @@ class TestRealizedOutcome:
     def test_none_without_logits(self) -> None:
         """No language head output means no realised outcome."""
         assert realized_outcome({}, torch.zeros(1, 4).long()) is None
+
+    def test_scores_the_trailing_positions(self) -> None:
+        """Alignment must match the trainer's left-padding.
+
+        ``Trainer.compute_loss`` left-pads short targets, so the supervised
+        positions are the *last* ``len(targets)`` logits. Scoring the
+        leading positions reads slots the model was never trained on, which
+        pinned the readout near chance regardless of how well the model had
+        learned.
+        """
+        vocab, span = 10, 3
+        logits = torch.full((1, 8, vocab), -20.0)
+        targets = torch.tensor([[1, 2, 3]])
+        for offset, token in enumerate([1, 2, 3]):
+            logits[0, -span + offset, token] = 20.0
+        value = realized_outcome({"language": logits}, targets)
+        assert value is not None
+        assert value == pytest.approx(0.0, abs=1e-6)
+
+    def test_leading_positions_are_ignored(self) -> None:
+        """Getting the leading positions right must not score as correct."""
+        vocab = 10
+        logits = torch.full((1, 8, vocab), -20.0)
+        targets = torch.tensor([[1, 2, 3]])
+        for offset, token in enumerate([1, 2, 3]):
+            logits[0, offset, token] = 20.0
+        value = realized_outcome({"language": logits}, targets)
+        assert value is not None
+        assert value > 1.0
+
+
+class TestMatchedCompute:
+    """Tests for :func:`compute_matched_comparison`."""
+
+    def test_arms_share_the_operator_call_budget(self) -> None:
+        """Both controls must cost the same as the optimisation arm.
+
+        A ``K=0`` arm is cheaper, not matched, so comparing against it
+        would credit the optimisation for compute rather than origination.
+        """
+        model = tiny_model()
+        inputs, targets = tiny_inputs()
+        rows = compute_matched_comparison(
+            model, [(inputs, targets)], intent_steps=2
+        )
+        assert {row.arm for row in rows} == {
+            "intent-optimization",
+            "more-reasoning",
+            "repeat-and-average",
+        }
+        budgets = {row.operator_calls for row in rows}
+        assert len(budgets) == 1
+        base = model.reasoning_loop.config.num_iterations
+        assert budgets.pop() == (2 + 2) * base
+
+    def test_restores_the_loop_config_and_state(self) -> None:
+        """The comparison is read-only."""
+        model = tiny_model()
+        inputs, targets = tiny_inputs()
+        before_iters = model.reasoning_loop.config.num_iterations
+        before = {
+            name: model.pcs.get_bank(name).detach().clone()
+            for name in model.pcs.bank_order
+        }
+        compute_matched_comparison(model, [(inputs, targets)], intent_steps=2)
+        assert model.reasoning_loop.config.num_iterations == before_iters
+        for name, tensor in before.items():
+            assert torch.allclose(model.pcs.get_bank(name).detach(), tensor)
+
+    def test_rejects_non_positive_steps(self) -> None:
+        """There is nothing to compare at ``K=0``."""
+        model = tiny_model()
+        inputs, targets = tiny_inputs()
+        with pytest.raises(ValueError):
+            compute_matched_comparison(
+                model, [(inputs, targets)], intent_steps=0
+            )
+
+    def test_rejects_empty_pairs(self) -> None:
+        """No probe pairs means no comparison."""
+        with pytest.raises(ValueError):
+            compute_matched_comparison(tiny_model(), [], intent_steps=1)
+
+    def test_rows_are_serialisable(self) -> None:
+        """``to_dict`` returns plain values."""
+        model = tiny_model()
+        inputs, targets = tiny_inputs()
+        rows = compute_matched_comparison(
+            model, [(inputs, targets)], intent_steps=1
+        )
+        payload = rows[0].to_dict()
+        assert set(payload) >= {"arm", "operator_calls", "realized"}
 
 
 class TestEmaOutputs:

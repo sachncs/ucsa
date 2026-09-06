@@ -30,6 +30,7 @@ import torch
 import yaml
 
 from ucsa.models.intent_descent import (
+    compute_matched_comparison,
     jepa_step_errors,
     optimize_intent,
     outcome_correlation,
@@ -202,6 +203,17 @@ def print_human(report: dict[str, object]) -> None:
             f"corr {row['outcome_correlation']:+.3f}",
             flush=True,
         )
+    matched_rows = report["matched_compute"]
+    assert isinstance(matched_rows, list)
+    if matched_rows:
+        print("  matched compute (equal operator calls per input):", flush=True)
+        for row in matched_rows:
+            print(
+                f"    K={row['intent_steps']:<2} {row['arm']:20s} "
+                f"calls={row['operator_calls']:<3} "
+                f"realised={row['realized']:.5f}",
+                flush=True,
+            )
 
 
 def main() -> None:
@@ -246,6 +258,19 @@ def main() -> None:
         model, pairs, list(args.intent_steps), args.intent_learning_rate
     )
 
+    matched: list[dict[str, object]] = []
+    for k in sorted({s for s in args.intent_steps if s > 0}):
+        matched.extend(
+            row.to_dict()
+            for row in compute_matched_comparison(
+                model,
+                pairs,
+                intent_steps=k,
+                learning_rate=args.intent_learning_rate,
+                target_encoder=EMATargetEncoder(model, momentum=0.99),
+            )
+        )
+
     report: dict[str, object] = {
         "ckpt": args.ckpt,
         "seed": args.seed,
@@ -255,6 +280,7 @@ def main() -> None:
         "collapse": collapse.to_dict(),
         "localisation": localisation.to_dict(),
         "descent": descent,
+        "matched_compute": matched,
     }
     os.makedirs(os.path.dirname(args.out_json) or ".", exist_ok=True)
     with open(args.out_json, "w") as handle:
