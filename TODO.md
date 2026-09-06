@@ -349,11 +349,27 @@ makes that signal explicit, localisable, and optimisable.
       *variance* rises (cv 0.040 -> 0.243) -- exactly the signature the spec
       predicted. Fixed `K=8` costs 8.3x `K=0`, in line with the spec's "K=5
       is roughly 10x".
-- [ ] **honest caveats, left open.**
-      1. No intervention flips the arg-max token (0/16 in every config). The
-         action *logits* move measurably and specifically, but at ppl 1.13
-         the model is confident enough that the decision does not change.
-         Controllability is measured in logit space, not decision space.
+- [x] **localisation sharpens as the model learns**, which is the trend the
+      mechanism predicts. Same run, probed at six points:
+
+      | step | ppl | grad-active | controllability | top-token flips |
+      | --- | --- | --- | --- | --- |
+      | 0 | (init) | 5.4/16 | 0.00 | 0/128 |
+      | 150 | 30.77 | 4.0/16 | 0.00 | 0/128 |
+      | 300 | 33.06 | 4.2/16 | 0.00 | 0/128 |
+      | 500 | 25.51 | 3.9/16 | 0.00 | 0/128 |
+      | 800 | 12.37 | 2.5/16 | 0.22 | 0/128 |
+      | 1199 | 1.29 | 2.0/16 | 0.81 | 0/128 |
+
+      The gradient concentrates on fewer slots and their causal effect grows
+      monotonically as the task is learned.
+- [ ] **honest caveat, left open: no decision-space authority.** The
+      arg-max token never flips -- 0 of 128 interventions, at *every* stage
+      from random init to ppl 1.29. So this is not model saturation, as
+      first suspected; intent simply has no authority over which token is
+      emitted. Controllability is therefore a logit-space measurement. The
+      same limit shows up in the evaluation numbers, where accuracy is
+      exactly flat while mean log-likelihood shifts by 1e-3 to 5e-3.
       2. Load balancing and descent quality pull against each other:
          balancing keeps the gate conditioning on the input (MI 0.041 vs
          0.000) but drops the descent correlation from +0.755 to +0.008.
