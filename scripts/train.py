@@ -64,13 +64,32 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--reconstruction-weight", type=float, default=0.1)
     p.add_argument("--no-tc-jepa", dest="tc_jepa", action="store_false")
     p.add_argument("--text-conditioner-scale", type=float, default=0.1)
+    # Endogenous origination (intent bank) toggles
+    p.add_argument("--observation-mix", type=float, default=1.0,
+                   help="alpha_0. 1.0 keeps the exogenous observation and "
+                        "never calls the origination generator.")
+    p.add_argument("--observation-mix-decay", type=float, default=1.0)
+    p.add_argument("--origination-top-k", type=int, default=2)
+    p.add_argument("--no-origination-balance", dest="origination_balance",
+                   action="store_false",
+                   help="Drop the gate's load-balancing loss. Tightens "
+                        "localisation but collapses the gate's mutual "
+                        "information with the input to zero.")
+    p.add_argument("--origination-weight", type=float, default=0.01)
+    p.add_argument("--intent-update-scale", type=float, default=0.1,
+                   help="0.0 freezes the intent bank, making the "
+                        "origination signal identical for every input.")
+    p.add_argument("--stream-intent-bank", action="store_true",
+                   help="Also let the operator attend over the intent "
+                        "bank. Destroys per-slot attribution; kept as the "
+                        "ablation that shows why the exclusion is needed.")
     p.add_argument("--no-curriculum", dest="curriculum", action="store_false",
                    help="Disable the 4-stage curriculum (all losses always on).")
     p.add_argument("--ablation", default=None,
                    help="A short tag appended to --out-json (e.g., 'no-ema').")
     p.add_argument("--out-json", default=None)
     p.set_defaults(ema=True, lewm=True, recon=True,
-                   tc_jepa=True, curriculum=True)
+                   tc_jepa=True, curriculum=True, origination_balance=True)
     return p.parse_args()
 
 
@@ -192,6 +211,11 @@ def main() -> None:
     cfg["model"]["text_conditioner_scale"] = (
         args.text_conditioner_scale if args.tc_jepa else 0.0
     )
+    cfg["model"]["observation_mix"] = args.observation_mix
+    cfg["model"]["observation_mix_decay"] = args.observation_mix_decay
+    cfg["model"]["origination_top_k"] = args.origination_top_k
+    cfg["model"]["intent_update_scale"] = args.intent_update_scale
+    cfg["model"]["stream_intent_bank"] = args.stream_intent_bank
 
     cfg["training"]["max_steps"] = args.max_steps
     cfg["training"]["warmup_steps"] = 400
@@ -245,6 +269,17 @@ def main() -> None:
         stack.append(f"recon(w={args.reconstruction_weight})")
     if args.tc_jepa:
         stack.append(f"tc-jepa(s={args.text_conditioner_scale})")
+    if args.observation_mix < 1.0:
+        stack.append(
+            f"origination(alpha0={args.observation_mix},"
+            f"decay={args.observation_mix_decay},"
+            f"k={args.origination_top_k},"
+            f"update={args.intent_update_scale},"
+            f"balance={'on' if args.origination_balance else 'off'},"
+            f"stream={'on' if args.stream_intent_bank else 'off'})"
+        )
+    else:
+        stack.append("origination=off(alpha=1)")
     if args.curriculum:
         stack.append("curriculum=4stage")
     else:
@@ -255,13 +290,22 @@ def main() -> None:
 
     # ponytail: ablation toggles flow into the combined loss via a
     # zero-weight substitution. The forward path stays unchanged.
-    if not args.recon:
+    if not args.recon or not args.origination_balance:
         from ucsa.models.losses import LossWeights
         trainer.loss_fn.weights = LossWeights(
             jepa=trainer.loss_fn.weights.jepa,
             memory=trainer.loss_fn.weights.memory,
             router=trainer.loss_fn.weights.router,
-            reconstruction=0.0,
+            reconstruction=(
+                trainer.loss_fn.weights.reconstruction
+                if args.recon
+                else 0.0
+            ),
+            origination=(
+                args.origination_weight
+                if args.origination_balance
+                else 0.0
+            ),
         )
     if not args.tc_jepa:
         # ponytail: zero the field, the conditioner contributes 0.

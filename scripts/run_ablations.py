@@ -33,6 +33,28 @@ ABLATIONS = [
     {"tag": "no-recon", "flags": ["--no-recon"]},
     {"tag": "no-tc-jepa", "flags": ["--no-tc-jepa"]},
     {"tag": "no-curriculum", "flags": ["--no-curriculum"]},
+    # Endogenous origination. "origination" is the treatment; the rest
+    # isolate one mechanism each, all at the same step count and the same
+    # forward-pass budget, so the comparison is matched-compute.
+    {"tag": "origination", "flags": ["--observation-mix", "0.5"]},
+    {
+        "tag": "origination-no-balance",
+        "flags": ["--observation-mix", "0.5", "--no-origination-balance"],
+    },
+    {
+        "tag": "origination-static-bank",
+        "flags": [
+            "--observation-mix", "0.5", "--intent-update-scale", "0.0",
+        ],
+    },
+    {
+        "tag": "origination-streamed-intent",
+        "flags": ["--observation-mix", "0.5", "--stream-intent-bank"],
+    },
+    {
+        "tag": "origination-dense-gate",
+        "flags": ["--observation-mix", "0.5", "--origination-top-k", "16"],
+    },
 ]
 
 

@@ -212,8 +212,43 @@ makes that signal explicit, localisable, and optimisable.
 
 ### Phase 11.D — origination is optimised
 
-- [ ] feat(infer): K steps of gradient descent on the `intent` bank only,
-      default `K=0`
+- [x] feat(models): `ucsa/models/intent_descent.py` -- K steps of gradient
+      descent on the `intent` bank only, weights frozen, against the
+      multi-step JEPA chain, with optional early stop on the intent gradient
+      norm and `K=0` by default
+- [x] feat(infer): `generate_with_intent_descent` plus `--intent-steps` /
+      `--intent-learning-rate`, `K=0` default
+- [x] fix(descent): evaluate every candidate from the same cognitive state.
+      A forward pass rewrites the PCS, so back-to-back rollouts drift; the
+      first version reported the objective falling 0.0069 -> 0.0028 purely
+      from drift while the bank barely moved. Same fix needed for the EMA
+      encoder, whose own forward also rewrote its banks.
+- [x] fix(descent): use EMA targets. Without them both sides of every JEPA
+      pair come from the same forward pass, so moving intent moves the
+      prediction and its target together; the gradient measured ~3e-7 and
+      the objective refused to fall even when the bank moved 2.2x its norm.
+- [x] feat(scripts): `scripts/probe_origination.py` emits collapse,
+      localisation and the matched-compute descent sweep as JSON; ablation
+      arms added to `scripts/run_ablations.py`
+- [x] **forward-model hacking is real and detected.** 400 steps, EMA
+      momentum 0.99, 8 probe inputs:
+
+      | K | passes/input | predicted better | realised better | gamed | corr(pred,real) |
+      | --- | --- | --- | --- | --- | --- |
+      | 0 | 2 | 0/8 | 0/8 | 0/8 | +0.000 |
+      | 1 | 3 | 8/8 | 5/8 | 3/8 | +0.005 |
+      | 3 | 5 | 8/8 | 6/8 | 2/8 | -0.313 |
+      | 5 | 7 | 8/8 | 7/8 | 2/8 | -0.126 |
+
+- [ ] **open finding**: descent reliably improves the *predicted* outcome
+      (8/8 at every K > 0) but the predicted-versus-realised correlation is
+      near zero or negative. Improving the JEPA prediction is not yet
+      evidence of improving the action, and 2-3 of 8 inputs are flagged
+      outright as gamed. Per the spec's own bar -- "predicted-vs-realized
+      outcome correlation must survive *after* optimization" -- it does not
+      survive, so intent descent is not yet a usable quality mechanism.
+      Left as measured. The likely cause is that a 400-step model's forward
+      model is not calibrated enough to optimise against.
 
 ## Exit criteria
 

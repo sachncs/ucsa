@@ -8,6 +8,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ucsa.models.intent_descent`: Phase D. `optimize_intent` runs K steps of
+  gradient descent on the `intent` bank alone with every weight frozen,
+  against the multi-step JEPA chain as the model's own forward model.
+  `K=0` by default, so nothing runs unless asked. Optional early stop on
+  the intent gradient norm; `normalize_gradient` (default `True`) makes
+  `learning_rate` a step size in bank-norm units, because the raw intent
+  gradient is around `1e-7` and no fixed raw step size works across
+  models. Every candidate is evaluated from the *same* cognitive state --
+  a forward pass rewrites the PCS, and without restoring it the reported
+  improvement is drift, not a better origination (measured: the first
+  version showed the objective falling 0.0069 to 0.0028 purely from
+  drift). `ema_outputs` restores the target encoder's banks too, for the
+  same reason. `DescentReport.forward_model_gamed` and
+  `outcome_correlation` are the forward-model-hacking check: predicted
+  gain with realised loss.
+- `ucsa/infer.py`: `generate_with_intent_descent` and
+  `sample_next_token`; `run_inference(intent_steps=...)` and
+  `--intent-steps` / `--intent-learning-rate` on the CLI. `K=0` default.
+  Reports carry the forward-pass count so cost travels with any claim.
+- `scripts/probe_origination.py`: emits collapse, localisation, and the
+  matched-compute descent sweep as one JSON report, mirroring
+  `scripts/probe_banks.py`.
+- `scripts/train.py`: `--observation-mix`, `--observation-mix-decay`,
+  `--origination-top-k`, `--no-origination-balance`,
+  `--origination-weight`, `--intent-update-scale`,
+  `--stream-intent-bank`. `scripts/run_ablations.py` gains the
+  `origination`, `origination-no-balance`, `origination-static-bank`,
+  `origination-streamed-intent`, and `origination-dense-gate` arms, all
+  at the same step count so the comparison is matched-compute.
 - `ucsa.training.metrics`: the intent-collapse diagnostics --
   `intent_state_variance`, `intent_gate_usage`, `intent_gate_entropy`,
   `intent_gate_mutual_info`, `intent_read_share` -- added to
