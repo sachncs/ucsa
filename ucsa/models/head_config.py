@@ -16,6 +16,8 @@ class HeadSpec:
     num_plan_tokens: int = 64
     num_tools: int = 32
     memory_query_dim: int = 64
+    origination_top_k: int = 2
+    origination_aux_loss_weight: float = 0.01
 
 
 def build_head_config(
@@ -31,6 +33,8 @@ def build_head_config(
         num_plan_tokens=spec.num_plan_tokens,
         num_tools=spec.num_tools,
         memory_query_dim=spec.memory_query_dim,
+        origination_top_k=spec.origination_top_k,
+        origination_aux_loss_weight=spec.origination_aux_loss_weight,
     )
 
 
@@ -38,16 +42,25 @@ def build_head_config_from_cfg(cfg: Mapping[str, object] | object) -> HeadConfig
     """Build a :class:`HeadConfig` from a UCSAConfig-like object."""
     hidden_size = int(getattr(cfg, "hidden_size", 128))
     vocab_size = int(getattr(cfg, "vocab_size", 50257))
+    top_k = int(getattr(cfg, "origination_top_k", 2))
+    aux_weight = float(getattr(cfg, "origination_aux_loss_weight", 0.01))
     head_section = getattr(cfg, "heads", None)
     if head_section is None and isinstance(cfg, Mapping):
         head_section = cfg.get("heads")  # type: ignore[union-attr]
     if head_section is None:
-        return HeadConfig(hidden_size=hidden_size, vocab_size=vocab_size)
+        return HeadConfig(
+            hidden_size=hidden_size,
+            vocab_size=vocab_size,
+            origination_top_k=top_k,
+            origination_aux_loss_weight=aux_weight,
+        )
     spec = HeadSpec(
         vocab_size=int(getattr(head_section, "vocab_size", vocab_size)),
         num_plan_tokens=int(getattr(head_section, "num_plan_tokens", 64)),
         num_tools=int(getattr(head_section, "num_tools", 32)),
         memory_query_dim=int(getattr(head_section, "memory_query_dim", 64)),
+        origination_top_k=top_k,
+        origination_aux_loss_weight=aux_weight,
     )
     return build_head_config(hidden_size, spec)
 

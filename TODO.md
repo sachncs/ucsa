@@ -151,9 +151,26 @@ makes that signal explicit, localisable, and optimisable.
 
 ### Phase 11.B — origination is localisable
 
-- [ ] feat(heads): route `G` through a top-k sparse gate over intent slots
-- [ ] feat(probe): per-slot `grad x activation` attribution + causal
-      intervention utility
+- [x] feat(heads): route `G` through a top-k sparse gate over intent slots,
+      reusing `load_balancing_loss` / `top_k_mask` extracted from `moe.py`
+- [x] feat(probe): `ucsa/models/origination.py` -- per-slot
+      `grad x activation` attribution, ablate/swap intervention, and a
+      combined controllability + specificity rate
+- [x] fix(probe): snapshot and restore the whole PCS around every probe. The
+      operator rewrites every bank each iteration, so back-to-back forwards
+      start from different states; without this the measured effect was
+      ~100x too large and was mostly state drift.
+- [ ] **open finding, do not close**: measured controllability is `0.000` in
+      every configuration after a 100-step fixed-batch run. Ablating any
+      intent slot moves the emitted action by `<= 1.3e-4` relative, and
+      gated slots are not distinguishable from ungated ones. Two candidate
+      causes, both needing a decision before Phase 11.D:
+      1. The intent bank reaches the action by two paths -- through `G`
+         (sparse, attributable) and as ordinary PCS context the operator
+         attends over (dense, not attributable). The second path dilutes
+         and un-localises the first.
+      2. No loss term rewards using intent, so there is a path but no
+         incentive. 100 steps on one batch is also not training.
 
 ### Phase 11.C — collapse diagnostic
 

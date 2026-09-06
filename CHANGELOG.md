@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `ucsa.models.moe.load_balancing_loss` and `top_k_mask`: the routing
+  machinery extracted as module-level functions so the origination gate
+  reuses it with intent slots in place of experts.
+  `MixtureOfExperts._load_balancing_loss` now delegates; the arithmetic
+  is unchanged.
+- `ucsa.models.projection_heads.OriginationHead`: a top-k sparse gate
+  over the intent slots. The working side of the attention stays dense
+  (it is context, not origination). Exposes `last_gate_logits`,
+  `last_gate_weights`, `last_gate_mask`, and `last_aux_loss`.
+  `HeadConfig.origination_top_k` / `origination_aux_loss_weight` and the
+  matching `UCSAConfig` fields control it. `UCSA.forward` reports
+  `origination_aux_loss`; it is **not** summed into the total loss,
+  because wiring a regulariser before the Phase C collapse diagnostic
+  exists would be tuning toward a number we cannot yet read.
+- `ucsa.models.origination`: the localisation probes.
+  `intent_attribution` returns a per-slot `grad x activation` map plus
+  which slots the sparse gate actually routed to; `intervene_intent`
+  ablates or swaps a slot and reports how far the action moved;
+  `counterfactual_controllability` combines them into a controllability
+  and a specificity rate. `pcs_snapshot` / `pcs_restore` make the probes
+  genuinely read-only: the operator rewrites every bank on every
+  iteration, so without snapshotting, a baseline and a perturbed forward
+  start from different states and the measured difference is mostly that
+  drift. Fixing this shrank the observed effect sizes by ~100x.
 - `ucsa.models.state`: the `intent` bank (16 tokens, trainable), the
   origination signal from which the reasoning loop generates the next
   iteration's input. Appended last in `BANK_NAMES` so every existing

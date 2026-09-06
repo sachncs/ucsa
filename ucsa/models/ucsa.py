@@ -77,6 +77,13 @@ class UCSAConfig:
             reproducing the behaviour from before the ``intent`` bank
             existed.
         observation_mix_decay: Geometric per-iteration decay of ``alpha``.
+        origination_top_k: Intent slots each query token may read through
+            the origination gate. Sparsity is what makes the origination
+            attributable, so this is the knob the localisation ablation
+            sweeps.
+        origination_aux_loss_weight: Weight on the origination gate's
+            load-balancing loss. Exposed as ``origination_aux_loss`` in the
+            forward dict; not yet added to the total loss.
     """
 
     hidden_size: int = 128
@@ -96,6 +103,8 @@ class UCSAConfig:
     differentiable_state_carry: bool = True
     observation_mix: float = 1.0
     observation_mix_decay: float = 1.0
+    origination_top_k: int = 2
+    origination_aux_loss_weight: float = 0.01
     # TC-JEPA text conditioner config; arXiv 2605.03245 (May 2026).
     text_conditioner_top_k: int = 4
     text_conditioner_scale: float = 0.1
@@ -357,6 +366,11 @@ class UCSA(nn.Module):
         heads_out["jepa_multi_step"] = jepa_multi_step
         heads_out["long_term"] = long_term
         heads_out["router_logits"] = router_logits
+        # The origination gate's load-balancing loss. Reported, not yet
+        # summed into the total: an unbalanced gate is a collapse pathway,
+        # but wiring a regulariser before the collapse diagnostic exists
+        # would be tuning toward a number we cannot yet read.
+        heads_out["origination_aux_loss"] = self.heads.origination.last_aux_loss
         return heads_out
 
     def start_memory_service(self) -> None:
@@ -431,6 +445,12 @@ def build_ucsa(cfg: Any) -> UCSA:
             observation_mix=float(model_section.get("observation_mix", 1.0)),
             observation_mix_decay=float(
                 model_section.get("observation_mix_decay", 1.0)
+            ),
+            origination_top_k=int(
+                model_section.get("origination_top_k", 2)
+            ),
+            origination_aux_loss_weight=float(
+                model_section.get("origination_aux_loss_weight", 0.01)
             ),
             text_conditioner_top_k=int(
                 model_section.get("text_conditioner_top_k", 4)

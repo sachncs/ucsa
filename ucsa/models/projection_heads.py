@@ -25,6 +25,8 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor, nn
 
+from ucsa.models.moe import load_balancing_loss, top_k_mask
+
 
 @dataclass(frozen=True)
 class HeadConfig:
@@ -39,6 +41,12 @@ class HeadConfig:
         reconstruction_dim: Dim of the input-reconstruction projection.
             Defaults to ``hidden_size`` so it can be compared against
             ``perception.embed_tokens`` element-wise.
+        origination_top_k: Number of intent slots each query token may read
+            through the origination gate. The sparsity is what makes the
+            origination attributable.
+        origination_aux_loss_weight: Weight on the origination gate's
+            load-balancing loss, exposed as
+            ``OriginationHead.last_aux_loss``.
     """
 
     hidden_size: int = 128
@@ -47,6 +55,8 @@ class HeadConfig:
     num_tools: int = 32
     memory_query_dim: int = 64
     reconstruction_dim: int = 0  # 0 = inherit hidden_size
+    origination_top_k: int = 2
+    origination_aux_loss_weight: float = 0.01
 
     def __post_init__(self) -> None:
         if self.hidden_size <= 0:
@@ -69,6 +79,16 @@ class HeadConfig:
             raise ValueError(
                 f"memory_query_dim must be positive, "
                 f"got {self.memory_query_dim}."
+            )
+        if self.origination_top_k <= 0:
+            raise ValueError(
+                f"origination_top_k must be positive, "
+                f"got {self.origination_top_k}."
+            )
+        if self.origination_aux_loss_weight < 0.0:
+            raise ValueError(
+                f"origination_aux_loss_weight must be non-negative, "
+                f"got {self.origination_aux_loss_weight}."
             )
         if self.reconstruction_dim <= 0:
             # ponytail: default the reconstruction dim to hidden_size
@@ -220,20 +240,71 @@ class OriginationHead(nn.Module):
     reaches the output except through the attention weights, so the mix in
     :class:`~ucsa.models.reasoning_loop.ReasoningLoop` remains the only
     path by which the real observation survives.
+
+    The intent side of the attention is routed through a **top-k sparse
+    gate**, reusing the routing machinery in :mod:`ucsa.models.moe` with
+    intent slots in place of experts. The sparsity is the point: with a
+    dense read every slot contributes a little to every action and the
+    origination cannot be attributed to anything. The working side stays
+    dense -- it is context, not origination.
     """
 
-    def __init__(self, hidden_size: int) -> None:
+    def __init__(
+        self,
+        hidden_size: int,
+        top_k: int = 2,
+        aux_loss_weight: float = 0.01,
+    ) -> None:
         """Initialise the origination generator.
 
         Args:
             hidden_size: Hidden dimensionality.
+            top_k: Number of intent slots each query token may read. Values
+                at or above the bank size make the gate dense.
+            aux_loss_weight: Weight on the gate's load-balancing loss,
+                which stops one slot from winning every query.
+
+        Raises:
+            ValueError: If ``top_k`` is not positive or ``aux_loss_weight``
+                is negative.
         """
         super().__init__()
+        if top_k <= 0:
+            raise ValueError(f"top_k must be positive, got {top_k}.")
+        if aux_loss_weight < 0.0:
+            raise ValueError(
+                f"aux_loss_weight must be non-negative, got {aux_loss_weight}."
+            )
         self.hidden_size = hidden_size
+        self.top_k = top_k
+        self.aux_loss_weight = aux_loss_weight
         self.q_proj = nn.Linear(hidden_size, hidden_size, bias=False)
         self.k_proj = nn.Linear(hidden_size, hidden_size, bias=False)
         self.v_proj = nn.Linear(hidden_size, hidden_size, bias=False)
         self.out_proj = nn.Linear(hidden_size, hidden_size, bias=False)
+        # ponytail: gate diagnostics, overwritten every forward. The
+        # attribution and collapse probes read these instead of
+        # re-deriving the routing.
+        self.last_gate_logits: Tensor | None = None
+        self.last_gate_weights: Tensor | None = None
+        self.last_gate_mask: Tensor | None = None
+        self.last_aux_loss: Tensor = torch.zeros(())
+
+    def gate_load_balancing_loss(self, gate_logits: Tensor) -> Tensor:
+        """Return the load-balancing loss for the intent gate.
+
+        Args:
+            gate_logits: Tensor of shape ``(num_queries, intent_tokens)``.
+
+        Returns:
+            Scalar tensor.
+        """
+        num_slots = gate_logits.shape[-1]
+        probs = torch.softmax(gate_logits, dim=-1)
+        prob_per_slot = probs.sum(dim=0) / gate_logits.shape[0]
+        return load_balancing_loss(
+            gate_logits, prob_per_slot, num_slots, self.aux_loss_weight
+        )
 
     def forward(
         self,
@@ -279,6 +350,7 @@ class OriginationHead(nn.Module):
                 f"observation={observation.shape[-1]}."
             )
         batch = observation.shape[0]
+        num_intent = intent.shape[0]
         context = torch.cat([intent, working], dim=0)
         context = context.unsqueeze(0).expand(batch, -1, -1)
         queries = self.q_proj(observation)
@@ -287,7 +359,22 @@ class OriginationHead(nn.Module):
         scores = torch.matmul(queries, keys.transpose(-1, -2)) / (
             self.hidden_size**0.5
         )
-        weights = torch.softmax(scores, dim=-1)
+        # Sparsify the intent slots only; working memory stays dense.
+        intent_scores = scores[..., :num_intent]
+        keep = top_k_mask(intent_scores, min(self.top_k, num_intent))
+        masked = scores.masked_fill(
+            torch.cat(
+                [~keep, torch.zeros_like(scores[..., num_intent:], dtype=torch.bool)],
+                dim=-1,
+            ),
+            float("-inf"),
+        )
+        weights = torch.softmax(masked, dim=-1)
+        flat_logits = intent_scores.reshape(-1, num_intent)
+        self.last_gate_logits = flat_logits
+        self.last_gate_weights = weights[..., :num_intent]
+        self.last_gate_mask = keep
+        self.last_aux_loss = self.gate_load_balancing_loss(flat_logits)
         generated: Tensor = self.out_proj(torch.matmul(weights, values))
         return generated
 
@@ -318,7 +405,11 @@ class ProjectionHeads(nn.Module):
         # ``forward``: it reads the intent bank and the input stream rather
         # than working memory alone, so it cannot share the head contract.
         # The reasoning loop calls it directly.
-        self.origination = OriginationHead(config.hidden_size)
+        self.origination = OriginationHead(
+            config.hidden_size,
+            top_k=config.origination_top_k,
+            aux_loss_weight=config.origination_aux_loss_weight,
+        )
 
     def forward(self, working_memory: Tensor) -> dict[str, Tensor]:
         """Run every head on ``working_memory``.

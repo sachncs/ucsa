@@ -50,6 +50,66 @@ class MoEConfig:
             )
 
 
+def load_balancing_loss(
+    router_logits: Tensor,
+    router_prob_per_expert: Tensor,
+    num_experts: int,
+    aux_loss_weight: float,
+) -> Tensor:
+    """Compute the Switch Transformer load-balancing auxiliary loss.
+
+    Shared by :class:`MixtureOfExperts` and by the origination generator's
+    intent gate, which is the same top-k routing problem with intent slots
+    in place of experts.
+
+    Args:
+        router_logits: Tensor of shape ``(num_tokens, num_experts)``.
+        router_prob_per_expert: Per-expert *average* routing probability of
+            shape ``(num_experts,)``, i.e. ``softmax(logits).sum(0) /
+            num_tokens``.
+        num_experts: Number of routable destinations.
+        aux_loss_weight: Weight applied to the returned loss.
+
+    Returns:
+        Scalar tensor with the weighted load-balancing loss.
+    """
+    num_tokens = router_logits.shape[0]
+    scaled_prob = router_prob_per_expert * num_tokens
+    with torch.no_grad():
+        expert_mask = torch.nn.functional.one_hot(
+            router_logits.argmax(dim=-1), num_classes=num_experts
+        ).float()
+    tokens_per_expert = expert_mask.sum(dim=0)
+    loss = (tokens_per_expert * scaled_prob).sum()
+    loss = loss / (num_tokens * num_experts)
+    return aux_loss_weight * loss
+
+
+def top_k_mask(scores: Tensor, top_k: int) -> Tensor:
+    """Return a boolean mask keeping only the ``top_k`` scores per row.
+
+    Args:
+        scores: Tensor of shape ``(..., num_choices)``.
+        top_k: Number of entries to keep along the last dimension. Values
+            above ``num_choices`` keep everything.
+
+    Returns:
+        Boolean tensor shaped like ``scores``, ``True`` where kept.
+
+    Raises:
+        ValueError: If ``top_k`` is not positive.
+    """
+    if top_k <= 0:
+        raise ValueError(f"top_k must be positive, got {top_k}.")
+    num_choices = scores.shape[-1]
+    if top_k >= num_choices:
+        return torch.ones_like(scores, dtype=torch.bool)
+    indices = scores.topk(top_k, dim=-1).indices
+    mask = torch.zeros_like(scores, dtype=torch.bool)
+    kept: Tensor = mask.scatter(-1, indices, True)
+    return kept
+
+
 class Expert(nn.Module):
     """A single gated FFN expert.
 
@@ -181,16 +241,18 @@ class MixtureOfExperts(nn.Module):
         Returns:
             Scalar tensor with the load-balancing loss.
         """
-        num_tokens = router_logits.shape[0]
-        router_prob_per_expert = router_prob_per_expert * num_tokens
-        with torch.no_grad():
-            expert_mask = torch.nn.functional.one_hot(
-                router_logits.argmax(dim=-1), num_classes=self.config.num_experts
-            ).float()
-        tokens_per_expert = expert_mask.sum(dim=0)
-        loss = (tokens_per_expert * router_prob_per_expert).sum()
-        loss = loss / (num_tokens * self.config.num_experts)
-        return self.config.aux_loss_weight * loss
+        return load_balancing_loss(
+            router_logits,
+            router_prob_per_expert,
+            self.config.num_experts,
+            self.config.aux_loss_weight,
+        )
 
 
-__all__ = ["Expert", "MixtureOfExperts", "MoEConfig"]
+__all__ = [
+    "Expert",
+    "MixtureOfExperts",
+    "MoEConfig",
+    "load_balancing_loss",
+    "top_k_mask",
+]
