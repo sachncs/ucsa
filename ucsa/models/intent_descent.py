@@ -225,6 +225,42 @@ def ema_outputs(
     return dict(result) if isinstance(result, dict) else None
 
 
+def jepa_step_errors(
+    outputs: dict[str, Any],
+    target_outputs: dict[str, Any] | None = None,
+) -> list[float]:
+    """Return the JEPA prediction error at each step of the chain.
+
+    The origination generator only shapes iteration 2 onward, so if intent
+    is really steering the loop the *late* steps of the chain should improve
+    more than the early ones. A uniform profile means the origination is not
+    doing the work.
+
+    Args:
+        outputs: A :meth:`ucsa.models.ucsa.UCSA.forward` result.
+        target_outputs: Optional EMA target encoder result.
+
+    Returns:
+        One error per chain step, earliest first.
+    """
+    pairs = outputs.get("jepa_multi_step") or []
+    if not pairs:
+        return []
+    targets: list[Tensor] = [target for _, target in pairs]
+    if target_outputs is not None:
+        ema_pairs = target_outputs.get("jepa_multi_step") or []
+        if len(ema_pairs) >= len(pairs):
+            targets = [ema_pairs[k][0] for k in range(len(pairs))]
+    return [
+        float(
+            torch.nn.functional.smooth_l1_loss(
+                predicted, target.detach()
+            ).item()
+        )
+        for (predicted, _), target in zip(pairs, targets, strict=True)
+    ]
+
+
 def realized_outcome(
     outputs: dict[str, Any], targets: Tensor | None
 ) -> float | None:
@@ -462,6 +498,7 @@ __all__ = [
     "DescentStep",
     "critic_score",
     "jepa_chain_error",
+    "jepa_step_errors",
     "optimize_intent",
     "outcome_correlation",
     "realized_outcome",

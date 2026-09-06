@@ -240,6 +240,21 @@ makes that signal explicit, localisable, and optimisable.
       | 3 | 5 | 8/8 | 6/8 | 2/8 | -0.313 |
       | 5 | 7 | 8/8 | 7/8 | 2/8 | -0.126 |
 
+- [x] feat(models): `jepa_step_errors` reports the chain error per step, so
+      the spec's "late steps should improve more than early ones" signature
+      can actually be checked; surfaced in `scripts/probe_origination.py`
+- [ ] **open finding, negative**: the late-vs-early signature does not hold.
+      400 steps, same seed, chain error improvement by step:
+
+      | config | k0 | k1 | k2 | perplexity |
+      | --- | --- | --- | --- | --- |
+      | origination on (alpha0=0.5) | +0.03659 | +0.00670 | +0.00128 | 4.143 |
+      | origination off (alpha=1.0) | +0.03707 | +0.00671 | +0.00129 | 4.134 |
+
+      Early steps improve ~29x more than late ones, and the two profiles are
+      indistinguishable. The spec names this as "the diagnostic that intent
+      is actually steering"; by that diagnostic it is not. Perplexity is
+      flat-to-marginally-worse, which is what the spec predicted.
 - [ ] **open finding**: descent reliably improves the *predicted* outcome
       (8/8 at every K > 0) but the predicted-versus-realised correlation is
       near zero or negative. Improving the JEPA prediction is not yet

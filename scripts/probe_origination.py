@@ -29,7 +29,11 @@ import os
 import torch
 import yaml
 
-from ucsa.models.intent_descent import optimize_intent, outcome_correlation
+from ucsa.models.intent_descent import (
+    jepa_step_errors,
+    optimize_intent,
+    outcome_correlation,
+)
 from ucsa.models.origination import (
     counterfactual_controllability,
     intent_collapse_report,
@@ -180,6 +184,11 @@ def print_human(report: dict[str, object]) -> None:
         f"specificity {localisation['specificity']:.3f}",
         flush=True,
     )
+    chain = report["jepa_step_errors"]
+    assert isinstance(chain, list)
+    if chain:
+        rendered = "  ".join(f"k{k}={v:.5f}" for k, v in enumerate(chain))
+        print(f"  jepa chain error by step: {rendered}", flush=True)
     print("  descent (matched compute is the pass count):", flush=True)
     rows = report["descent"]
     assert isinstance(rows, list)
@@ -225,6 +234,10 @@ def main() -> None:
     )
     inputs_only = [inputs for inputs, _ in pairs]
 
+    with torch.no_grad():
+        chain_outputs = model(inputs_only[0])
+    chain = jepa_step_errors(chain_outputs)
+
     collapse = intent_collapse_report(model, inputs_only)
     localisation = counterfactual_controllability(
         model, inputs_only[0], effect_threshold=args.effect_threshold
@@ -238,6 +251,7 @@ def main() -> None:
         "seed": args.seed,
         "observation_mix": args.observation_mix,
         "ckpt_compat_notes": notes,
+        "jepa_step_errors": chain,
         "collapse": collapse.to_dict(),
         "localisation": localisation.to_dict(),
         "descent": descent,

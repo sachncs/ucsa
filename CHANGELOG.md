@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same reason. `DescentReport.forward_model_gamed` and
   `outcome_correlation` are the forward-model-hacking check: predicted
   gain with realised loss.
+- `ucsa.models.intent_descent.jepa_step_errors`: chain error per step, so
+  the "late steps improve more than early ones" signature can be checked
+  rather than assumed. Reported by `scripts/probe_origination.py`.
 - `ucsa/infer.py`: `generate_with_intent_descent` and
   `sample_next_token`; `run_inference(intent_steps=...)` and
   `--intent-steps` / `--intent-learning-rate` on the CLI. `K=0` default.
