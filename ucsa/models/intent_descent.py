@@ -324,8 +324,49 @@ def critic_score(model: UCSA, outputs: dict[str, Any]) -> float | None:
         candidate = model.pcs.get_bank("working").detach()
         pooled = candidate.mean(dim=0)
         summary = verifier.summarize_cstate(model.pcs)
-        logit = verifier.mlp(torch.cat([pooled, summary], dim=-1))
-    return float(logit.reshape(-1)[0].item())
+        full = torch.cat([pooled, summary], dim=-1)
+        logit = verifier.mlp(full).reshape(-1)[0]
+    return float(logit.item())
+
+
+def critic_objective(
+    model: UCSA,
+    outputs: dict[str, Any],
+) -> Tensor | None:
+    """Verifier logit as a *differentiable* objective.
+
+    The spec lists the LearnedVerifier as the outcome critic. The
+    ``critic_score`` helper above is a logged metric, taken under
+    ``no_grad``; this one is the *objective* the descent can descend on.
+    It exists as a separate path so the logged score does not need to
+    carry gradient just to be reported.
+
+    The score is the verifier's confidence in the current working memory.
+    The working bank is the model's *current* state, not the pre-rewrite
+    ``no_grad`` snapshot the log uses, so descending it actually moves the
+    bank's influence on the verifier's next assessment.
+
+    Args:
+        model: The model whose verifier is consulted.
+        outputs: A forward-pass result. Currently unused -- the objective
+            is computed from the working bank's current contents rather
+            than the forward output, so the bank is the bridge for the
+            gradient. Kept on the signature so callers do not have to
+            special-case which side of the call surface they pass.
+
+    Returns:
+        Verifier logit as a tensor with grad, or ``None`` when the model
+        does not carry a :class:`LearnedVerifier`.
+    """
+    verifier = getattr(model, "verifier", None)
+    if not isinstance(verifier, LearnedVerifier):
+        return None
+    candidate = model.pcs.get_bank("working")
+    pooled = candidate.mean(dim=0)
+    summary = verifier.summarize_cstate(model.pcs)
+    full = torch.cat([pooled, summary], dim=-1)
+    logit: Tensor = verifier.mlp(full).reshape(-1)[0]
+    return logit
 
 
 def optimize_intent(

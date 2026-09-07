@@ -8,6 +8,7 @@ import torch
 from ucsa.models.intent_descent import (
     DescentReport,
     compute_matched_comparison,
+    critic_objective,
     ema_outputs,
     jepa_chain_error,
     optimize_intent,
@@ -15,6 +16,7 @@ from ucsa.models.intent_descent import (
     realized_outcome,
 )
 from ucsa.models.ucsa import UCSA, UCSAConfig
+from ucsa.models.verification import LearnedVerifier
 from ucsa.training.ema import EMATargetEncoder
 
 
@@ -37,6 +39,28 @@ def tiny_inputs() -> tuple[torch.Tensor, torch.Tensor]:
     generator = torch.Generator().manual_seed(1)
     ids = torch.randint(0, 100, (1, 8), generator=generator)
     return ids, torch.roll(ids, -1, dims=1)
+
+
+
+class TestCriticObjective:
+    """The spec's outcome oracle, as a differentiable objective."""
+
+    def test_none_when_verifier_is_heuristic(self) -> None:
+        """Only a ``LearnedVerifier`` produces a differentiable signal."""
+        model = tiny_model()
+        out = model(tiny_inputs()[0])
+        assert critic_objective(model, out) is None
+
+    def test_returns_a_differentiable_tensor(self) -> None:
+        """The result is a real logit with grad through the bank."""
+        model = tiny_model()
+        model.verifier = LearnedVerifier(hidden_size=32, cstate_summary_size=8)
+        out = model(tiny_inputs()[0])
+        logit = critic_objective(model, out)
+        assert logit is not None
+        assert logit.dim() == 0
+        logit.backward()
+        assert model.pcs.get_bank("working").grad is not None
 
 
 class TestJepaChainError:
