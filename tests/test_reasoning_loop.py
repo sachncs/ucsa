@@ -68,7 +68,9 @@ class TestReasoningLoop:
 
     def test_forward_runs_configured_iterations(self) -> None:
         """``iteration_count`` matches ``num_iterations`` after forward."""
-        loop = ReasoningLoop(tiny_operator(), ReasoningLoopConfig(num_iterations=3))
+        loop = ReasoningLoop(
+            tiny_operator(), ReasoningLoopConfig(num_iterations=3)
+        )
         pcs = tiny_pcs()
         obs = torch.randn(1, 4, 32)
         loop(pcs, obs)
@@ -187,7 +189,14 @@ class TestReasoningLoop:
             tiny_operator(), ReasoningLoopConfig(num_iterations=1)
         )
         out = loop(tiny_pcs(), torch.randn(1, 4, 32))
-        for name in ("working", "long_term", "goal", "episode", "task", "memory_index"):
+        for name in (
+            "working",
+            "long_term",
+            "goal",
+            "episode",
+            "task",
+            "memory_index",
+        ):
             assert name in out.bank_specs
 
     def test_get_intermediates_returns_copy(self) -> None:
@@ -349,6 +358,80 @@ class TestEndogenousOrigination:
         )
         loop(tiny_pcs(), torch.randn(1, 4, 32))
         assert loop.last_generated_inputs == []
+
+    def test_generated_stream_does_not_run_away(self) -> None:
+        """The generated input must not grow across iterations.
+
+        This is the compounding-drift failure mode: once the loop consumes
+        its own output it can amplify without bound. The ``alpha_k``
+        observation mix is the brake, and this asserts the brake holds
+        rather than assuming it. Measured at ``alpha=0``, the hardest case,
+        where the exogenous observation is dropped entirely.
+        """
+        loop, _ = self.loop_with_generator(
+            num_iterations=6, observation_mix=0.0
+        )
+        observation = torch.randn(1, 5, 32)
+        loop(tiny_pcs(), observation)
+        generated = loop.last_generated_inputs
+        assert len(generated) == 5
+        reference = float(observation.norm())
+        norms = [float(stream.detach().norm()) for stream in generated]
+        # No iteration may exceed the real observation's magnitude, and the
+        # sequence must not be growing by the end.
+        for index, norm in enumerate(norms):
+            assert norm <= reference * 1.5, (index, norm, reference)
+        assert norms[-1] <= norms[0] * 1.5
+
+    def test_higher_alpha_keeps_more_of_the_observation(self) -> None:
+        """A larger ``alpha`` leaves the fed stream closer to ``O_0``.
+
+        The mix is the drift brake, so its effect has to be monotone: more
+        weight on the real observation means less room for the generated
+        stream to pull the input away. Uses the *same* generator for both
+        settings, so the only thing varying is ``alpha``.
+        """
+        observation = torch.randn(1, 4, 32)
+        torch.manual_seed(0)
+        generator = OriginationHead(32)
+        operator = tiny_operator()
+        distances = []
+        for mix in (0.25, 0.75):
+            loop = ReasoningLoop(
+                operator,
+                ReasoningLoopConfig(num_iterations=2, observation_mix=mix),
+                origination=generator,
+            )
+            mixed = loop.next_observation(
+                tiny_pcs(), observation, observation, 0
+            )
+            distances.append(float((mixed - observation).detach().norm()))
+        assert distances[1] < distances[0]
+
+    def test_mix_weight_is_actually_applied(self) -> None:
+        """The fed stream must equal the exact ``alpha`` blend.
+
+        Asserting only that "the output changed" or "a norm stayed bounded"
+        would still pass if the brake were deleted and the generated stream
+        fed verbatim. This pins the arithmetic instead: the result has to be
+        ``alpha * O_0 + (1 - alpha) * G`` and must differ measurably from
+        the unbraked ``G`` alone.
+        """
+        torch.manual_seed(0)
+        generator = OriginationHead(32)
+        loop = ReasoningLoop(
+            tiny_operator(),
+            ReasoningLoopConfig(num_iterations=2, observation_mix=0.75),
+            origination=generator,
+        )
+        observation = torch.randn(1, 4, 32)
+        mixed = loop.next_observation(tiny_pcs(), observation, observation, 0)
+        generated = loop.last_generated_inputs[-1]
+        expected = 0.75 * observation + 0.25 * generated
+        assert torch.allclose(mixed, expected, atol=1e-6)
+        # Without the brake the fed stream would be ``generated`` itself.
+        gap = float((mixed - generated).detach().norm())
+        assert gap > 1e-3, gap
 
     def test_reset_clears_origination_traces(self) -> None:
         """``reset`` drops the recorded weights and generated inputs."""
