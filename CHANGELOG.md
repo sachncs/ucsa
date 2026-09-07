@@ -260,6 +260,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lint fixes: ruff clean on the entire `ucsa/` and `tests/` tree.
 
 ### Changed
+- Perplexity cost of the sparse origination gate is now reported with a
+  seed band instead of from single runs: 3 seeds per arm gives 1.0413
+  (sd 0.0053) with origination off against 1.0610 (sd 0.0119) with it on,
+  a `+0.0197` ppl delta at 2.14 pooled seed sd. The cost is therefore a
+  real effect, the balanced and unbalanced gates are indistinguishable
+  from each other, and the previously reported single-run figures
+  (1.049 vs 1.132) overstated the gap about fourfold.
 - `mypy --strict ucsa/` is now clean: 0 errors across 34 source files,
   down from 92 in 21 files. The literal gate command previously aborted
   before checking anything, because the installed numpy ships stubs

@@ -301,8 +301,25 @@ makes that signal explicit, localisable, and optimisable.
       (**directed controllability 1.00**), with mean cosine between
       predicted and realised change **+0.768** (balanced gate) and
       **+0.858** (unbalanced).
-- [x] **perplexity flat-to-slightly-worse, as the spec predicted**: 1.049
-      without origination, 1.132 with. The sparse gate costs capacity.
+- [x] **perplexity flat-to-slightly-worse, as the spec predicted, and the
+      gap is real rather than seed noise.** 3 seeds per arm, same task and
+      budget:
+
+      | arm | mean ppl | seed sd | seeds |
+      | --- | --- | --- | --- |
+      | origination off (alpha=1) | 1.0413 | 0.0053 | 1.0359, 1.0413, 1.0466 |
+      | origination on, balanced | 1.0610 | 0.0119 | 1.0475, 1.0653, 1.0702 |
+      | origination on, no balance | 1.0616 | 0.0120 | 1.0482, 1.0652, 1.0713 |
+
+      `delta(on - off) = +0.0197` ppl against a pooled seed sd of 0.0092,
+      i.e. **2.14 sd** -- outside the noise band, so the sparse gate's
+      capacity cost is a measured effect and not an artefact of a single
+      run. Balanced and unbalanced gates are indistinguishable from each
+      other (+0.0006, well inside 1 sd), so the cost comes from the gate
+      itself rather than from the load-balancing term. Note the earlier
+      single-run figures (1.049 vs 1.132) overstated the gap roughly
+      fourfold; single runs on this task are not reliable to better than
+      ~0.01 ppl.
 - [x] fix(descent): `realized_outcome` scored the *leading* logit positions
       while the trainer left-pads targets to the *trailing* ones, so it read
       slots the model was never trained on. On a model at training loss 0.13
