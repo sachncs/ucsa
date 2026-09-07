@@ -6,7 +6,9 @@ import pytest
 import torch
 
 from ucsa.models.origination import (
+    chain_latents,
     counterfactual_controllability,
+    direction_agreement,
     intent_attribution,
     intent_collapse_report,
     intervene_intent,
@@ -131,6 +133,82 @@ class TestIntervention:
         model = tiny_model()
         with pytest.raises(ValueError):
             intervene_intent(model, tiny_inputs(), 0, mode="scramble")
+
+
+class TestDirectionAgreement:
+    """Tests for the directional half of the localisation claim."""
+
+    def test_none_without_latents(self) -> None:
+        """No chain means no directional verdict."""
+        assert direction_agreement(None, None) is None
+        pair = (torch.randn(2, 4), torch.randn(2, 4))
+        assert direction_agreement(pair, None) is None
+
+    def test_none_when_nothing_moved(self) -> None:
+        """A zero change has no direction."""
+        pair = (torch.randn(2, 4), torch.randn(2, 4))
+        assert direction_agreement(pair, pair) is None
+
+    def test_positive_when_changes_align(self) -> None:
+        """Predicted and realised moving together scores near +1."""
+        base = (torch.zeros(2, 4), torch.zeros(2, 4))
+        step = torch.ones(2, 4)
+        assert direction_agreement(base, (step, step)) == pytest.approx(1.0)
+
+    def test_negative_when_changes_oppose(self) -> None:
+        """Predicted and realised moving apart scores near -1.
+
+        This is the case that separates "the intervention had an effect"
+        from the spec's claim that it moves behaviour *in the direction the
+        forward model predicted*.
+        """
+        base = (torch.zeros(2, 4), torch.zeros(2, 4))
+        step = torch.ones(2, 4)
+        agreement = direction_agreement(base, (step, -step))
+        assert agreement == pytest.approx(-1.0)
+
+    def test_chain_latents_returns_a_pair(self) -> None:
+        """The probe reads the last pair of the JEPA chain."""
+        model = tiny_model()
+        latents = chain_latents(model, tiny_inputs())
+        assert latents is not None
+        predicted, realized = latents
+        assert predicted.shape == realized.shape
+        assert predicted.grad_fn is None
+
+    def test_intervention_reports_direction(self) -> None:
+        """Interventions on a gated slot carry a directional score.
+
+        Uses a four-iteration loop, which is the configuration the reported
+        results use. With only three iterations the chain is short enough
+        that its predicted side can be a step the origination never
+        reaches, leaving no direction to report even though the realised
+        latents moved.
+
+        An ungated slot has no path through ``G`` at all, so ablating it
+        moves nothing and ``None`` is then the correct answer, not a number.
+        """
+        model = tiny_model(reasoning_iterations=4)
+        inputs = tiny_inputs()
+        gated = intent_attribution(model, inputs).gated_slots
+        assert gated
+        report = intervene_intent(model, inputs, gated[0])
+        assert report.direction_agreement is not None
+        assert -1.0 <= report.direction_agreement <= 1.0
+
+    def test_ungated_slot_has_no_direction(self) -> None:
+        """A slot the gate never selected moves nothing at all."""
+        model = tiny_model()
+        inputs = tiny_inputs()
+        attribution = intent_attribution(model, inputs)
+        ungated = [
+            slot
+            for slot in range(len(attribution.scores))
+            if slot not in set(attribution.gated_slots)
+        ]
+        assert ungated
+        report = intervene_intent(model, inputs, ungated[0])
+        assert report.action_delta == pytest.approx(0.0, abs=1e-6)
 
 
 class TestControllability:

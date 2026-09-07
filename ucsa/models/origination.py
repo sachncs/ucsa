@@ -112,6 +112,13 @@ class InterventionReport:
             logits, normalised by the baseline norm.
         top_token_changed: Whether the arg-max action token changed.
         readout_delta: Signed change in the baseline action's own logit.
+        direction_agreement: Cosine similarity between the change the
+            forward model *predicted* and the change that actually
+            happened, in ``[-1, 1]``, or ``None`` when the JEPA chain was
+            unavailable. This is what distinguishes "the intervention had
+            an effect" from the spec's stronger claim, that it "moves
+            behaviour in the direction the forward model predicted". A
+            magnitude alone cannot say that.
     """
 
     slot: int
@@ -119,6 +126,7 @@ class InterventionReport:
     action_delta: float
     top_token_changed: bool
     readout_delta: float
+    direction_agreement: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable view."""
@@ -128,6 +136,7 @@ class InterventionReport:
             "action_delta": self.action_delta,
             "top_token_changed": self.top_token_changed,
             "readout_delta": self.readout_delta,
+            "direction_agreement": self.direction_agreement,
         }
 
 
@@ -282,6 +291,63 @@ def intent_attribution(
     )
 
 
+def chain_latents(model: UCSA, inputs: Tensor) -> tuple[Tensor, Tensor] | None:
+    """Return the forward model's forecasts and the latents they forecast.
+
+    Concatenates *every* pair of the multi-step JEPA chain. Taking only the
+    last pair is not enough: the origination generator shapes iteration 2
+    onward, so for a short loop the last pair's predicted side can be the
+    one step intent never reaches, giving a delta of exactly zero and no
+    directional verdict at all even though the realised latents moved.
+
+    Args:
+        model: The model to run.
+        inputs: Token ids of shape ``(batch, seq)``.
+
+    Returns:
+        Tuple ``(predicted, realized)`` stacked over the chain, or ``None``
+        when the chain is absent.
+    """
+    device = model.pcs.get_bank(INTENT_BANK).device
+    with torch.no_grad():
+        outputs = model(inputs.to(device))
+    pairs = outputs.get("jepa_multi_step") or []
+    if not pairs:
+        return None
+    predicted = torch.cat([p.detach().reshape(-1) for p, _ in pairs])
+    realized = torch.cat([t.detach().reshape(-1) for _, t in pairs])
+    return predicted.clone(), realized.clone()
+
+
+def direction_agreement(
+    baseline: tuple[Tensor, Tensor] | None,
+    perturbed: tuple[Tensor, Tensor] | None,
+) -> float | None:
+    """Cosine between the predicted change and the realised change.
+
+    Args:
+        baseline: ``(predicted, realized)`` before the intervention.
+        perturbed: ``(predicted, realized)`` after it.
+
+    Returns:
+        Cosine similarity in ``[-1, 1]``, or ``None`` when either latent
+        pair is missing or neither quantity moved.
+    """
+    if baseline is None or perturbed is None:
+        return None
+    predicted_delta = (perturbed[0] - baseline[0]).flatten()
+    realized_delta = (perturbed[1] - baseline[1]).flatten()
+    if float(predicted_delta.norm()) <= 0.0:
+        return None
+    if float(realized_delta.norm()) <= 0.0:
+        return None
+    return float(
+        torch.nn.functional.cosine_similarity(
+            predicted_delta, realized_delta, dim=0
+        ).item()
+    )
+
+
 def intervene_intent(
     model: UCSA,
     inputs: Tensor,
@@ -327,6 +393,8 @@ def intervene_intent(
         with torch.no_grad():
             baseline = action_logits(model, inputs).detach().clone()
         pcs_restore(model, snapshot)
+        baseline_latents = chain_latents(model, inputs)
+        pcs_restore(model, snapshot)
         with torch.no_grad():
             if mode == "ablate":
                 bank[slot] = torch.zeros_like(bank[slot])
@@ -334,6 +402,11 @@ def intervene_intent(
                 bank[slot] = original[partner]
                 bank[partner] = original[slot]
             perturbed = action_logits(model, inputs).detach().clone()
+        perturbed_intent = bank.detach().clone()
+        pcs_restore(model, snapshot)
+        with torch.no_grad():
+            bank.copy_(perturbed_intent)
+        perturbed_latents = chain_latents(model, inputs)
     finally:
         pcs_restore(model, snapshot)
     baseline_last = baseline[0, -1]
@@ -350,6 +423,9 @@ def intervene_intent(
         top_token_changed=int(perturbed_last.argmax().item()) != baseline_token,
         readout_delta=float(
             perturbed_last[baseline_token] - baseline_last[baseline_token]
+        ),
+        direction_agreement=direction_agreement(
+            baseline_latents, perturbed_latents
         ),
     )
 
@@ -571,6 +647,8 @@ __all__ = [
     "InterventionReport",
     "action_logits",
     "action_readout",
+    "chain_latents",
+    "direction_agreement",
     "counterfactual_controllability",
     "intent_collapse_report",
     "intent_attribution",

@@ -92,6 +92,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `origination_aux_loss`; it is **not** summed into the total loss,
   because wiring a regulariser before the Phase C collapse diagnostic
   exists would be tuning toward a number we cannot yet read.
+- `ucsa.models.origination`: `chain_latents`, `direction_agreement`, and
+  `InterventionReport.direction_agreement`. The spec's claim is
+  that intervening "moves behaviour *in the direction the forward model
+  predicted*"; a magnitude and a specificity rate cannot say that. The
+  cosine between the change the JEPA chain predicted and the change that
+  actually happened can. `chain_latents` uses the whole chain rather than
+  its last pair, because for a short loop the last pair's predicted side
+  can be the one step the origination never reaches, which yields a delta
+  of exactly zero and no verdict at all.
 - `ucsa.models.origination`: the localisation probes.
   `intent_attribution` returns a per-slot `grad x activation` map plus
   which slots the sparse gate actually routed to; `intervene_intent`
