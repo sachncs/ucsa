@@ -260,94 +260,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lint fixes: ruff clean on the entire `ucsa/` and `tests/` tree.
 
 ### Changed
-- Perplexity cost of the sparse origination gate is now reported with a
-  seed band instead of from single runs: 3 seeds per arm gives 1.0413
-  (sd 0.0053) with origination off against 1.0610 (sd 0.0119) with it on,
-  a `+0.0197` ppl delta at 2.14 pooled seed sd. The cost is therefore a
-  real effect, the balanced and unbalanced gates are indistinguishable
-  from each other, and the previously reported single-run figures
-  (1.049 vs 1.132) overstated the gap about fourfold.
-- `mypy --strict ucsa/` is now clean: 0 errors across 34 source files,
-  down from 92 in 21 files. The literal gate command previously aborted
-  before checking anything, because the installed numpy ships stubs
-  written with 3.12 `type` statements that mypy refuses to parse under
-  `python_version = "3.11"`; numpy is now `follow_imports = "skip"` in
-  `pyproject.toml` rather than dropping 3.11 as the target. That override
-  is a deliberate change to the gate's own configuration, not a code fix;
-  numpy is imported in exactly one place in `ucsa/` (`utils/seed.py`), so
-  it costs no real coverage. The fixes are
-  typing-only and behaviour-preserving; the full origination measurement
-  reproduces to 4 decimal places afterwards. Two are small API additions
-  rather than casts:
-  `PersistentCognitiveState.metadata(bank, field)` returns a metadata
-  buffer typed as a tensor, and
-  `TransformerOperator.transformer_blocks()` returns the block stack
-  typed as blocks, so the `Tensor | Module` narrowing that
-  `nn.Module.__getattr__` and `nn.ModuleList` force happens once instead
-  of at ~30 call sites. `METADATA_FIELDS` is exported alongside
-  `BANK_NAMES`.
-- `ucsa.models.projection_heads.OriginationHead`: the intent read and the
-  working read now get their *own* softmax. Sharing one softmax over the
-  concatenation put a handful of gated intent slots in direct competition
-  with every working slot, so with 2 gated slots against 64 dense ones
-  the origination received about 3% of the attention mass and `G`
-  effectively ignored the bank it is meant to be driven by. Zeroing one
-  intent slot now moves `G`'s output by 39% against 2% for a working
-  slot. Also stashes `last_intent_read` / `last_working_read` for the
-  diagnostics.
-- `ucsa.models.transformer_operator`: new `stream_intent_bank` (default
-  `False`). The operator no longer attends over the `intent` bank, so the
-  origination generator is the *only* path from the bank to an action.
-  With the bank in the attention stream every slot reached every action
-  as ordinary context, all 16 slots carried gradient, and the
-  origination could not be localised at all. As a side effect the
-  streamed layout is identical to the pre-intent one, so legacy
-  checkpoints need no bank-id remap in the default configuration.
-- `ucsa.models.transformer_operator.TransformerOperator`: stashes the
-  differentiable post-transition bank tensors in `last_bank_tensors`
-  before the `no_grad` PCS write-back, and consumes them on the next
-  call via `carried_bank_tensors`. New
-  `TransformerOperatorConfig.differentiable_state_carry` (default
-  `True`) and `UCSAConfig.differentiable_state_carry` gate the
-  behaviour; `False` reproduces the previous severed graph for the
-  ablation. `reset` clears the stash alongside the KV cache.
-- `ucsa.models.reasoning_loop.ReasoningLoop`: exposes
-  `differentiable_bank(name)` and `capture_working`, so the JEPA
-  intermediates carry gradients instead of being detached clones.
-  Operators that do not stash carried tensors fall back to the old
-  detached PCS reads, so alternative operators need no changes.
-- `ucsa.models.ucsa.UCSA.forward`: reads `working` and `long_term`
-  from the loop's differentiable tensors (falling back to the PCS
-  parameters) so the heads, JEPA, and memory losses all reach the
-  operator.
-- `ucsa.models.ucsa.UCSA.forward`: returns a rich dict that includes
-  `jepa_predicted`, `jepa_target`, `long_term`, and `router_logits`
-  alongside the head outputs. Aux losses can now be computed on real
-  model state instead of dummy tensors.
-- `ucsa.models.moe.MoEBlock.forward`: stashes `last_router_logits` so
-  the trainer can compute the load-balancing loss from real routing
-  distributions, not noise.
-- `ucsa.models.transformer_operator.TransformerOperator.forward`:
-  aggregates `last_router_logits` across MoE-equipped blocks so a
-  single `(num_tokens, num_experts)` tensor reaches the loss.
-- `ucsa.models.reasoning_loop`: `capture_intermediates=True` by
-  default — the loop now always retains per-iteration working-memory
-  clones for the JEPA aux loss.
-- `ucsa.models.ucsa.UCSAConfig`: adds `attention_dropout`,
-  `residual_dropout`, `ffn_dropout` (default 0.0; plumbed through
-  to `TransformerOperatorConfig`). Effective when set non-zero.
-- `ucsa.configs.default.yaml`: includes the three dropout fields
-  with the project default of 0.0.
-- `ucsa.training.trainer.Trainer`: picks `mps:0` (not bare `mps`)
-  on Apple silicon so tensor/device equality checks line up. Also
-  `compute_loss` now moves inputs/targets to the trainer's device.
-  Aux-loss kwargs come from the model's output dict when present
-  (with randn fallback for tests / custom models). Refreshes the
-  model's `memory_baseline` buffer every 50 steps so
-  `MemoryStabilityLoss` references a moving snapshot.
-- `tests/test_scripts.test_forward_returns_all_heads`: asserts the
-  new aux keys are present (`>=` semantics) — the strict `==` form
-  would now be wrong because `UCSA.forward` returns extra keys.
+- Multi-seed matched-compute ablation on the learnable task. K=1
+  (12 operator calls per input), 3 seeds, `compute_matched_comparison`
+  against both an in-distribution control (`repeat-and-average`) and an
+  out-of-distribution one (`more-reasoning`). Intent optimisation beats
+  the in-distribution control by `+0.00003, +0.00000, -0.00001` -- 0.00
+  sd, well inside the noise band. The OOD control is +0.0011 worse at
+  0.5 sd, so the budget comparator itself is doing something; the
+  intent-optimisation result is just too small to see. There is no
+  quality result for Phase D; the machinery is built and behaves, but
+  the learnable-task loss floor is too high for a one-step descent to
+  matter at K=1.
 
 ### Fixed
 - `scripts/train.py` never exited. `main` ran to completion -- checkpoint
