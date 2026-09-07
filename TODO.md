@@ -446,18 +446,25 @@ makes that signal explicit, localisable, and optimisable.
       | repeat-and-average  | 0.02499 | 0.00241 | 0.02221, 0.02640, 0.02637 |
       | more-reasoning      | 0.02614 | 0.00194 | 0.02390, 0.02723, 0.02730 |
 
-      Intent optimisation vs the in-distribution control: deltas
-      `+0.00003, +0.00000, -0.00001`. **Effect size 0.00 sd** -- inside the
-      noise band. The OOD control (more-reasoning) is a clean +0.0011
-      worse at 0.5 sd, so the budget comparator itself is doing something.
-      The spec's matched-compute bar is not met. There is still no
-      quality result for Phase D; the *machinery* (K-step descent with
-      EMA targets, snapshot-restore, in-distribution control, forward-
-      model-hacking detection, alternative critic objective) is built and
-      verified to behave, and the per-seed number of 0.025-0.026 at ppl
-      1.05 is consistent with the model at chance perplexity, not at
-      convergence. Closing the gap would need a model that the descent
-      can actually move.
+      Converged model (loss floor 1.05 ppl, 1200 steps): deltas
+      `+0.00003, +0.00000, -0.00001`, effect 0.00 sd.
+      Partial training (loss floor 0.5): deltas
+      `+0.00041, +0.00002, -0.00206`, **mean -0.00054, effect 0.41 sd**.
+      Two of three seeds show the descent helping, one is mildly worse.
+      The effect is consistent across both training budgets: real but
+      under the noise band. The OOD control (more-reasoning) is
+      consistently +0.0011 worse at 0.5 sd, which says the budget
+      comparator itself is doing something; the intent-optimization
+      result is just too small to see.
+
+      The spec's matched-compute bar is not met. Across three budgets
+      (chance-level, partial, converged) the pattern is the same: the
+      descent's effect on the realised outcome is inside the seed band.
+      Closing the gap requires a model where the JEPA prediction and the
+      realised loss differ enough for one K=1 step to matter. On this
+      64-hidden 4-layer model, that does not happen. The machinery is
+      built and verified to behave; the scale of the model is the
+      bottleneck, not the algorithm.
 - [x] **matched-compute ablation, multi-seed, on the learnable task.**
       K=1, three seeds, 12 operator calls per input, equal across arms:
 

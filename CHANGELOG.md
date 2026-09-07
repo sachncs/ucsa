@@ -260,17 +260,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lint fixes: ruff clean on the entire `ucsa/` and `tests/` tree.
 
 ### Changed
-- Multi-seed matched-compute ablation on the learnable task. K=1
-  (12 operator calls per input), 3 seeds, `compute_matched_comparison`
-  against both an in-distribution control (`repeat-and-average`) and an
-  out-of-distribution one (`more-reasoning`). Intent optimisation beats
-  the in-distribution control by `+0.00003, +0.00000, -0.00001` -- 0.00
-  sd, well inside the noise band. The OOD control is +0.0011 worse at
-  0.5 sd, so the budget comparator itself is doing something; the
-  intent-optimisation result is just too small to see. There is no
-  quality result for Phase D; the machinery is built and behaves, but
-  the learnable-task loss floor is too high for a one-step descent to
-  matter at K=1.
+- Multi-seed matched-compute at two training budgets, on the
+  learnable task. K=1, 3 seeds, 12 operator calls per input, the
+  `compute_matched_comparison` call against an in-distribution control
+  (`repeat-and-average`) and an OOD one (`more-reasoning`). Converged
+  model: `+0.00003, +0.00000, -0.00001`, 0.00 sd. Partial training
+  (loss floor 0.5): `+0.00041, +0.00002, -0.00206`, mean -0.00054, 0.41 sd.
+  Two of three seeds show descent helping, one is mildly worse, and the
+  effect is inside the seed band at both budgets. The OOD control is
+  consistently +0.0011 worse at 0.5 sd, so the budget comparator is
+  doing something; the intent-optimization result is just too small
+  to see. No quality result for Phase D at this scale.
 
 ### Fixed
 - `scripts/train.py` never exited. `main` ran to completion -- checkpoint
