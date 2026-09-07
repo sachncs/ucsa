@@ -232,6 +232,26 @@ class TestControllability:
         report = counterfactual_controllability(tiny_model(), tiny_inputs())
         assert 0.0 <= report.controllability <= 1.0
         assert 0.0 <= report.specificity <= 1.0
+        assert 0.0 <= report.directed_controllability <= 1.0
+
+    def test_directed_controllability_is_not_looser(self) -> None:
+        """Directed control is a subset of plain control.
+
+        A slot only counts as directed if it moved the action *and* agreed
+        with the forward model, so the directed rate can never exceed the
+        undirected one.
+        """
+        report = counterfactual_controllability(tiny_model(), tiny_inputs())
+        assert set(report.directed_moved) <= set(
+            report.attribution.active_slots
+        )
+        assert report.directed_controllability <= report.controllability + 1e-9
+
+    def test_reports_mean_direction_agreement(self) -> None:
+        """The sweep summarises directional agreement across slots."""
+        report = counterfactual_controllability(tiny_model(), tiny_inputs())
+        assert report.mean_direction_agreement is not None
+        assert -1.0 <= report.mean_direction_agreement <= 1.0
 
     def test_report_is_serialisable(self) -> None:
         """``to_dict`` nests the attribution and interventions."""

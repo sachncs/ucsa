@@ -263,11 +263,20 @@ makes that signal explicit, localisable, and optimisable.
       | origination on, no load balance | 1.132 | yes (gate MI 0) | 2/16 | 0.04035 vs 0.00000 | **1.00** | **1.00** | **+0.755** |
       | origination off (alpha=1) | 1.049 | yes (inert) | 0/16 | 0.0 vs 0.0 | 0.00 | 1.00 | +0.000 |
 
-- [x] **headline localisation claim achieved.** 2-4 of 16 intent slots carry
-      the gradient; every attributed slot moves the emitted action when
-      ablated (controllability 1.00) and no unattributed slot does
-      (specificity 1.00). With the gate unbalanced the unattributed slots
-      move it by *exactly* 0.0.
+- [x] feat(probe): directional agreement. Controllability and specificity
+      only say an intervention *had* a specific effect; the spec asks whether
+      it "moves behaviour in the direction the forward model predicted".
+      `direction_agreement` is the cosine between the change the JEPA chain
+      predicted and the change that actually occurred.
+- [x] **headline localisation claim achieved, including its directional
+      half.** 2-4 of 16 intent slots carry the gradient; every attributed
+      slot moves the emitted action when ablated (controllability 1.00) and
+      no unattributed slot does (specificity 1.00) -- with the gate
+      unbalanced, unattributed slots move it by *exactly* 0.0. Every
+      attributed slot moves it in the predicted direction
+      (**directed controllability 1.00**), with mean cosine between
+      predicted and realised change **+0.768** (balanced gate) and
+      **+0.858** (unbalanced).
 - [x] **perplexity flat-to-slightly-worse, as the spec predicted**: 1.049
       without origination, 1.132 with. The sparse gate costs capacity.
 - [x] fix(descent): `realized_outcome` scored the *leading* logit positions

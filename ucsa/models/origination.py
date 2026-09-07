@@ -149,9 +149,17 @@ class ControllabilityReport:
         interventions: One entry per probed slot.
         active_moved: Attributed slots whose ablation moved the action by
             more than ``effect_threshold``.
+        directed_moved: Attributed slots that moved the action *and* whose
+            realised change agreed in direction with the forward model's
+            predicted change.
         silent_moved: Non-attributed slots that moved it anyway.
         controllability: Fraction of attributed slots that moved the
             action. ``0.0`` when attribution named no slots.
+        directed_controllability: Fraction of attributed slots that moved
+            it *in the predicted direction*. This is the spec's claim;
+            ``controllability`` alone only says an effect existed.
+        mean_direction_agreement: Mean cosine between predicted and
+            realised change over the probed slots that reported one.
         specificity: Fraction of non-attributed slots that stayed quiet.
             ``1.0`` when every slot was attributed.
         effect_threshold: Normalised ``action_delta`` counted as an effect.
@@ -160,8 +168,11 @@ class ControllabilityReport:
     attribution: AttributionReport
     interventions: list[InterventionReport] = field(default_factory=list)
     active_moved: list[int] = field(default_factory=list)
+    directed_moved: list[int] = field(default_factory=list)
     silent_moved: list[int] = field(default_factory=list)
     controllability: float = 0.0
+    directed_controllability: float = 0.0
+    mean_direction_agreement: float | None = None
     specificity: float = 1.0
     effect_threshold: float = 1e-3
 
@@ -171,8 +182,11 @@ class ControllabilityReport:
             "attribution": self.attribution.to_dict(),
             "interventions": [i.to_dict() for i in self.interventions],
             "active_moved": self.active_moved,
+            "directed_moved": self.directed_moved,
             "silent_moved": self.silent_moved,
             "controllability": self.controllability,
+            "directed_controllability": self.directed_controllability,
+            "mean_direction_agreement": self.mean_direction_agreement,
             "specificity": self.specificity,
             "effect_threshold": self.effect_threshold,
         }
@@ -469,11 +483,27 @@ def counterfactual_controllability(
     }
     probed_active = [s for s in probe if s in active]
     probed_silent = [s for s in probe if s not in active]
+    directed = {
+        report.slot
+        for report in interventions
+        if report.action_delta > effect_threshold
+        and report.direction_agreement is not None
+        and report.direction_agreement > 0.0
+    }
     active_moved = [s for s in probed_active if s in moved]
+    directed_moved = [s for s in probed_active if s in directed]
     silent_moved = [s for s in probed_silent if s in moved]
     controllability = (
         len(active_moved) / len(probed_active) if probed_active else 0.0
     )
+    directed_controllability = (
+        len(directed_moved) / len(probed_active) if probed_active else 0.0
+    )
+    agreements = [
+        report.direction_agreement
+        for report in interventions
+        if report.direction_agreement is not None
+    ]
     specificity = (
         1.0 - len(silent_moved) / len(probed_silent) if probed_silent else 1.0
     )
@@ -481,8 +511,13 @@ def counterfactual_controllability(
         attribution=attribution,
         interventions=interventions,
         active_moved=active_moved,
+        directed_moved=directed_moved,
         silent_moved=silent_moved,
         controllability=controllability,
+        directed_controllability=directed_controllability,
+        mean_direction_agreement=(
+            sum(agreements) / len(agreements) if agreements else None
+        ),
         specificity=specificity,
         effect_threshold=effect_threshold,
     )

@@ -93,7 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   because wiring a regulariser before the Phase C collapse diagnostic
   exists would be tuning toward a number we cannot yet read.
 - `ucsa.models.origination`: `chain_latents`, `direction_agreement`, and
-  `InterventionReport.direction_agreement`. The spec's claim is
+  `InterventionReport.direction_agreement` /
+  `ControllabilityReport.directed_controllability`. The spec's claim is
   that intervening "moves behaviour *in the direction the forward model
   predicted*"; a magnitude and a specificity rate cannot say that. The
   cosine between the change the JEPA chain predicted and the change that
