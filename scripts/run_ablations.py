@@ -67,6 +67,15 @@ def parse_args() -> argparse.Namespace:
         help="Per-ablation JSON files land here.",
     )
     p.add_argument("--skip-baselines", action="store_true")
+    p.add_argument(
+        "--tags", nargs="*", default=None,
+        help="Only run these ablation tags. Defaults to all of them.",
+    )
+    p.add_argument(
+        "--eval-every", type=int, default=200,
+        help="0 disables periodic evaluation.",
+    )
+    p.add_argument("--eval-batches", type=int, default=10)
     return p.parse_args()
 
 
@@ -76,10 +85,9 @@ def main() -> None:
     cmd_base = [
         sys.executable, "scripts/train.py",
         "--max-steps", str(args.max_steps),
-        "--ablation", "PLACEHOLDER",
         "--ckpt-every", "0",  # one final ckpt only
-        "--eval-every", "200",
-        "--eval-batches", "10",
+        "--eval-every", str(args.eval_every),
+        "--eval-batches", str(args.eval_batches),
         "--stage-1-end", "400",
         "--stage-2-end", "1200",
         "--stage-3-end", "2400",
@@ -87,9 +95,20 @@ def main() -> None:
     if args.skip_baselines:
         cmd_base.append("--skip-baselines")
 
+    selected = ABLATIONS
+    if args.tags:
+        known = {abl["tag"] for abl in ABLATIONS}
+        unknown = sorted(set(args.tags) - known)
+        if unknown:
+            raise SystemExit(
+                f"unknown ablation tags {unknown}; known tags are "
+                f"{sorted(known)}"
+            )
+        selected = [abl for abl in ABLATIONS if abl["tag"] in args.tags]
+
     rows: list[dict] = []
     for seed in args.seeds:
-        for abl in ABLATIONS:
+        for abl in selected:
             print(
                 f"\n=== ablation={abl['tag']} seed={seed} ===",
                 flush=True,
@@ -98,7 +117,11 @@ def main() -> None:
                 args.out_dir,
                 f"ucsa-{abl['tag']}-seed{seed}.json",
             )
+            # The tag has to be passed through, not left as a
+            # placeholder: it names the run inside the JSON and is what
+            # ``build_paper_tables.py`` groups on.
             cmd = list(cmd_base) + list(abl["flags"]) + [
+                "--ablation", str(abl["tag"]),
                 "--seed", str(seed),
                 "--out-json", out_path,
             ]

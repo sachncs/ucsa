@@ -50,6 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `scripts/probe_origination.py`: emits collapse, localisation, and the
   matched-compute descent sweep as one JSON report, mirroring
   `scripts/probe_banks.py`.
+- `scripts/run_ablations.py`: `--tags` selects a subset of arms, and
+  `--eval-every` / `--eval-batches` are passed through.
 - `scripts/train.py`: `--observation-mix`, `--observation-mix-decay`,
   `--origination-top-k`, `--no-origination-balance`,
   `--origination-weight`, `--intent-update-scale`,
@@ -328,6 +330,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   would now be wrong because `UCSA.forward` returns extra keys.
 
 ### Fixed
+- `scripts/train.py` never exited. `main` ran to completion -- checkpoint
+  saved, JSON written, "Final:" printed -- and the interpreter then
+  deadlocked in finalisation on this torch/MPS build, with no non-daemon
+  threads and no child processes remaining (observed alive at 55 minutes).
+  `scripts/run_ablations.py` drives it with `subprocess.run`, so a sweep
+  blocked forever after its first arm. The script now flushes and
+  hard-exits past finalisation: a 2-step run goes from hanging
+  indefinitely to exiting in 37 s.
+- `scripts/train.py`: `--eval-every 0` raised `ZeroDivisionError` on the
+  first step. `0` now means "never", matching the documented meaning of
+  `--ckpt-every 0` and what `run_ablations.py` already passed.
+- `scripts/run_ablations.py` never substituted its `--ablation
+  PLACEHOLDER` argument, so every run was tagged `PLACEHOLDER` in its
+  JSON and `build_paper_tables.py` could not group on it.
 - `ucsa.models.intent_descent.realized_outcome` scored the *leading* logit
   positions while `Trainer.compute_loss` left-pads targets to the
   *trailing* ones, so it read positions the model was never trained on. On

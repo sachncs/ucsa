@@ -379,6 +379,51 @@ makes that signal explicit, localisable, and optimisable.
          less at late steps than early ones, which is the ordering the spec
          predicts, but the sign is not an improvement.
 
+### Phase 11.E — real-data ablation sweep
+
+- [x] fix(scripts): `scripts/train.py` never exited. `main` ran to
+      completion -- checkpoint saved, JSON written, "Final:" printed -- and
+      then the interpreter deadlocked in finalisation: no non-daemon threads
+      and no child processes remained, yet the process stayed alive
+      indefinitely (observed at 55 minutes). That made the script unusable
+      for automation, because `run_ablations.py` drives it with
+      `subprocess.run` and blocked forever after the first arm. Now flushes
+      and hard-exits past finalisation; a 2-step run goes from hanging
+      forever to exiting in 37 s.
+- [x] fix(scripts): `--eval-every 0` raised `ZeroDivisionError` on the first
+      step. `0` now means "never", matching what `--ckpt-every 0` already
+      documented and what `run_ablations.py` already passed.
+- [x] fix(scripts): `run_ablations.py` never substituted its `--ablation
+      PLACEHOLDER`, so every run was tagged `PLACEHOLDER` inside its JSON.
+      Added a `--tags` filter and `--eval-every` / `--eval-batches`
+      pass-through so a subset of arms can be run.
+- [x] **sweep executed on real fineweb-edu**: 300 steps, seed 42,
+      UCSA-small (384-hidden, 6-layer, 65.3M params), identical everything
+      but the origination knob.
+
+      | arm | final val ppl | delta vs full |
+      | --- | --- | --- |
+      | full (origination off) | 3832.7 | — |
+      | origination (alpha0=0.5) | 3824.1 | -8.7 |
+      | origination-static-bank | 3830.0 | -2.8 |
+      | origination-dense-gate | 3852.4 | +19.7 |
+      | origination-no-balance | 3853.5 | +20.7 |
+      | origination-streamed-intent | 3627.9 | -204.8 |
+
+- [x] **perplexity is not harmed by enabling origination**, which is what
+      the spec predicted ("flat to slightly worse"). Four of the five
+      origination arms sit within +-0.6% of the no-origination baseline.
+- [ ] **do not read significance into this sweep.** One seed, 300 steps, and
+      the model is deeply undertrained at ppl ~3830 against GPT-2-scale
+      ~30, so it is measuring early-training noise. The +-20 ppl differences
+      are almost certainly noise and even the -204.8 on
+      `origination-streamed-intent` may be. By the spec's own standard --
+      quality claims only at matched compute -- there is no quality claim
+      here beyond "not harmed". A defensible result needs several seeds and
+      a much longer schedule. Also note `streamed-intent` carries 384 extra
+      parameters (one more `bank_id_embedding` row, +0.0006%), so it is not
+      exactly parameter-matched.
+
 ## Gate status
 
 - [x] `ruff check ucsa tests scripts` clean.

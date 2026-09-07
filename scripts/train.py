@@ -25,6 +25,7 @@ import argparse
 import json
 import math
 import os
+import sys
 import time
 
 import torch
@@ -43,8 +44,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--max-steps", type=int, default=12000)
     p.add_argument("--ckpt-dir", default="ckpts")
-    p.add_argument("--ckpt-every", type=int, default=1000)
-    p.add_argument("--eval-every", type=int, default=500)
+    p.add_argument("--ckpt-every", type=int, default=1000,
+                   help="0 disables periodic checkpoints.")
+    p.add_argument("--eval-every", type=int, default=500,
+                   help="0 disables periodic evaluation.")
     p.add_argument("--eval-batches", type=int, default=20)
     p.add_argument("--stage-1-end", type=int, default=2000)
     p.add_argument("--stage-2-end", type=int, default=4500)
@@ -351,7 +354,11 @@ def main() -> None:
                 "jepa_steps": int(snap.get("jepa_steps", 0)),
             })
 
-        if step > 0 and step % args.eval_every == 0:
+        # ``0`` means never, matching the documented meaning of
+        # ``--ckpt-every 0`` ("one final ckpt only") that
+        # ``scripts/run_ablations.py`` already passes. Taking a modulo by it
+        # raised ZeroDivisionError on the first step instead.
+        if args.eval_every > 0 and step > 0 and step % args.eval_every == 0:
             vm = _eval(trainer, val_loader, args.eval_batches)
             if vm["perplexity"] < best_val_ppl:
                 best_val_ppl = vm["perplexity"]
@@ -363,7 +370,7 @@ def main() -> None:
                 flush=True,
             )
 
-        if step > 0 and step % args.ckpt_every == 0:
+        if args.ckpt_every > 0 and step > 0 and step % args.ckpt_every == 0:
             path = os.path.join(args.ckpt_dir, f"ucsa-step{step}.safetensors")
             trainer.save_checkpoint(path)
             print(f"  saved {path}", flush=True)
@@ -432,3 +439,13 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    # Exit explicitly. `main` runs to completion -- the checkpoint is
+    # saved and the JSON is written -- but the interpreter then deadlocks
+    # in finalisation on this torch/MPS build: no non-daemon threads and no
+    # child processes remain, yet the process never exits. That makes the
+    # script unusable for automation, because `scripts/run_ablations.py`
+    # drives it with `subprocess.run` and blocks forever after the first
+    # arm. Flush and hard-exit past finalisation.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
