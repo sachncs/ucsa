@@ -554,16 +554,18 @@ makes that signal explicit, localisable, and optimisable.
 - [x] **perplexity is not harmed by enabling origination**, which is what
       the spec predicted ("flat to slightly worse"). Four of the five
       origination arms sit within +-0.6% of the no-origination baseline.
-- [ ] **do not read significance into this sweep.** One seed, 300 steps, and
-      the model is deeply undertrained at ppl ~3830 against GPT-2-scale
-      ~30, so it is measuring early-training noise. The +-20 ppl differences
-      are almost certainly noise and even the -204.8 on
-      `origination-streamed-intent` may be. By the spec's own standard --
-      quality claims only at matched compute -- there is no quality claim
-      here beyond "not harmed". A defensible result needs several seeds and
-      a much longer schedule. Also note `streamed-intent` carries 384 extra
-      parameters (one more `bank_id_embedding` row, +0.0006%), so it is not
-      exactly parameter-matched.
+- [x] **do not read significance into this sweep.** The 6-arm single-seed
+      300-step fineweb sweep showed `origination-streamed-intent` at
+      ppl 3627.9 vs the no-origination baseline at 3832.7 -- a -204.8 ppl
+      delta, and the only arm not within +-1% of the baseline. That looks
+      like a win, but the model is at ppl 3830 against GPT-2-scale ~30, so
+      this is measuring early-training noise. The spec's bar is matched-
+      compute reporting, and the multi-seed matched-compute at the small
+      scale did not clear the noise band. A defensible fineweb claim
+      needs several seeds and a longer schedule. `streamed-intent` also
+      carries 384 extra parameters, so it is not exactly parameter-
+      matched. The sweep is the pilot and the wiring; the measured arm
+      deltas should not be read as a result.
 
 ## Gate status
 
