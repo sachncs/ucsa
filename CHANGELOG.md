@@ -265,7 +265,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before checking anything, because the installed numpy ships stubs
   written with 3.12 `type` statements that mypy refuses to parse under
   `python_version = "3.11"`; numpy is now `follow_imports = "skip"` in
-  `pyproject.toml` rather than dropping 3.11 as the target. The fixes are
+  `pyproject.toml` rather than dropping 3.11 as the target. That override
+  is a deliberate change to the gate's own configuration, not a code fix;
+  numpy is imported in exactly one place in `ucsa/` (`utils/seed.py`), so
+  it costs no real coverage. The fixes are
   typing-only and behaviour-preserving; the full origination measurement
   reproduces to 4 decimal places afterwards. Two are small API additions
   rather than casts:

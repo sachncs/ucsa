@@ -202,23 +202,47 @@ makes that signal explicit, localisable, and optimisable.
       diagnostic caught gate collapse -- the gate settled on the same two
       slots whatever it was shown, mutual information exactly 0.0000.
 - [x] **diagnostic is green in the intended configuration** and correctly red
-      in the degenerate ones. 600 steps, structured copy task:
+      in the degenerate ones. Re-measured after the target-padding fix, on
+      the learnable task (vocab 32, repeat-the-first-half, 1200 steps):
 
       | config | collapsed | var | MI | H/max | read share | slots |
       | --- | --- | --- | --- | --- | --- | --- |
-      | origination on, balanced | no | 1.2e-7 | 0.440 | 2.10/2.77 | 0.418 | 16/16 |
-      | origination on, no balance | yes | 1.0e-7 | 0.000 | 0.69/2.77 | 0.423 | 2/16 |
-      | static bank (scale 0) | yes | 5.6e-19 | 0.000 | 0.69/2.77 | 0.038 | 2/16 |
-      | origination off (alpha=1) | yes | 0.0 | 0.000 | 0.00/2.77 | 0.000 | 0/16 |
+      | origination on, balanced | no | 3.38e-03 | 0.041 | 0.76/2.77 | 0.353 | 3/16 |
+      | origination on, no balance | yes (gate MI 0) | 3.25e-03 | 0.000 | 0.69/2.77 | 0.224 | 2/16 |
+      | origination off (alpha=1) | yes (inert) | 0.00e+00 | 0.000 | 0.00/2.77 | 0.000 | 0/16 |
 
-- [ ] **open finding**: load balancing and localisation pull against each
-      other. Balancing the gate lifts mutual information from 0.000 to 0.440
-      but widens the per-action gated set from 2 slots to 9, and the
-      gated-vs-ungated effect ratio falls from ~5.7e7 to ~0.9. Both ends of
-      that trade-off are reported; no weight has been tuned to flatter it.
-- [ ] **open finding**: final loss is 1.354 in *every* configuration,
-      including origination fully off. On this task the origination path
-      buys nothing measurable. Phase 11.D is where it is supposed to pay.
+      The static-bank case is not in this table because it was not re-run
+      after the padding fix. Its verdict does not depend on a training run:
+      with `intent_update_scale=0.0` the origination state is a parameter
+      and cannot vary across inputs, so the variance is zero by
+      construction. That is asserted directly in
+      `tests/test_origination.py::TestCollapseReport::
+      test_flags_a_static_intent_bank`, which requires
+      `state_variance == 0.0` exactly and `collapsed` to be set.
+
+      Superseded numbers, recorded so the earlier revision is not mistaken
+      for a measurement: this table previously read var 1.2e-7 / MI 0.440 /
+      H 2.10 / share 0.418 / slots 16-of-16 for the balanced arm at 600
+      steps. Those came from a run where 90.4% of the objective was
+      padding-prediction (see Phase 11.0), so the arms were barely
+      distinguishable and the numbers do not describe the current system.
+
+- [ ] **open finding**: load balancing and localisation trade against each
+      other, though mildly. Re-measured after the target-padding fix, on the
+      learnable task: balancing lifts the gate's mutual information with the
+      input from 0.000 to 0.041 and widens the per-action gated set from 2
+      slots to 3-4, while the gated-vs-ungated effect ratio falls from
+      ~4e10 (ungated effect exactly 0.0) to 15.2x. Controllability and
+      specificity stay at 1.00 either way, so the trade-off costs sharpness
+      rather than validity. Both ends reported; no weight tuned to flatter
+      either.
+
+      Superseded numbers, kept only to mark that they were wrong: an earlier
+      revision recorded this as "MI 0.000 -> 0.440, gated set 2 -> 9, ratio
+      5.7e7 -> 0.9" and "final loss 1.354 in every configuration". Both were
+      measured while `Trainer.compute_loss` padded targets with token id 0,
+      which made 90.4% of the objective a padding-prediction task identical
+      across configurations. See Phase 11.0.
 
 ### Phase 11.D — origination is optimised
 
@@ -437,11 +461,25 @@ makes that signal explicit, localisable, and optimisable.
 
 - [x] `ruff check ucsa tests scripts` clean.
 - [x] `mypy --strict ucsa/` clean -- 0 errors in 34 files, from 92 in 21.
-      Required resolving the numpy stub abort (`follow_imports = "skip"`,
-      keeping 3.11 as the target) and two typed accessors,
+      Two typed accessors do most of the work,
       `PersistentCognitiveState.metadata` and
       `TransformerOperator.transformer_blocks`, so the `Tensor | Module`
-      narrowing happens once rather than at ~30 call sites.
+      narrowing that `nn.Module.__getattr__` and `nn.ModuleList` force
+      happens once rather than at ~30 call sites.
+
+      **Flagging a config change made to satisfy this gate.** Before any of
+      the code fixes, `mypy --strict ucsa/` aborted after a single error
+      without checking a line of project code: the installed numpy ships
+      stubs using 3.12 `type` statements, which mypy refuses to parse under
+      the repo's `python_version = "3.11"`. `pyproject.toml` now sets
+      `follow_imports = "skip"` for `numpy.*`. That is me changing the
+      gate's configuration in order to pass the gate, so it should be a
+      conscious decision rather than something buried in a diff. The
+      alternatives were bumping `python_version` to 3.12, which weakens
+      what CI checks on 3.11, or pinning numpy. numpy is used in exactly
+      one place in `ucsa/` (`utils/seed.py`, for RNG seeding), so skipping
+      its stubs costs no real coverage -- but if you would rather pin numpy
+      and drop the override, say so and I will.
 - [x] `pytest -q` green: 572 passed.
 - [x] `CHANGELOG.md` and `TODO.md` updated in the same commit as the work.
 - [x] Smoke runs with no NaN before each phase was called done.
