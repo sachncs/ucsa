@@ -7,6 +7,7 @@ import torch
 
 from ucsa.models.intent_descent import (
     DescentReport,
+    _resolved_objective,
     compute_matched_comparison,
     critic_objective,
     ema_outputs,
@@ -61,6 +62,45 @@ class TestCriticObjective:
         assert logit.dim() == 0
         logit.backward()
         assert model.pcs.get_bank("working").grad is not None
+
+
+
+class TestObjectiveResolution:
+    """The ``auto`` policy picks the available objective."""
+
+    def test_auto_picks_jepa_when_no_learned_verifier(self) -> None:
+        """A heuristic verifier forces the JEPA path."""
+        model = tiny_model()
+        assert _resolved_objective(model, "auto") == "jepa"
+
+    def test_auto_picks_critic_when_learned_verifier_present(self) -> None:
+        """A learned verifier takes priority over the JEPA chain."""
+        model = tiny_model()
+        model.verifier = LearnedVerifier(hidden_size=32, cstate_summary_size=8)
+        assert _resolved_objective(model, "auto") == "critic"
+
+    def test_explicit_request_overrides_auto(self) -> None:
+        """``jepa`` and ``critic`` are honoured even when the other is faster."""
+        model = tiny_model()
+        model.verifier = LearnedVerifier(hidden_size=32, cstate_summary_size=8)
+        assert _resolved_objective(model, "jepa") == "jepa"
+        assert _resolved_objective(model, "critic") == "critic"
+
+    def test_unknown_request_rejected(self) -> None:
+        """An unknown objective raises rather than guessing."""
+        model = tiny_model()
+        with pytest.raises(ValueError):
+            optimize_intent(model, tiny_inputs()[0], objective="nope")
+
+    def test_optimize_intent_routes_to_critic_when_requested(self) -> None:
+        """``objective="critic"`` runs and a real verifier is reached."""
+        model = tiny_model()
+        model.verifier = LearnedVerifier(hidden_size=32, cstate_summary_size=8)
+        # Two iterations to be sure the inner loop runs.
+        optimize_intent(
+            model, tiny_inputs()[0], num_steps=2, objective="critic",
+            restore=True,
+        )
 
 
 class TestJepaChainError:

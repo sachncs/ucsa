@@ -369,6 +369,28 @@ def critic_objective(
     return logit
 
 
+
+def _resolved_objective(model: UCSA, requested: str) -> str:
+    """Pick the actual objective to descend on.
+
+    Args:
+        model: The model whose verifier availability matters.
+        requested: One of ``"auto"``, ``"jepa"``, ``"critic"``.
+
+    Returns:
+        ``"critic"`` when the request is satisfied by a
+        :class:`LearnedVerifier` on the model, ``"jepa"`` otherwise, and the
+        literal request when it is not ``"auto"``.
+    """
+    if requested != "auto":
+        return requested
+    verifier = getattr(model, "verifier", None)
+    if isinstance(verifier, LearnedVerifier):
+        return "critic"
+    return "jepa"
+
+
+
 def optimize_intent(
     model: UCSA,
     inputs: Tensor,
@@ -380,6 +402,7 @@ def optimize_intent(
     restore: bool = False,
     normalize_gradient: bool = True,
     target_encoder: torch.nn.Module | None = None,
+    objective: str = "auto",
 ) -> DescentReport:
     """Descend on the ``intent`` bank only, with the weights frozen.
 
@@ -428,6 +451,11 @@ def optimize_intent(
         raise ValueError(
             f"learning_rate must be non-negative, got {learning_rate}."
         )
+    if objective not in ("auto", "jepa", "critic"):
+        raise ValueError(
+            f"objective must be 'auto', 'jepa' or 'critic', got {objective!r}."
+        )
+    objective_mode = _resolved_objective(model, objective)
     bank = model.pcs.get_bank(INTENT_BANK)
     original = bank.detach().clone()
     frozen = [
@@ -462,18 +490,23 @@ def optimize_intent(
             pcs_restore(model, context)
             outputs = model(inputs)
             report.forward_passes += 1
-            objective = jepa_chain_error(outputs, target_outputs)
-            if not objective.requires_grad:
+            objective_tensor: Tensor | None
+            if objective_mode == "jepa":
+                objective_tensor = jepa_chain_error(outputs, target_outputs)
+            else:  # "critic"
+                objective_tensor = critic_objective(model, outputs)
+            if objective_tensor is None or not objective_tensor.requires_grad:
                 break
-            objective.backward()  # type: ignore[no-untyped-call]
+            objective_tensor.backward()  # type: ignore[no-untyped-call]
             gradient = bank.grad
             grad_norm = (
                 0.0 if gradient is None else float(gradient.norm().item())
             )
+            objective_value = float(objective_tensor.item())
             report.steps.append(
                 DescentStep(
                     step=step,
-                    objective=float(objective.item()),
+                    objective=objective_value,
                     grad_norm=grad_norm,
                     critic_score=critic_score(model, outputs),
                 )
@@ -734,6 +767,7 @@ __all__ = [
     "DescentStep",
     "MatchedComputeRow",
     "compute_matched_comparison",
+    "critic_objective",
     "critic_score",
     "jepa_chain_error",
     "jepa_step_errors",
