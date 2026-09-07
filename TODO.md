@@ -158,6 +158,14 @@ makes that signal explicit, localisable, and optimisable.
       intent bank; 100-step smoke on four `alpha` schedules, no NaN, and the
       generated stream's RMS stays at or below the observation's rather than
       growing (drift measured, not assumed)
+- [x] test(drift): promote the drift check from a throwaway smoke script into
+      the suite, so a regression is caught rather than re-discovered. Three
+      tests: bounded generated stream over six iterations at `alpha=0`,
+      monotone effect of `alpha` on how far the fed stream departs from
+      `O_0`, and the exact `alpha * O_0 + (1 - alpha) * G` arithmetic.
+      Mutation-checked by deleting the mix and feeding `G` verbatim -- 3
+      tests fail where previously only 1 did. Bound- and change-based
+      assertions alone survived that mutation, so the arithmetic is pinned.
 
 ### Phase 11.B — origination is localisable
 
@@ -413,6 +421,64 @@ makes that signal explicit, localisable, and optimisable.
 
       The gradient concentrates on fewer slots and their causal effect grows
       monotonically as the task is learned.
+- [x] feat(descent): `objective="auto"|"jepa"|"critic"`. The spec names the
+      `LearnedVerifier` as the outcome oracle, but the default
+      `HeuristicVerifier` makes the critic path unreachable and the
+      `critic_score` helper returns ``None``. `critic_objective` now
+      exists as a *differentiable* verifier logit, and `optimize_intent`
+      picks it when the model carries a `LearnedVerifier`. The
+      ``no_grad`` `critic_score` log is preserved for the report.
+- [x] **the safety net exists; it is not enough by itself.** With the
+      `critic` objective on this 1200-step task, ``predicted_better``
+      dropped from 8/8 to 0/8 -- the descent no longer rides the JEPA
+      prediction. But the critic is a randomly-initialised 2-layer MLP
+      here, so its gradient is noise and the realised gains (``5/8``,
+      corr ``-0.217``) are not real either. To actually close forward-
+      model hacking the verifier has to be trained on a genuine
+      outcome signal, and that training is a separate problem the
+      spec does not write out. Recorded honestly.
+- [x] **matched-compute ablation, multi-seed, on the learnable task.**
+      K=1, three seeds, 12 operator calls per input, equal across arms:
+
+      | arm | mean | sd | per-seed |
+      | --- | --- | --- | --- |
+      | intent-optimization | 0.02500 | 0.00239 | 0.02224, 0.02640, 0.02636 |
+      | repeat-and-average  | 0.02499 | 0.00241 | 0.02221, 0.02640, 0.02637 |
+      | more-reasoning      | 0.02614 | 0.00194 | 0.02390, 0.02723, 0.02730 |
+
+      Intent optimisation vs the in-distribution control: deltas
+      `+0.00003, +0.00000, -0.00001`. **Effect size 0.00 sd** -- inside the
+      noise band. The OOD control (more-reasoning) is a clean +0.0011
+      worse at 0.5 sd, so the budget comparator itself is doing something.
+      The spec's matched-compute bar is not met. There is still no
+      quality result for Phase D; the *machinery* (K-step descent with
+      EMA targets, snapshot-restore, in-distribution control, forward-
+      model-hacking detection, alternative critic objective) is built and
+      verified to behave, and the per-seed number of 0.025-0.026 at ppl
+      1.05 is consistent with the model at chance perplexity, not at
+      convergence. Closing the gap would need a model that the descent
+      can actually move.
+- [x] **matched-compute ablation, multi-seed, on the learnable task.**
+      K=1, three seeds, 12 operator calls per input, equal across arms:
+
+      | arm | mean | sd | per-seed |
+      | --- | --- | --- | --- |
+      | intent-optimization | 0.02500 | 0.00239 | 0.02224, 0.02640, 0.02636 |
+      | repeat-and-average  | 0.02499 | 0.00241 | 0.02221, 0.02640, 0.02637 |
+      | more-reasoning      | 0.02614 | 0.00194 | 0.02390, 0.02723, 0.02730 |
+
+      Intent optimisation vs the in-distribution control: deltas
+      `+0.00003, +0.00000, -0.00001`. **Effect size 0.00 sd** -- inside the
+      noise band. The OOD control (more-reasoning) is a clean +0.0011
+      worse at 0.5 sd, so the budget comparator itself is doing something.
+      The spec's matched-compute bar is not met. There is still no
+      quality result for Phase D; the *machinery* (K-step descent with
+      EMA targets, snapshot-restore, in-distribution control, forward-
+      model-hacking detection, alternative critic objective) is built and
+      verified to behave, and the per-seed number of 0.025-0.026 at ppl
+      1.05 is consistent with the model at chance perplexity, not at
+      convergence. Closing the gap would need a model that the descent
+      can actually move.
 - [ ] **honest caveat, left open: no decision-space authority.** The
       arg-max token never flips -- 0 of 128 interventions, at *every* stage
       from random init to ppl 1.29. So this is not model saturation, as
@@ -428,6 +494,24 @@ makes that signal explicit, localisable, and optimisable.
          (k0 -0.029) and barely moves when it is off (k0 -0.001). It rises
          less at late steps than early ones, which is the ordering the spec
          predicts, but the sign is not an improvement.
+
+### Phase 11.F — the claim as a test
+
+- [x] test(claim): `tests/test_localisation_claim.py` asserts the headline
+      claim rather than only the parts that support it. Four assertions
+      mapping to the spec's wording -- sparsity, controllability,
+      specificity, directional agreement -- plus a negative control at
+      `alpha=1` where the mechanism is off.
+- [x] the perplexity guard inside it is load-bearing, not decoration: at 900
+      steps the same configuration sits at ppl 31.85, chance for a 32-token
+      vocabulary, and every downstream assertion is meaningless because
+      there is no settled behaviour to move. Raised to 1200 steps, which
+      lands at ppl ~1.1, and the guard now fails loudly if a future change
+      stops the task being learned.
+- [x] mutation-checked: forcing the gate dense (`top_k` = all slots) fails 3
+      of the 7 assertions, including the sparsity and effect-separation
+      ones. The claim test therefore detects the loss of the bottleneck that
+      the whole localisation result depends on.
 
 ### Phase 11.E — real-data ablation sweep
 
