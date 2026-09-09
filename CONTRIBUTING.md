@@ -1,3 +1,9 @@
+---
+layout: home
+title: Contributing
+permalink: /CONTRIBUTING/
+---
+
 # Contributing to ucsa
 
 Thanks for your interest in ucsa. This document explains how to set up
