@@ -51,11 +51,16 @@ ucsa-train = "ucsa.train:main"
 ucsa-infer = "ucsa.infer:main"
 
 [project.urls]
-Homepage = "https://github.com/anomalyco/ucsa"
+Homepage = "https://sachncs.github.io/ucsa/"
+Repository = "https://github.com/sachncs/ucsa"
+Issues = "https://github.com/sachncs/ucsa/issues"
+Discussions = "https://github.com/sachncs/ucsa/discussions"
+Changelog = "https://github.com/sachncs/ucsa/blob/master/CHANGELOG.md"
 
 [tool.setuptools]
 packages = [
     "ucsa",
+    "ucsa.configs",
     "ucsa.models",
     "ucsa.training",
     "ucsa.utils",
