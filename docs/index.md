@@ -28,13 +28,13 @@ permalink: /docs/
           Pick a role below; every link is curated.
         </p>
         <div class="ucsa-hero__ctas">
-          <a class="ucsa-btn ucsa-btn--primary" href="/ucsa/docs/getting-started/">
+          <a class="ucsa-btn ucsa-btn--primary" href="{{ '/docs/getting-started/' | relative_url }}">
             Get started <span class="ucsa-btn__arrow">→</span>
           </a>
-          <a class="ucsa-btn ucsa-btn--ghost" href="/ucsa/docs/architecture/">
+          <a class="ucsa-btn ucsa-btn--ghost" href="{{ '/docs/architecture/' | relative_url }}">
             Read architecture
           </a>
-          <a class="ucsa-btn ucsa-btn--ghost" href="/ucsa/paper/PAPER/">
+          <a class="ucsa-btn ucsa-btn--ghost" href="{{ '/paper/PAPER/' | relative_url }}">
             Paper draft
           </a>
         </div>
@@ -46,12 +46,12 @@ permalink: /docs/
             <span class="ucsa-hero__visual-tag">10 pages · 1 sidebar</span>
           </div>
           <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--s-3);">
-            <a href="/ucsa/docs/getting-started/" style="display: block; padding: var(--s-3); background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r-2); color: var(--ink-900); font-weight: 600; font-size: var(--type-sm);">Getting started →</a>
-            <a href="/ucsa/docs/architecture/" style="display: block; padding: var(--s-3); background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r-2); color: var(--ink-900); font-weight: 600; font-size: var(--type-sm);">Architecture →</a>
-            <a href="/ucsa/docs/api-reference/" style="display: block; padding: var(--s-3); background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r-2); color: var(--ink-900); font-weight: 600; font-size: var(--type-sm);">API reference →</a>
-            <a href="/ucsa/docs/tutorials/" style="display: block; padding: var(--s-3); background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r-2); color: var(--ink-900); font-weight: 600; font-size: var(--type-sm);">Tutorials →</a>
-            <a href="/ucsa/docs/contributing/" style="display: block; padding: var(--s-3); background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r-2); color: var(--ink-900); font-weight: 600; font-size: var(--type-sm);">Contributing →</a>
-            <a href="/ucsa/paper/PAPER/" style="display: block; padding: var(--s-3); background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r-2); color: var(--ink-900); font-weight: 600; font-size: var(--type-sm);">Paper draft →</a>
+            <a href="{{ '/docs/getting-started/' | relative_url }}" style="display: block; padding: var(--s-3); background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r-2); color: var(--ink-900); font-weight: 600; font-size: var(--type-sm);">Getting started →</a>
+            <a href="{{ '/docs/architecture/' | relative_url }}" style="display: block; padding: var(--s-3); background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r-2); color: var(--ink-900); font-weight: 600; font-size: var(--type-sm);">Architecture →</a>
+            <a href="{{ '/docs/api-reference/' | relative_url }}" style="display: block; padding: var(--s-3); background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r-2); color: var(--ink-900); font-weight: 600; font-size: var(--type-sm);">API reference →</a>
+            <a href="{{ '/docs/tutorials/' | relative_url }}" style="display: block; padding: var(--s-3); background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r-2); color: var(--ink-900); font-weight: 600; font-size: var(--type-sm);">Tutorials →</a>
+            <a href="{{ '/docs/contributing/' | relative_url }}" style="display: block; padding: var(--s-3); background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r-2); color: var(--ink-900); font-weight: 600; font-size: var(--type-sm);">Contributing →</a>
+            <a href="{{ '/paper/PAPER/' | relative_url }}" style="display: block; padding: var(--s-3); background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r-2); color: var(--ink-900); font-weight: 600; font-size: var(--type-sm);">Paper draft →</a>
           </div>
         </div>
       </div>
@@ -85,9 +85,9 @@ permalink: /docs/
           pipeline.
         </p>
         <div class="ucsa-role__links">
-          <a class="ucsa-role__link" href="/ucsa/docs/api-reference/">→ API reference</a>
-          <a class="ucsa-role__link" href="/ucsa/docs/tutorials/">→ Tutorials</a>
-          <a class="ucsa-role__link" href="/ucsa/docs/getting-started/">→ Getting started</a>
+          <a class="ucsa-role__link" href="{{ '/docs/api-reference/' | relative_url }}">→ API reference</a>
+          <a class="ucsa-role__link" href="{{ '/docs/tutorials/' | relative_url }}">→ Tutorials</a>
+          <a class="ucsa-role__link" href="{{ '/docs/getting-started/' | relative_url }}">→ Getting started</a>
         </div>
       </article>
 
@@ -100,9 +100,9 @@ permalink: /docs/
           read the working paper draft.
         </p>
         <div class="ucsa-role__links">
-          <a class="ucsa-role__link" href="/ucsa/docs/architecture/">→ Architecture</a>
-          <a class="ucsa-role__link" href="/ucsa/paper/PAPER/">→ Paper draft</a>
-          <a class="ucsa-role__link" href="/ucsa/paper/TABLES/">→ Paper tables</a>
+          <a class="ucsa-role__link" href="{{ '/docs/architecture/' | relative_url }}">→ Architecture</a>
+          <a class="ucsa-role__link" href="{{ '/paper/PAPER/' | relative_url }}">→ Paper draft</a>
+          <a class="ucsa-role__link" href="{{ '/paper/TABLES/' | relative_url }}">→ Paper tables</a>
         </div>
       </article>
 
@@ -114,8 +114,8 @@ permalink: /docs/
           reproduction, ablation sweep, eval harness, paper tables.
         </p>
         <div class="ucsa-role__links">
-          <a class="ucsa-role__link" href="/ucsa/docs/getting-started/">→ Getting started</a>
-          <a class="ucsa-role__link" href="/ucsa/paper/TABLES/">→ Paper tables</a>
+          <a class="ucsa-role__link" href="{{ '/docs/getting-started/' | relative_url }}">→ Getting started</a>
+          <a class="ucsa-role__link" href="{{ '/paper/TABLES/' | relative_url }}">→ Paper tables</a>
         </div>
       </article>
 
@@ -127,7 +127,7 @@ permalink: /docs/
           tests, smoke test, and the code review checklist.
         </p>
         <div class="ucsa-role__links">
-          <a class="ucsa-role__link" href="/ucsa/docs/contributing/">→ Contributing</a>
+          <a class="ucsa-role__link" href="{{ '/docs/contributing/' | relative_url }}">→ Contributing</a>
           <a class="ucsa-role__link" href="https://github.com/sachncs/ucsa/issues" rel="noopener">→ Issues ↗</a>
         </div>
       </article>
@@ -152,21 +152,21 @@ permalink: /docs/
     </div>
 
     <div class="ucsa-doc-grid">
-      <a class="ucsa-doc-tile" href="/ucsa/docs/getting-started/">
+      <a class="ucsa-doc-tile" href="{{ '/docs/getting-started/' | relative_url }}">
         <span class="ucsa-doc-tile__eyebrow">onboarding</span>
         <h4 class="ucsa-doc-tile__title">Getting started</h4>
         <p class="ucsa-doc-tile__desc">
           Install, smoke test, full reproduction, ablation flags.
         </p>
       </a>
-      <a class="ucsa-doc-tile" href="/ucsa/docs/architecture/">
+      <a class="ucsa-doc-tile" href="{{ '/docs/architecture/' | relative_url }}">
         <span class="ucsa-doc-tile__eyebrow">design</span>
         <h4 class="ucsa-doc-tile__title">Architecture</h4>
         <p class="ucsa-doc-tile__desc">
           Deep design notes for every subsystem, with the maths.
         </p>
       </a>
-      <a class="ucsa-doc-tile" href="/ucsa/docs/api-reference/">
+      <a class="ucsa-doc-tile" href="{{ '/docs/api-reference/' | relative_url }}">
         <span class="ucsa-doc-tile__eyebrow">reference</span>
         <h4 class="ucsa-doc-tile__title">API reference</h4>
         <p class="ucsa-doc-tile__desc">
@@ -174,7 +174,7 @@ permalink: /docs/
           by responsibility.
         </p>
       </a>
-      <a class="ucsa-doc-tile" href="/ucsa/docs/tutorials/">
+      <a class="ucsa-doc-tile" href="{{ '/docs/tutorials/' | relative_url }}">
         <span class="ucsa-doc-tile__eyebrow">walkthroughs</span>
         <h4 class="ucsa-doc-tile__title">Tutorials</h4>
         <p class="ucsa-doc-tile__desc">
@@ -182,7 +182,7 @@ permalink: /docs/
           measure, probe.
         </p>
       </a>
-      <a class="ucsa-doc-tile" href="/ucsa/docs/contributing/">
+      <a class="ucsa-doc-tile" href="{{ '/docs/contributing/' | relative_url }}">
         <span class="ucsa-doc-tile__eyebrow">dev workflow</span>
         <h4 class="ucsa-doc-tile__title">Contributing</h4>
         <p class="ucsa-doc-tile__desc">
@@ -190,7 +190,7 @@ permalink: /docs/
           checklist.
         </p>
       </a>
-      <a class="ucsa-doc-tile" href="/ucsa/CHANGELOG/">
+      <a class="ucsa-doc-tile" href="{{ '/CHANGELOG/' | relative_url }}">
         <span class="ucsa-doc-tile__eyebrow">release notes</span>
         <h4 class="ucsa-doc-tile__title">Changelog</h4>
         <p class="ucsa-doc-tile__desc">
@@ -198,7 +198,7 @@ permalink: /docs/
           tests added.
         </p>
       </a>
-      <a class="ucsa-doc-tile" href="/ucsa/paper/PAPER/">
+      <a class="ucsa-doc-tile" href="{{ '/paper/PAPER/' | relative_url }}">
         <span class="ucsa-doc-tile__eyebrow">research</span>
         <h4 class="ucsa-doc-tile__title">Paper draft</h4>
         <p class="ucsa-doc-tile__desc">
@@ -206,7 +206,7 @@ permalink: /docs/
           section.
         </p>
       </a>
-      <a class="ucsa-doc-tile" href="/ucsa/paper/TABLES/">
+      <a class="ucsa-doc-tile" href="{{ '/paper/TABLES/' | relative_url }}">
         <span class="ucsa-doc-tile__eyebrow">results</span>
         <h4 class="ucsa-doc-tile__title">Paper tables</h4>
         <p class="ucsa-doc-tile__desc">
@@ -214,7 +214,7 @@ permalink: /docs/
           the paper claims.
         </p>
       </a>
-      <a class="ucsa-doc-tile" href="/ucsa/SECURITY/">
+      <a class="ucsa-doc-tile" href="{{ '/SECURITY/' | relative_url }}">
         <span class="ucsa-doc-tile__eyebrow">policy</span>
         <h4 class="ucsa-doc-tile__title">Security</h4>
         <p class="ucsa-doc-tile__desc">
@@ -222,7 +222,7 @@ permalink: /docs/
           SLA.
         </p>
       </a>
-      <a class="ucsa-doc-tile" href="/ucsa/SUPPORT/">
+      <a class="ucsa-doc-tile" href="{{ '/SUPPORT/' | relative_url }}">
         <span class="ucsa-doc-tile__eyebrow">help</span>
         <h4 class="ucsa-doc-tile__title">Support</h4>
         <p class="ucsa-doc-tile__desc">
