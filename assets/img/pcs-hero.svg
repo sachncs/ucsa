@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 460" width="540" height="460" role="img" aria-label="Persistent Cognitive State diagram">
+  <title>Persistent Cognitive State — seven banks and the operator stream</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fbfbfb"/>
+      <stop offset="100%" stop-color="#f3f3f2"/>
+    </linearGradient>
+    <linearGradient id="stream" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1d4ed8" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#1d4ed8" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#1d4ed8" stop-opacity="0"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+      markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#0a2540"/>
+    </marker>
+    <marker id="arrow-light" viewBox="0 0 10 10" refX="9" refY="5"
+      markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5b6470"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect x="0" y="0" width="540" height="460" rx="12" fill="url(#bg)"/>
+
+  <!-- PCS container outline -->
+  <rect x="40" y="60" width="460" height="340" rx="12"
+    fill="#ffffff" stroke="#0a2540" stroke-width="1.4"/>
+
+  <!-- PCS header -->
+  <text x="60" y="86" font-family="JetBrains Mono, ui-monospace, monospace"
+    font-size="10" letter-spacing="2" fill="#5b6470">PCS</text>
+  <text x="92" y="86" font-family="JetBrains Mono, ui-monospace, monospace"
+    font-size="10" letter-spacing="2" fill="#8b95a1">/persistent_cognitive_state</text>
+
+  <!-- Operator stream band (six stream banks) -->
+  <rect x="60" y="110" width="420" height="58" rx="8"
+    fill="#fbfbfb" stroke="#e6e8eb"/>
+  <text x="72" y="130" font-family="JetBrains Mono, ui-monospace, monospace"
+    font-size="9" letter-spacing="1.5" fill="#8b95a1">OPERATOR STREAM</text>
+
+  <!-- Stream banks: working, long_term, goal, episode, task, memory_index -->
+  <g font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="600">
+    <rect x="68" y="138" width="62" height="22" rx="3" fill="#dbeafe" stroke="#1d4ed8" stroke-width="1"/>
+    <text x="99" y="153" text-anchor="middle" fill="#1d4ed8">working</text>
+
+    <rect x="138" y="138" width="68" height="22" rx="3" fill="#ccfbf1" stroke="#0f766e" stroke-width="1"/>
+    <text x="172" y="153" text-anchor="middle" fill="#0f766e">long_term</text>
+
+    <rect x="214" y="138" width="50" height="22" rx="3" fill="#fef3c7" stroke="#a16207" stroke-width="1"/>
+    <text x="239" y="153" text-anchor="middle" fill="#a16207">goal</text>
+
+    <rect x="272" y="138" width="60" height="22" rx="3" fill="#ede9fe" stroke="#6d28d9" stroke-width="1"/>
+    <text x="302" y="153" text-anchor="middle" fill="#6d28d9">episode</text>
+
+    <rect x="340" y="138" width="50" height="22" rx="3" fill="#fce7f3" stroke="#be185d" stroke-width="1"/>
+    <text x="365" y="153" text-anchor="middle" fill="#be185d">task</text>
+
+    <rect x="398" y="138" width="78" height="22" rx="3" fill="#f1f5f9" stroke="#475569" stroke-width="1"/>
+    <text x="437" y="153" text-anchor="middle" fill="#475569">memory_index</text>
+  </g>
+
+  <!-- Operator F arrow over stream -->
+  <line x1="68" y1="200" x2="472" y2="200" stroke="#1d4ed8" stroke-width="1.5"
+    stroke-dasharray="0" marker-end="url(#arrow)"/>
+  <text x="270" y="194" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace"
+    font-size="10" fill="#1d4ed8" letter-spacing="1">F · N=4 iterations</text>
+
+  <!-- JEPA multi-step chain -->
+  <g transform="translate(60 230)">
+    <rect x="0" y="0" width="420" height="80" rx="8" fill="#ffffff" stroke="#e6e8eb"/>
+    <text x="12" y="20" font-family="JetBrains Mono, ui-monospace, monospace"
+      font-size="9" letter-spacing="1.5" fill="#8b95a1">JEPA MULTI-STEP CHAIN</text>
+
+    <!-- chain nodes -->
+    <g transform="translate(20 36)" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#0a2540">
+      <circle cx="0" cy="14" r="8" fill="#1d4ed8" opacity="0.18"/>
+      <circle cx="0" cy="14" r="4" fill="#1d4ed8"/>
+      <text x="0" y="38" text-anchor="middle">z₁</text>
+      <text x="0" y="-2" text-anchor="middle" fill="#5b6470" font-size="8">pred</text>
+
+      <line x1="10" y1="14" x2="38" y2="14" stroke="#1d4ed8" stroke-width="1.4"
+        marker-end="url(#arrow)" opacity="0.7"/>
+
+      <circle cx="50" cy="14" r="8" fill="#1d4ed8" opacity="0.18"/>
+      <circle cx="50" cy="14" r="4" fill="#1d4ed8"/>
+      <text x="50" y="38" text-anchor="middle">z₂</text>
+
+      <line x1="60" y1="14" x2="88" y2="14" stroke="#1d4ed8" stroke-width="1.4"
+        marker-end="url(#arrow)" opacity="0.7"/>
+
+      <circle cx="100" cy="14" r="8" fill="#1d4ed8" opacity="0.18"/>
+      <circle cx="100" cy="14" r="4" fill="#1d4ed8"/>
+      <text x="100" y="38" text-anchor="middle">z₃</text>
+
+      <line x1="110" y1="14" x2="138" y2="14" stroke="#1d4ed8" stroke-width="1.4"
+        marker-end="url(#arrow)" opacity="0.7"/>
+
+      <circle cx="150" cy="14" r="8" fill="#1d4ed8" opacity="0.18"/>
+      <circle cx="150" cy="14" r="4" fill="#1d4ed8"/>
+      <text x="150" y="38" text-anchor="middle">z₄</text>
+    </g>
+
+    <!-- EMA target encoder side -->
+    <g transform="translate(220 26)">
+      <rect x="0" y="0" width="180" height="40" rx="6" fill="#fbfbfb" stroke="#c8ccd1"/>
+      <text x="10" y="16" font-family="JetBrains Mono, ui-monospace, monospace"
+        font-size="9" letter-spacing="1.5" fill="#5b6470">EMA TARGET ENCODER</text>
+      <text x="10" y="32" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#0a2540">momentum 0.996</text>
+    </g>
+  </g>
+
+  <!-- Held-out intent bank -->
+  <rect x="60" y="328" width="420" height="50" rx="8"
+    fill="#fef2f2" stroke="#dc2626" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="72" y="348" font-family="JetBrains Mono, ui-monospace, monospace"
+    font-size="9" letter-spacing="1.5" fill="#8b95a1">HELD OUT — ORIGINATION SIGNAL</text>
+  <rect x="72" y="356" width="80" height="18" rx="3" fill="#fee2e2" stroke="#dc2626" stroke-width="1"/>
+  <text x="112" y="369" text-anchor="middle" font-family="Inter, system-ui, sans-serif"
+    font-size="11" font-weight="600" fill="#dc2626">intent</text>
+  <text x="164" y="369" font-family="JetBrains Mono, ui-monospace, monospace"
+    font-size="10" fill="#5b6470">→ OriginationHead → O_{k+1}</text>
+
+  <!-- Caption -->
+  <text x="60" y="426" font-family="JetBrains Mono, ui-monospace, monospace"
+    font-size="10" fill="#8b95a1">persistent cognitive state · C_{t+1} = F(C_t, O_t)</text>
+</svg>
