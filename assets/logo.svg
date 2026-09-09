@@ -1,7 +1,36 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="ucsa logo">
-  <title>ucsa</title>
-  <rect width="512" height="512" rx="96" fill="#3776AB"/>
-  <text x="50%" y="55%" text-anchor="middle" dominant-baseline="middle"
-        font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
-        font-size="280" font-weight="700" fill="#FFFFFF">U</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="UCSA logo">
+  <title>UCSA</title>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1f3a5f"/>
+      <stop offset="100%" stop-color="#2e6fb5"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#g)"/>
+  <!-- Seven PCS bank slots arranged in a ring around a central node. -->
+  <g transform="translate(256 256)" fill="#9ecbff">
+    <circle cx="0" cy="-120" r="22"/>
+    <circle cx="114" cy="-60" r="22"/>
+    <circle cx="114" cy="60" r="22"/>
+    <circle cx="0" cy="120" r="22"/>
+    <circle cx="-114" cy="60" r="22"/>
+    <circle cx="-114" cy="-60" r="22"/>
+  </g>
+  <!-- Central PCS node -->
+  <g transform="translate(256 256)">
+    <circle cx="0" cy="0" r="40" fill="#ffffff"/>
+    <circle cx="0" cy="0" r="20" fill="url(#g)"/>
+  </g>
+  <!-- Connecting lines -->
+  <g transform="translate(256 256)" stroke="#9ecbff" stroke-width="3" fill="none" opacity="0.6">
+    <line x1="0" y1="-100" x2="0" y2="-40"/>
+    <line x1="95" y1="-50" x2="34" y2="-17"/>
+    <line x1="95" y1="50" x2="34" y2="17"/>
+    <line x1="0" y1="100" x2="0" y2="40"/>
+    <line x1="-95" y1="50" x2="-34" y2="17"/>
+    <line x1="-95" y1="-50" x2="-34" y2="-17"/>
+  </g>
+  <!-- Wordmark -->
+  <text x="256" y="450" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+        font-size="64" font-weight="700" fill="#ffffff" letter-spacing="2">UCSA</text>
 </svg>

@@ -1,8 +1,23 @@
-title: "ucsa"
-description: "ucsa"
-theme: minima
+title: UCSA — Unified Cognitive State Architecture
+description: "UCSA is a research-grade foundation model whose computation orbits a single persistent differentiable cognitive state. This site is the project documentation hub: getting started, architecture, API reference, tutorials, and the working paper draft."
+remote_theme: pmarsceill/just-the-docs@v0.4.1
 logo: /assets/logo.svg
-show_downloads: false
+favicon: /assets/favicon.svg
 permalink: /:title/
 plugins:
   - jekyll-feed
+  - jekyll-seo-tag
+  - jekyll-sitemap
+  - jekyll-remote-theme
+aux_links:
+  "Source on GitHub":
+    - "https://github.com/sachncs/ucsa"
+  "Issues":
+    - "https://github.com/sachncs/ucsa/issues"
+  "Discussions":
+    - "https://github.com/sachncs/ucsa/discussions"
+aux_links_new_tab: false
+color_scheme: light
+search_enabled: true
+nav_enabled: true
+nav_sort: case_insensitive

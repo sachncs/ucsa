@@ -26,8 +26,10 @@ head that enforces a capacity bottleneck on the latent space.
 
 Our contributions:
 
-1. **PCS as the central architectural primitive.** Six token banks
-   with explicit roles, retention scoring, and recycle policy.
+1. **PCS as the central architectural primitive.** Seven token banks
+   (six stream banks plus a held-out ``intent`` bank for endogenous
+   origination) with explicit roles, retention scoring, and a
+   recycle policy.
 2. **Multi-step JEPA prediction across reasoning iterations** with
    EMA-tracked targets. Lightweight, no multi-term loss juggling,
    no stop-grad gymnastics.
@@ -76,7 +78,11 @@ The training innovation is to chain JEPA prediction across the operator's iterat
 
 ### 3.1. Persistent Cognitive State (PCS)
 
-Six token banks with explicit roles (numbers default):
+Seven token banks with explicit roles (numbers default). The
+``intent`` bank was added in Phase 11 (endogenous origination) and
+is held out of the operator's attention stream so that the
+origination generator is the only path from ``intent`` to
+behaviour. See §3.6 for the localisation argument.
 
 | Bank            | Tokens | Role                                           |
 | --------------- | -----: | ---------------------------------------------- |
@@ -86,6 +92,7 @@ Six token banks with explicit roles (numbers default):
 | Episode         |     32 | Per-request context.                            |
 | Task            |     16 | Long-running task state.                        |
 | MemoryIndex     |     32 | Retrieval index, cross-attended each block.     |
+| Intent          |     16 | Origination signal, held out of the operator stream. |
 
 Retention metadata drives a recycle policy: the bottom-$k$ scored
 long-term tokens are recycled when new content arrives. See
