@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if page.title %}{{ page.title }} · UCSA{% else %}UCSA — Unified Cognitive State Architecture{% endif %}</title>
+  <meta name="description" content="{{ page.description | default: 'UCSA is a research-grade foundation model whose computation orbits a single persistent differentiable cognitive state (PCS).' }}">
+
+  <link rel="icon" type="image/svg+xml" href="{{ '/assets/favicon.svg' | relative_url }}">
+  <link rel="stylesheet" href="{{ '/assets/css/ucsa.css' | relative_url }}">
+  <link rel="preconnect" href="https://rsms.me/">
+  <link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+
+  {% seo %}
+  {% feed_meta %}
+</head>
+<body>
+
+  {% include topnav.html %}
+
+  {{ content }}
+
+  {% include footer.html %}
+
+  <script src="{{ '/assets/js/site.js' | relative_url }}"></script>
+</body>
+</html>
