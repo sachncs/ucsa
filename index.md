@@ -29,13 +29,13 @@ permalink: /
           realisation of the operator; the state is the thesis.
         </p>
         <div class="ucsa-hero__ctas">
-          <a class="ucsa-btn ucsa-btn--primary" href="/docs/getting-started/">
+          <a class="ucsa-btn ucsa-btn--primary" href="/ucsa/docs/getting-started/">
             Get started <span class="ucsa-btn__arrow">→</span>
           </a>
-          <a class="ucsa-btn ucsa-btn--ghost" href="/docs/architecture/">
+          <a class="ucsa-btn ucsa-btn--ghost" href="/ucsa/docs/architecture/">
             Read architecture
           </a>
-          <a class="ucsa-btn ucsa-btn--ghost" href="/paper/PAPER/">
+          <a class="ucsa-btn ucsa-btn--ghost" href="/ucsa/paper/PAPER/">
             View paper draft
           </a>
         </div>
@@ -69,7 +69,7 @@ permalink: /
             <span class="ucsa-hero__visual-title">persistent cognitive state</span>
             <span class="ucsa-hero__visual-tag">C<sub>t+1</sub> = F(C<sub>t</sub>, O<sub>t</sub>)</span>
           </div>
-          <img class="ucsa-diagram" src="/assets/img/pcs-hero.svg" alt="PCS diagram: operator stream with six banks plus a held-out intent bank, with the JEPA multi-step chain below">
+          <img class="ucsa-diagram" src="/ucsa/assets/img/pcs-hero.svg" alt="PCS diagram: operator stream with six banks plus a held-out intent bank, with the JEPA multi-step chain below">
         </div>
       </div>
 
@@ -236,7 +236,7 @@ permalink: /
       </div>
 
       <div class="ucsa-arch-card ucsa-arch-card--full">
-        <img class="ucsa-diagram" src="/assets/img/architecture.svg" alt="Architecture overview: PCS at center, surrounded by perception, reasoning loop, memory service, projection heads, auxiliary losses, eval harness">
+        <img class="ucsa-diagram" src="/ucsa/assets/img/architecture.svg" alt="Architecture overview: PCS at center, surrounded by perception, reasoning loop, memory service, projection heads, auxiliary losses, eval harness">
       </div>
     </div>
   </div>
@@ -337,7 +337,7 @@ permalink: /
     </div>
 
     <div style="margin-top: var(--s-6);">
-      <img class="ucsa-diagram" src="/assets/img/reasoning-loop.svg" alt="Reasoning loop timeline: input → four iterations of F → logits, with JEPA chain back-edges">
+      <img class="ucsa-diagram" src="/ucsa/assets/img/reasoning-loop.svg" alt="Reasoning loop timeline: input → four iterations of F → logits, with JEPA chain back-edges">
     </div>
   </div>
 </section>
@@ -804,8 +804,8 @@ permalink: /
           loss. You want the API tour and the tutorials.
         </p>
         <div class="ucsa-role__links">
-          <a class="ucsa-role__link" href="/docs/api-reference/">→ API reference</a>
-          <a class="ucsa-role__link" href="/docs/tutorials/">→ Tutorials</a>
+          <a class="ucsa-role__link" href="/ucsa/docs/api-reference/">→ API reference</a>
+          <a class="ucsa-role__link" href="/ucsa/docs/tutorials/">→ Tutorials</a>
         </div>
       </article>
 
@@ -818,8 +818,8 @@ permalink: /
           the paper.
         </p>
         <div class="ucsa-role__links">
-          <a class="ucsa-role__link" href="/docs/architecture/">→ Architecture</a>
-          <a class="ucsa-role__link" href="/paper/PAPER/">→ Paper draft</a>
+          <a class="ucsa-role__link" href="/ucsa/docs/architecture/">→ Architecture</a>
+          <a class="ucsa-role__link" href="/ucsa/paper/PAPER/">→ Paper draft</a>
         </div>
       </article>
 
@@ -831,8 +831,8 @@ permalink: /
           protocol catches negative results.
         </p>
         <div class="ucsa-role__links">
-          <a class="ucsa-role__link" href="/paper/TABLES/">→ Paper tables</a>
-          <a class="ucsa-role__link" href="/docs/getting-started/">→ Get started</a>
+          <a class="ucsa-role__link" href="/ucsa/paper/TABLES/">→ Paper tables</a>
+          <a class="ucsa-role__link" href="/ucsa/docs/getting-started/">→ Get started</a>
         </div>
       </article>
 
@@ -844,7 +844,7 @@ permalink: /
           fast, and the issue templates are short.
         </p>
         <div class="ucsa-role__links">
-          <a class="ucsa-role__link" href="/docs/contributing/">→ Contributing</a>
+          <a class="ucsa-role__link" href="/ucsa/docs/contributing/">→ Contributing</a>
           <a class="ucsa-role__link" href="https://github.com/sachncs/ucsa/issues" rel="noopener">→ Issues ↗</a>
         </div>
       </article>
@@ -857,21 +857,21 @@ permalink: /
       </div>
 
       <div class="ucsa-doc-grid">
-        <a class="ucsa-doc-tile" href="/docs/getting-started/">
+        <a class="ucsa-doc-tile" href="/ucsa/docs/getting-started/">
           <span class="ucsa-doc-tile__eyebrow">onboarding</span>
           <h4 class="ucsa-doc-tile__title">Getting started</h4>
           <p class="ucsa-doc-tile__desc">
             Install, smoke test, full reproduction, ablation flags.
           </p>
         </a>
-        <a class="ucsa-doc-tile" href="/docs/architecture/">
+        <a class="ucsa-doc-tile" href="/ucsa/docs/architecture/">
           <span class="ucsa-doc-tile__eyebrow">design</span>
           <h4 class="ucsa-doc-tile__title">Architecture</h4>
           <p class="ucsa-doc-tile__desc">
             Deep design notes for every subsystem, with the maths.
           </p>
         </a>
-        <a class="ucsa-doc-tile" href="/docs/api-reference/">
+        <a class="ucsa-doc-tile" href="/ucsa/docs/api-reference/">
           <span class="ucsa-doc-tile__eyebrow">reference</span>
           <h4 class="ucsa-doc-tile__title">API reference</h4>
           <p class="ucsa-doc-tile__desc">
@@ -879,7 +879,7 @@ permalink: /
             by responsibility.
           </p>
         </a>
-        <a class="ucsa-doc-tile" href="/docs/tutorials/">
+        <a class="ucsa-doc-tile" href="/ucsa/docs/tutorials/">
           <span class="ucsa-doc-tile__eyebrow">walkthroughs</span>
           <h4 class="ucsa-doc-tile__title">Tutorials</h4>
           <p class="ucsa-doc-tile__desc">
@@ -887,7 +887,7 @@ permalink: /
             measure, probe.
           </p>
         </a>
-        <a class="ucsa-doc-tile" href="/docs/contributing/">
+        <a class="ucsa-doc-tile" href="/ucsa/docs/contributing/">
           <span class="ucsa-doc-tile__eyebrow">dev workflow</span>
           <h4 class="ucsa-doc-tile__title">Contributing</h4>
           <p class="ucsa-doc-tile__desc">
@@ -895,7 +895,7 @@ permalink: /
             checklist.
           </p>
         </a>
-        <a class="ucsa-doc-tile" href="/CHANGELOG/">
+        <a class="ucsa-doc-tile" href="/ucsa/CHANGELOG/">
           <span class="ucsa-doc-tile__eyebrow">release notes</span>
           <h4 class="ucsa-doc-tile__title">Changelog</h4>
           <p class="ucsa-doc-tile__desc">
@@ -903,7 +903,7 @@ permalink: /
             tests added.
           </p>
         </a>
-        <a class="ucsa-doc-tile" href="/paper/PAPER/">
+        <a class="ucsa-doc-tile" href="/ucsa/paper/PAPER/">
           <span class="ucsa-doc-tile__eyebrow">research</span>
           <h4 class="ucsa-doc-tile__title">Paper draft</h4>
           <p class="ucsa-doc-tile__desc">
@@ -911,7 +911,7 @@ permalink: /
             section.
           </p>
         </a>
-        <a class="ucsa-doc-tile" href="/paper/TABLES/">
+        <a class="ucsa-doc-tile" href="/ucsa/paper/TABLES/">
           <span class="ucsa-doc-tile__eyebrow">results</span>
           <h4 class="ucsa-doc-tile__title">Paper tables</h4>
           <p class="ucsa-doc-tile__desc">
@@ -919,7 +919,7 @@ permalink: /
             the paper claims.
           </p>
         </a>
-        <a class="ucsa-doc-tile" href="/SECURITY/">
+        <a class="ucsa-doc-tile" href="/ucsa/SECURITY/">
           <span class="ucsa-doc-tile__eyebrow">policy</span>
           <h4 class="ucsa-doc-tile__title">Security</h4>
           <p class="ucsa-doc-tile__desc">
@@ -927,7 +927,7 @@ permalink: /
             SLA.
           </p>
         </a>
-        <a class="ucsa-doc-tile" href="/SUPPORT/">
+        <a class="ucsa-doc-tile" href="/ucsa/SUPPORT/">
           <span class="ucsa-doc-tile__eyebrow">help</span>
           <h4 class="ucsa-doc-tile__title">Support</h4>
           <p class="ucsa-doc-tile__desc">
@@ -959,7 +959,7 @@ permalink: /
       <div class="ucsa-paper__copy">
         <p>
           The working paper draft
-          (<a href="/paper/PAPER/">paper/PAPER.md</a>) targets
+          (<a href="/ucsa/paper/PAPER/">paper/PAPER.md</a>) targets
           ICML / NeurIPS and records exactly what the system
           measures, what is in the repo, and what remains to run
           at paper-grade scale. The matched-compute protocol is the
@@ -988,10 +988,10 @@ permalink: /
           scripts.
         </p>
         <div style="margin-top: var(--s-5); display: flex; gap: var(--s-3); flex-wrap: wrap;">
-          <a class="ucsa-btn ucsa-btn--primary" href="/paper/PAPER/">
+          <a class="ucsa-btn ucsa-btn--primary" href="/ucsa/paper/PAPER/">
             Read the paper <span class="ucsa-btn__arrow">→</span>
           </a>
-          <a class="ucsa-btn ucsa-btn--ghost" href="/paper/TABLES/">
+          <a class="ucsa-btn ucsa-btn--ghost" href="/ucsa/paper/TABLES/">
             See the tables
           </a>
         </div>
@@ -1050,7 +1050,7 @@ permalink: /
         <p style="font-size: var(--type-sm); color: var(--ink-500); margin: var(--s-3) 0 0 0;">
           Numbers above are illustrative placeholders. The live
           table is regenerated from <code>runs/*.json</code> by
-          <a href="/paper/TABLES/">paper/TABLES.md</a>.
+          <a href="/ucsa/paper/TABLES/">paper/TABLES.md</a>.
         </p>
       </div>
     </div>
@@ -1191,12 +1191,12 @@ permalink: /
         </p>
         <p>
           The full guide lives at
-          <a href="/docs/contributing/">docs/contributing.md</a>.
+          <a href="/ucsa/docs/contributing/">docs/contributing.md</a>.
           It covers every command a contributor will need, the
           conventional-commits style, and the merge criteria.
         </p>
         <div style="margin-top: var(--s-5); display: flex; gap: var(--s-3); flex-wrap: wrap;">
-          <a class="ucsa-btn ucsa-btn--primary" href="/docs/contributing/">
+          <a class="ucsa-btn ucsa-btn--primary" href="/ucsa/docs/contributing/">
             Read the contributor guide <span class="ucsa-btn__arrow">→</span>
           </a>
           <a class="ucsa-btn ucsa-btn--ghost" href="https://github.com/sachncs/ucsa/issues" rel="noopener">
@@ -1289,10 +1289,10 @@ permalink: /
     </div>
 
     <div style="display: flex; flex-wrap: wrap; gap: var(--s-3); margin-top: var(--s-6);">
-      <a class="ucsa-btn ucsa-btn--accent" href="/docs/getting-started/">
+      <a class="ucsa-btn ucsa-btn--accent" href="/ucsa/docs/getting-started/">
         Get started <span class="ucsa-btn__arrow">→</span>
       </a>
-      <a class="ucsa-btn" style="background: transparent; color: #fff; border-color: rgba(255,255,255,0.4);" href="/paper/PAPER/">
+      <a class="ucsa-btn" style="background: transparent; color: #fff; border-color: rgba(255,255,255,0.4);" href="/ucsa/paper/PAPER/">
         Read the paper
       </a>
       <a class="ucsa-btn" style="background: transparent; color: #fff; border-color: rgba(255,255,255,0.4);" href="https://github.com/sachncs/ucsa" rel="noopener">
