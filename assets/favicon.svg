@@ -1,19 +1,35 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="UCSA">
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#1f3a5f"/>
-      <stop offset="100%" stop-color="#2e6fb5"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0a2540"/>
+      <stop offset="100%" stop-color="#1f3a5f"/>
     </linearGradient>
   </defs>
-  <rect width="64" height="64" rx="12" fill="url(#g)"/>
-  <g transform="translate(32 32)" fill="#9ecbff">
-    <circle cx="0" cy="-15" r="3"/>
-    <circle cx="14" cy="-7" r="3"/>
-    <circle cx="14" cy="7" r="3"/>
-    <circle cx="0" cy="15" r="3"/>
-    <circle cx="-14" cy="7" r="3"/>
-    <circle cx="-14" cy="-7" r="3"/>
+  <rect width="64" height="64" rx="12" fill="url(#bg)"/>
+  <g transform="translate(32 32)">
+    <!-- six small bank dots on a circle -->
+    <g fill="#9bb6f5">
+      <circle cx="0" cy="-18" r="3"/>
+      <circle cx="16" cy="-9" r="3"/>
+      <circle cx="16" cy="9" r="3"/>
+      <circle cx="0" cy="18" r="3"/>
+      <circle cx="-16" cy="9" r="3"/>
+      <circle cx="-16" cy="-9" r="3"/>
+    </g>
+    <!-- intent (held out) -->
+    <circle cx="0" cy="22" r="4" fill="#dc2626"/>
+    <!-- central core -->
+    <circle cx="0" cy="0" r="8" fill="#ffffff"/>
+    <circle cx="0" cy="0" r="4" fill="#0a2540"/>
+    <!-- connecting lines -->
+    <g stroke="#9bb6f5" stroke-width="0.7" opacity="0.6">
+      <line x1="0" y1="-7" x2="0" y2="-15"/>
+      <line x1="6" y1="-5" x2="13" y2="-7"/>
+      <line x1="6" y1="5" x2="13" y2="7"/>
+      <line x1="0" y1="7" x2="0" y2="15"/>
+      <line x1="-6" y1="5" x2="-13" y2="7"/>
+      <line x1="-6" y1="-5" x2="-13" y2="-7"/>
+    </g>
+    <line x1="0" y1="7" x2="0" y2="18" stroke="#dc2626" stroke-width="0.7" stroke-dasharray="1 1" opacity="0.7"/>
   </g>
-  <circle cx="32" cy="32" r="5" fill="#ffffff"/>
-  <circle cx="32" cy="32" r="2.5" fill="url(#g)"/>
 </svg>

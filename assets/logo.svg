@@ -1,36 +1,63 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="UCSA logo">
   <title>UCSA</title>
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#1f3a5f"/>
-      <stop offset="100%" stop-color="#2e6fb5"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0a2540"/>
+      <stop offset="100%" stop-color="#1f3a5f"/>
     </linearGradient>
+    <radialGradient id="ring" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="60%" stop-color="#0a2540" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#1d4ed8" stop-opacity="0.18"/>
+    </radialGradient>
   </defs>
-  <rect width="512" height="512" rx="96" fill="url(#g)"/>
-  <!-- Seven PCS bank slots arranged in a ring around a central node. -->
-  <g transform="translate(256 256)" fill="#9ecbff">
-    <circle cx="0" cy="-120" r="22"/>
-    <circle cx="114" cy="-60" r="22"/>
-    <circle cx="114" cy="60" r="22"/>
-    <circle cx="0" cy="120" r="22"/>
-    <circle cx="-114" cy="60" r="22"/>
-    <circle cx="-114" cy="-60" r="22"/>
-  </g>
-  <!-- Central PCS node -->
+  <!-- Background plate -->
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <!-- Soft ring -->
+  <circle cx="256" cy="256" r="220" fill="url(#ring)"/>
+
+  <!-- Seven bank slots arranged on a circle, with intent at bottom held distinct -->
   <g transform="translate(256 256)">
-    <circle cx="0" cy="0" r="40" fill="#ffffff"/>
-    <circle cx="0" cy="0" r="20" fill="url(#g)"/>
+    <!-- outer reference circle -->
+    <circle cx="0" cy="0" r="160" fill="none" stroke="#1d4ed8" stroke-width="1" stroke-dasharray="2 4" opacity="0.45"/>
+
+    <!-- six stream banks: subtle accent dots -->
+    <g fill="#9bb6f5">
+      <circle cx="0" cy="-160" r="14"/>
+      <circle cx="139" cy="-80" r="14"/>
+      <circle cx="139" cy="80" r="14"/>
+      <circle cx="0" cy="160" r="14"/>
+      <circle cx="-139" cy="80" r="14"/>
+      <circle cx="-139" cy="-80" r="14"/>
+    </g>
+
+    <!-- intent bank: held out, distinct accent -->
+    <g transform="translate(0 218)">
+      <circle cx="0" cy="0" r="22" fill="#dc2626"/>
+      <circle cx="0" cy="0" r="22" fill="none" stroke="#fecaca" stroke-width="1.5" opacity="0.6"/>
+    </g>
+
+    <!-- Central PCS core -->
+    <circle cx="0" cy="0" r="48" fill="#ffffff"/>
+    <circle cx="0" cy="0" r="48" fill="none" stroke="#1d4ed8" stroke-width="2.5"/>
+    <circle cx="0" cy="0" r="26" fill="#0a2540"/>
+    <text x="0" y="4" text-anchor="middle" font-family="Inter, system-ui, sans-serif"
+      font-size="11" font-weight="700" fill="#fff" letter-spacing="2">PCS</text>
+
+    <!-- Lines from core to six stream banks -->
+    <g stroke="#9bb6f5" stroke-width="1.4" opacity="0.55" fill="none">
+      <line x1="0" y1="-48" x2="0" y2="-146"/>
+      <line x1="34" y1="-34" x2="125" y2="-72"/>
+      <line x1="34" y1="34" x2="125" y2="72"/>
+      <line x1="0" y1="48" x2="0" y2="146"/>
+      <line x1="-34" y1="34" x2="-125" y2="72"/>
+      <line x1="-34" y1="-34" x2="-125" y2="-72"/>
+    </g>
+
+    <!-- Line to intent bank (held-out, distinct) -->
+    <line x1="0" y1="48" x2="0" y2="196" stroke="#dc2626" stroke-width="1.6" stroke-dasharray="3 3" opacity="0.7"/>
   </g>
-  <!-- Connecting lines -->
-  <g transform="translate(256 256)" stroke="#9ecbff" stroke-width="3" fill="none" opacity="0.6">
-    <line x1="0" y1="-100" x2="0" y2="-40"/>
-    <line x1="95" y1="-50" x2="34" y2="-17"/>
-    <line x1="95" y1="50" x2="34" y2="17"/>
-    <line x1="0" y1="100" x2="0" y2="40"/>
-    <line x1="-95" y1="50" x2="-34" y2="17"/>
-    <line x1="-95" y1="-50" x2="-34" y2="-17"/>
-  </g>
+
   <!-- Wordmark -->
-  <text x="256" y="450" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
-        font-size="64" font-weight="700" fill="#ffffff" letter-spacing="2">UCSA</text>
+  <text x="256" y="468" text-anchor="middle" font-family="Inter, system-ui, sans-serif"
+    font-size="64" font-weight="700" fill="#ffffff" letter-spacing="6">UCSA</text>
 </svg>
