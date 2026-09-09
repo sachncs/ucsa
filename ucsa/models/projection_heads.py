@@ -101,9 +101,9 @@ class HeadConfig:
                 f"got {self.intent_update_scale}."
             )
         if self.reconstruction_dim <= 0:
-            # ponytail: default the reconstruction dim to hidden_size
-            # so reconstructed token embeddings line up with
-            # perception.embed_tokens for element-wise loss.
+            # Default the reconstruction dim to ``hidden_size`` so the
+            # reconstructed token embeddings line up with
+            # ``perception.embed_tokens`` for an element-wise loss.
             object.__setattr__(
                 self, "reconstruction_dim", self.hidden_size
             )
@@ -370,9 +370,9 @@ class OriginationHead(nn.Module):
         self.k_proj = nn.Linear(hidden_size, hidden_size, bias=False)
         self.v_proj = nn.Linear(hidden_size, hidden_size, bias=False)
         self.out_proj = nn.Linear(hidden_size, hidden_size, bias=False)
-        # ponytail: gate diagnostics, overwritten every forward. The
-        # attribution and collapse probes read these instead of
-        # re-deriving the routing.
+        # Gate diagnostics, overwritten every forward. The attribution
+        # and collapse probes read these instead of re-deriving the
+        # routing.
         self.last_gate_logits: Tensor | None = None
         self.last_gate_weights: Tensor | None = None
         self.last_gate_mask: Tensor | None = None
@@ -497,21 +497,21 @@ class ProjectionHeads(nn.Module):
         self.planning = PlanningHead(config.hidden_size, config.num_plan_tokens)
         self.tool = ToolHead(config.hidden_size, config.num_tools)
         self.memory = MemoryHead(config.hidden_size, config.memory_query_dim)
-        # ponytail: input-reconstruction head (LeWM-style capacity bottleneck).
+        # Input-reconstruction head (LeWM-style capacity bottleneck).
         self.input_reconstruct = InputReconstructionHead(
             config.hidden_size, config.reconstruction_dim
         )
-        # ponytail: the origination generator. Deliberately *not* part of
-        # ``forward``: it reads the intent bank and the input stream rather
-        # than working memory alone, so it cannot share the head contract.
-        # The reasoning loop calls it directly.
+        # The origination generator. Deliberately *not* part of
+        # ``forward``: it reads the intent bank and the input stream
+        # rather than working memory alone, so it cannot share the head
+        # contract. The reasoning loop calls it directly.
         self.origination = OriginationHead(
             config.hidden_size,
             top_k=config.origination_top_k,
             aux_loss_weight=config.origination_aux_loss_weight,
         )
-        # ponytail: refreshes the origination state per iteration so it is
-        # not the same constant before every action.
+        # Refreshes the origination state per iteration so it is not the
+        # same constant before every action.
         self.intent_update = IntentUpdate(
             config.hidden_size, scale=config.intent_update_scale
         )

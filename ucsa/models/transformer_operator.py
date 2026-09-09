@@ -703,10 +703,10 @@ class TransformerOperator(StateTransitionOperator):
         self.cumulative_offsets: tuple[int, ...] = ()
         self.is_first_step: bool = True
         self.last_aux_loss: Tensor = torch.zeros(())
-        self.last_router_logits: Tensor | None = None  # ponytail: aggregated MoE router logits from blocks; None if no MoE
-        # ponytail: the differentiable post-transition bank tensors, stashed
-        # before the ``no_grad`` PCS write-back. Same lifecycle as the KV
-        # cache: written every forward, cleared by ``reset``.
+        self.last_router_logits: Tensor | None = None
+        # Differentiable post-transition bank tensors, stashed before the
+        # ``no_grad`` PCS write-back. Same lifecycle as the KV cache:
+        # written every forward, cleared by :meth:`reset`.
         self.last_bank_tensors: dict[str, Tensor] | None = None
         self.initialize()
 
@@ -716,15 +716,16 @@ class TransformerOperator(StateTransitionOperator):
         return "transformer"
 
     def initialize(self) -> None:
-        """Compute and cache bank offsets inside the PCS token stream."""
-        offsets: list[tuple[str, tuple[int, int]]] = []
-        cursor = 0
-        for bank_name in self.stream_bank_names:
-            # We don't know sizes here without PCS; offsets are bound at first
-            # forward. We use placeholder offsets that get re-bound dynamically.
-            offsets.append((bank_name, (cursor, cursor)))
-            cursor += 0
-        self.bank_offsets = dict(offsets)
+        """Build parameters and any lazy buffers.
+
+        The PCS bank offsets are bound lazily on the first call to
+        :meth:`forward` via :meth:`_bind_offsets`, because bank sizes are
+        only known once a :class:`PersistentCognitiveState` is attached.
+        This :meth:`initialize` therefore marks the operator ready and
+        initialises the bookkeeping containers, but does not populate
+        per-bank offsets ahead of time.
+        """
+        self.bank_offsets = {}
         self.cumulative_offsets = ()
 
     def reset(self) -> None:

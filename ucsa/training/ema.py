@@ -58,8 +58,8 @@ class EMATargetEncoder(nn.Module):
         ):
             tp.data.mul_(m).add_(sp.data, alpha=1.0 - m)
         # Buffers (running stats) — LeWM does not update them; keep them
-        # at their initial-deep-copied values to avoid drift.
-        # ponytail: skips buffers on purpose; EMA-only on parameters.
+        # at their initial-deep-copied values to avoid drift. EMA is
+        # applied to parameters only, by design.
 
     def forward(self, *args: Any, **kwargs: Any) -> dict[str, Tensor]:
         """Run the target encoder; no grads."""

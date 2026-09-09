@@ -186,8 +186,8 @@ class MLAAttention(nn.Module):
         self.num_q_heads = num_q_heads
         self.head_dim = head_dim
         self.kv_latent_dim = kv_latent_dim
-        # ponytail: Q stays full-rank; KV is the bottleneck. This matches
-        # §2.1.1 in the DeepSeek-V2 paper.
+        # Q stays full-rank; KV is the bottleneck. This matches
+        # §2.1.1 of the DeepSeek-V2 paper.
         self.q_proj = nn.Linear(hidden, num_q_heads * head_dim, bias=False)
         # The compressed KV representation per token.
         self.kv_down = nn.Linear(hidden, kv_latent_dim, bias=False)
@@ -285,7 +285,7 @@ class DeepSeekMoEFFN(nn.Module):
             SwiGLU(hidden, ffn_dim) for _ in range(num_shared_experts)
         ])
         self.gate = nn.Linear(hidden, num_routed_experts, bias=False)
-        # ponytail: aux-loss-free bias per expert (DeepSeek-V3 §3.2).
+        # Aux-loss-free per-expert bias (DeepSeek-V3 §3.2).
         self.register_buffer("expert_bias", torch.zeros(num_routed_experts))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -298,8 +298,8 @@ class DeepSeekMoEFFN(nn.Module):
         topk_vals, topk_idx = scores.topk(self.top_k, dim=-1)
         topk_w = topk_vals.softmax(dim=-1).unsqueeze(-1)  # (T, k, 1)
         routed_out = torch.zeros_like(x_flat)
-        # Manual top-k dispatch. ponytail: this loops over experts, not
-        # tokens — fine at our scale (T = 1, small vocab).
+        # Manual top-k dispatch over experts, not tokens — fine at
+        # the scales we benchmark here.
         for e_idx, expert in enumerate(self.routed):
             mask = topk_idx == e_idx
             if not mask.any():
@@ -446,8 +446,8 @@ class CSAHCAAttention(nn.Module):
         if self.csa_block_size > 0 and s >= self.csa_block_size:
             k_csa_blocks = self._compress(k, self.csa_block_size)
             v_csa_blocks = self._compress(v, self.csa_block_size)
-            # ponytail: selector head is allocated but we use dense
-            # attention over the compressed cache — already 4x cheaper.
+            # Selector head is allocated but we use dense attention
+            # over the compressed cache — already 4x cheaper.
             _ = self.csa_selector(x)
             out_csa = self._attend_to(
                 q, k_csa_blocks, v_csa_blocks, is_causal=False

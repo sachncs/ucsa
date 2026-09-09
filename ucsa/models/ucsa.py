@@ -203,7 +203,10 @@ class UCSA(nn.Module):
             operator=self.operator,
             config=ReasoningLoopConfig(
                 num_iterations=config.reasoning_iterations,
-                capture_intermediates=True,  # ponytail: needed for JEPA aux loss; intermediates are detached clones, no extra graph
+                # Needed for the JEPA aux loss. The intermediates are
+                # detached clones, so capturing them does not extend the
+                # autograd graph beyond what the loop already holds.
+                capture_intermediates=True,
                 observation_mix=config.observation_mix,
                 observation_mix_decay=config.observation_mix_decay,
             ),
@@ -218,9 +221,10 @@ class UCSA(nn.Module):
         self.graph_service = graph_service or GraphService(
             num_concepts=config.num_concepts
         )
-        # ponytail: memory_baseline is a non-trainable buffer that the trainer
-        # refreshes every N steps. MemoryStabilityLoss uses it as the reference
-        # so the loss is meaningful (MSE(long_term, baseline) instead of 0).
+        # ``memory_baseline`` is a non-trainable buffer that the trainer
+        # refreshes every N steps. The MemoryStabilityLoss uses it as
+        # the reference so the loss is meaningful (``MSE(long_term,
+        # baseline)`` instead of trivially 0).
         self.register_buffer(
             "memory_baseline",
             torch.zeros(config.hidden_size),
@@ -325,12 +329,11 @@ class UCSA(nn.Module):
         elif len(intermediates) == 1:
             jepa_predicted = intermediates[0]
             jepa_target = new_pcs.get_bank("working").detach()
-        # ponytail: chain the reasoning-loop intermediates into
-        # (predicted_k, target_{k+1}) pairs. Targets are detached so
-        # gradients flow only through the predictor. When the EMA
-        # target encoder is active, the trainer swaps these for its
-        # own intermediates, which keeps the chain aligned with the
-        # EMA-tracked latents.
+        # Chain the reasoning-loop intermediates into ``(predicted_k,
+        # target_{k+1})`` pairs. Targets are detached so gradients flow
+        # only through the predictor. When the EMA target encoder is
+        # active, the trainer swaps these for its own intermediates,
+        # which keeps the chain aligned with the EMA-tracked latents.
         for k in range(len(intermediates) - 1):
             jepa_multi_step.append(
                 (intermediates[k], intermediates[k + 1].detach())

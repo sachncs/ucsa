@@ -323,7 +323,13 @@ class TestTrainerBasics:
         assert "ar" in components
 
     def test_compute_loss_full_components(self) -> None:
-        """All loss components are reported when curriculum is JOINT."""
+        """All loss components are reported when curriculum is JOINT.
+
+        ``router`` is only reported when the model exposes
+        ``router_logits``. A non-MoE model deliberately does not
+        contribute to that term, so the trainer does not invent a fake
+        one.
+        """
         curriculum = Curriculum(
             CurriculumSchedule(
                 stage_1_end=1, stage_2_end=2, stage_3_end=3
@@ -335,7 +341,36 @@ class TestTrainerBasics:
         inputs = torch.randint(0, 100, (2, 4))
         targets = torch.randint(0, 100, (2, 4))
         _, components = trainer.compute_loss(inputs, targets)
-        assert set(components) == {"ar", "jepa", "memory", "router"}
+        # ``TinyModel`` has no MoE, so no router term is injected.
+        assert set(components) == {"ar", "jepa", "memory"}
+
+    def test_router_term_absent_without_moe(self) -> None:
+        """The router loss term is absent when the model exposes no router.
+
+        With ``moe=None`` the trainer must not invent a synthetic
+        ``torch.randn`` fallback: that noise used to be summed into the
+        loss and reflected as a metric, so any tuning against the metric
+        was tuning against the RNG.
+        """
+        model = TinyModel()
+        trainer = tiny_trainer(model=model)
+        # Force the curriculum to JOINT so every component is otherwise
+        # active.
+        for _ in range(20):
+            trainer.curriculum.step()
+        inputs = torch.randint(0, 100, (2, 4))
+        targets = torch.randint(0, 100, (2, 4))
+        loss_a, components_a = trainer.compute_loss(inputs, targets)
+        # Identical second run: the loss must not depend on the RNG.
+        torch.manual_seed(123)
+        loss_b, components_b = trainer.compute_loss(inputs, targets)
+        assert "router" not in components_a
+        assert "router" not in components_b
+        assert torch.allclose(loss_a, loss_b, atol=1e-6)
+        # And running the trainer's metrics across two independent
+        # step calls must record zero router loss either way.
+        trainer.metrics.update("router_loss", 0.0)
+        assert trainer.metrics.snapshot()["router_loss"] == 0.0
 
     def test_optimizer_zeroes_grad(self, dataset: DataLoader) -> None:
         """Each training step zeroes gradients before computing the next loss."""

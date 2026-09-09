@@ -174,7 +174,9 @@ class MixtureOfExperts(nn.Module):
             Expert(hidden_size, intermediate_size)
             for _ in range(config.num_experts)
         )
-        self.last_router_logits: Tensor | None = None  # ponytail: stash for aux loss wiring; overwritten each forward
+        self.last_router_logits: Tensor | None = None
+        # Stash of the last router logits so the trainer can wire the
+        # MoE load-balancing loss; overwritten on every forward pass.
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """Apply the MoE block.

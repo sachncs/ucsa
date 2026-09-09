@@ -291,8 +291,8 @@ def main() -> None:
     os.makedirs(args.ckpt_dir, exist_ok=True)
     print(f"Starting training: max_steps={args.max_steps}", flush=True)
 
-    # ponytail: ablation toggles flow into the combined loss via a
-    # zero-weight substitution. The forward path stays unchanged.
+    # Ablation toggles flow into the combined loss via a zero-weight
+    # substitution. The forward path stays unchanged.
     if not args.recon or not args.origination_balance:
         from ucsa.models.losses import LossWeights
         trainer.loss_fn.weights = LossWeights(
@@ -311,7 +311,7 @@ def main() -> None:
             ),
         )
     if not args.tc_jepa:
-        # ponytail: zero the field, the conditioner contributes 0.
+        # Zero the field so the conditioner contributes 0.
         trainer.model.text_conditioner_scale = 0.0
 
     history: list[dict[str, float]] = []

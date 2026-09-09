@@ -47,7 +47,7 @@ class _ConstantLogitsModel:
         pass
 
     def __call__(self, ids):
-        # ponytail: not used by rank-by-loglik — kept only for shape parity
+        # Not used by rank-by-loglik; kept only for shape parity.
         raise NotImplementedError
 
 

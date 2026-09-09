@@ -14,6 +14,7 @@ Implements the UCSA training loop with:
 
 from __future__ import annotations
 
+import contextlib
 import math
 import time
 from collections import deque
@@ -72,11 +73,14 @@ class TrainerConfig:
     checkpoint_every_n_steps: int = 0
     gradient_checkpointing: bool = False
     compile_model: bool = False
-    # ponytail: hard-EMA target encoder for JEPA stability.
+    # When ``ema_momentum > 0`` the trainer maintains a frozen EMA copy of
+    # the model and uses its JEPA intermediates as the prediction targets,
+    # which is what keeps the multi-step JEPA chain stable.
     ema_momentum: float = 0.0  # 0 disables EMA target; ~0.996 enables it
     ema_update_every: int = 1  # step interval for EMA blending
-    # ponytail: window of recent steps over which the intent-collapse
-    # variance and mutual-information diagnostics are computed.
+    # Window of recent steps over which the intent-collapse variance and
+    # mutual-information diagnostics are computed. Consecutive steps see
+    # different batches, so the window spans the right comparison.
     intent_window_size: int = 16
 
 
@@ -175,13 +179,12 @@ class Trainer:
         self.optimizer = optimizer
         self.curriculum = curriculum or Curriculum()
         self.metrics = metrics or build_default_registry()
-        # ponytail: rolling windows of recent origination states and gate
-        # usages. Variance and mutual information are only meaningful
-        # across *differing* inputs, and consecutive steps see different
-        # batches.
         self.ignore_index: int = int(
             getattr(getattr(loss_fn, "ar", None), "ignore_index", -100)
         )
+        # Rolling windows of recent origination states and gate usages.
+        # Variance and mutual information are only meaningful across
+        # *differing* inputs, and consecutive steps see different batches.
         self.intent_state_window: deque[Tensor] = deque(
             maxlen=config.intent_window_size
         )
@@ -212,7 +215,7 @@ class Trainer:
         # Stash a reference for the scheduler to read.
         self.optimizer._ucsa_trainer_state = self.state  # type: ignore[attr-defined]
 
-        # ponytail: hard-EMA target encoder for JEPA stability. When
+        # Hard-EMA target encoder for JEPA stability. When
         # ``ema_momentum > 0`` we hold a frozen copy of the model and
         # use its JEPA predicted embedding as ``jepa_target`` instead
         # of the previous-iteration working memory.
@@ -235,15 +238,15 @@ class Trainer:
         """Return the input token embeddings from the model's perception.
 
         Used as the target for the input-reconstruction loss. Falls
-        back to a frozen random projection when the model doesn't
-        expose an ``embed_tokens`` helper (e.g. in tests).
+        back to a zero tensor when the model doesn't expose an
+        ``embed_tokens`` helper (e.g. in tests), so the trainer does not
+        crash on a fake model.
         """
         try:
             perception = cast(Any, self.model).perception
             embedded: Tensor = perception.embed_tokens(inputs)
             return embedded
         except AttributeError:
-            # ponytail: tests use a fake model; don't crash the train loop.
             return torch.zeros(
                 inputs.shape[0], inputs.shape[1], 1, device=self.device
             )
@@ -304,10 +307,10 @@ class Trainer:
             multi_step = (
                 outputs.get("jepa_multi_step") if isinstance(outputs, dict) else None
             )
-            # ponytail: when an EMA target encoder is active, swap the
-            # targets in the multi-step list (or the single pair) for
-            # the EMA model's intermediates — keeps the prediction
-            # chain aligned with EMA-tracked latents.
+            # When an EMA target encoder is active, swap the targets in the
+            # multi-step list (or the single pair) for the EMA model's
+            # intermediates — keeps the prediction chain aligned with
+            # EMA-tracked latents.
             if self.target_encoder is not None and (
                 multi_step is not None or jp is not None
             ):
@@ -327,15 +330,17 @@ class Trainer:
             elif jp is not None and jt is not None:
                 kwargs["jepa_predicted"] = jp
                 kwargs["jepa_target"] = jt
-            else:
+            elif not isinstance(outputs, dict):
+                # Test path: a callable model that returns logits only.
+                # Provide a self-paired dummy so the JEPA loss has
+                # something to consume without contributing gradient.
                 dummy = torch.randn_like(logits[..., :32])
                 kwargs["jepa_predicted"] = dummy
                 kwargs["jepa_target"] = dummy
-        # ponytail: pass the input-reconstruction projection so the
-        # combined loss can compute the capacity-bottleneck term.
-        # The reconstruction head emits ``(B, working_bank, hidden)``;
-        # we take its first ``seq_len`` vectors to align with the
-        # input-token-embedding targets.
+        # Pass the input-reconstruction projection so the combined loss can
+        # compute the capacity-bottleneck term. The reconstruction head
+        # emits ``(B, working_bank, hidden)``; we take its first ``seq_len``
+        # vectors to align with the input-token-embedding targets.
         if (
             isinstance(outputs, dict)
             and "input_reconstruct" in outputs
@@ -349,14 +354,18 @@ class Trainer:
             kwargs["target_embeddings"] = target[:, :seq_len, :]  # noqa: E501
         if "memory" in active:
             lt = outputs.get("long_term") if isinstance(outputs, dict) else None
-            if lt is None:
+            if lt is not None:
+                kwargs["long_term"] = lt
+            elif not isinstance(outputs, dict):
+                # Test path: a callable model that returns logits only.
+                # Provide a small random long-term tensor so the memory
+                # loss has a target.
                 lt = torch.randn(8, logits.shape[-1])
-            kwargs["long_term"] = lt
+                kwargs["long_term"] = lt
         if "router" in active:
             rl = outputs.get("router_logits") if isinstance(outputs, dict) else None
-            if rl is None:
-                rl = torch.randn(16, 4)
-            kwargs["router_logits"] = rl
+            if rl is not None:
+                kwargs["router_logits"] = rl
         aux = (
             outputs.get("origination_aux_loss")
             if isinstance(outputs, dict)
@@ -383,9 +392,11 @@ class Trainer:
         inputs, targets = self.move_batch(batch)
         self.optimizer.zero_grad(set_to_none=True)
         autocast_ctx = (
-            torch.amp.autocast(device_type=self.device.type, dtype=self.config.amp_dtype)
+            torch.amp.autocast(
+                device_type=self.device.type, dtype=self.config.amp_dtype
+            )
             if self.amp_enabled
-            else _NullContext()
+            else contextlib.nullcontext()
         )
         with autocast_ctx:
             loss, components = self.compute_loss(inputs, targets)
@@ -396,8 +407,8 @@ class Trainer:
             )
         self.optimizer.step()
         self.scheduler.step()
-        # ponytail: blend the EMA target encoder toward the predictor
-        # weights. Cadence controlled by ``ema_update_every``.
+        # Blend the EMA target encoder toward the predictor weights.
+        # Cadence controlled by ``ema_update_every``.
         if (
             self.target_encoder is not None
             and self.state.global_step % self.config.ema_update_every == 0
@@ -407,8 +418,9 @@ class Trainer:
         self.state.last_loss = float(loss.item())
         self.state.last_components = components
         self.curriculum.step()
-        # ponytail: refresh memory baseline every 50 steps so MemoryStabilityLoss
-        # has a moving reference instead of being a no-op.
+        # Refresh the memory baseline every 50 steps so the
+        # MemoryStabilityLoss has a moving reference instead of being a
+        # no-op (MSE against a frozen mean trivially reaches zero).
         if (
             isinstance(self.model, nn.Module)
             and hasattr(self.model, "memory_baseline")
@@ -541,16 +553,6 @@ class Trainer:
             for name, tensor in state_dict.items()
         }
         self.model.load_state_dict(renamed, strict=False)
-
-
-class _NullContext:
-    """internal: context manager used when AMP is disabled."""
-
-    def __enter__(self) -> None:
-        return None
-
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
-        del exc_type, exc, tb
 
 
 __all__ = [

@@ -381,9 +381,9 @@ class UCSACombinedLoss(nn.Module):
         total = self.ar(logits, targets)
         components = {"ar": float(total.item())}
 
-        # ponytail: multi-step JEPA takes precedence over single-step.
-        # When the EMA target encoder is active, the trainer swaps the
-        # targets in the multi-step list for the EMA-tracked latents.
+        # Multi-step JEPA takes precedence over single-step. When the
+        # EMA target encoder is active, the trainer swaps the targets in
+        # the multi-step list for the EMA-tracked latents.
         active_jepa_pairs: list[tuple[Tensor, Tensor]] | None = None
         if jepa_multi_step is not None and len(jepa_multi_step) > 0:
             active_jepa_pairs = list(jepa_multi_step)

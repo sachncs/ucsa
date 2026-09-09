@@ -105,8 +105,8 @@ def build_trainer(
 ) -> Trainer:
     """Construct the trainer from the config."""
     cfg_dict = _config_to_dict(cfg)
-    # ponytail: pull JEPA-loss config out of the model section if
-    # present. Defaults preserve the original I-JEPA-style loss.
+    # Pull JEPA-loss config out of the model section if present.
+    # Defaults preserve the original I-JEPA-style loss.
     model_section = cfg_dict.get("model", {})
     jepa_mode = model_section.get("jepa_mode", "ijepa")
     jepa_alpha = float(model_section.get("jepa_alpha", 0.5))

@@ -94,7 +94,7 @@ class Muon(torch.optim.Optimizer):
                 buf = state["buf"]
                 buf.mul_(group["momentum"]).add_(g)
                 if g.ndim >= 2:
-                    # ponytail: scale by sqrt(max(rows,cols)/cols) so the
+                    # Scale by ``sqrt(max(rows, cols) / cols)`` so the
                     # update RMS is approximately invariant to aspect ratio.
                     update = _newton_schulz_5(buf, group["ns_steps"])
                     update = update * max(
