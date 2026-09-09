@@ -6,7 +6,7 @@ the project locally, run the test suite, and submit a pull request.
 ## Reporting issues
 
 Open an issue at
-[`sachncs/ucsa/issues`](https://github.com/sachncs/ucsa/issues)
+[`sachncs/sachncs.github.io/issues`](https://github.com/sachncs/sachncs.github.io/issues)
 using the appropriate template (`bug`, `feature_request`, or `question` via
 Discussions if enabled). For security issues, follow
 [`SECURITY.md`](./SECURITY.md).

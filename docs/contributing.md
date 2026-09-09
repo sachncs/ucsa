@@ -15,14 +15,14 @@ test suite, the PR template, and the code review checklist.
 
 This project follows the Contributor Covenant. By participating,
 you agree to abide by its terms. See
-[CODE_OF_CONDUCT.md](https://github.com/sachncs/ucsa/blob/master/CODE_OF_CONDUCT.md).
+[CODE_OF_CONDUCT.md](https://github.com/sachncs/sachncs.github.io/blob/master/CODE_OF_CONDUCT.md).
 
 ## Reporting security issues
 
 Please **do not** file a public issue. Use GitHub Security
 Advisories instead:
-[sachncs/ucsa/security/advisories/new](https://github.com/sachncs/ucsa/security/advisories/new).
-See [SECURITY.md](https://github.com/sachncs/ucsa/blob/master/SECURITY.md)
+[sachncs/sachncs.github.io/security/advisories/new](https://github.com/sachncs/sachncs.github.io/security/advisories/new).
+See [SECURITY.md](https://github.com/sachncs/sachncs.github.io/blob/master/SECURITY.md)
 for the supported-versions matrix and the response SLA.
 
 ## Filing a non-security issue
@@ -35,7 +35,7 @@ Use the appropriate issue template:
   Problem statement, proposed solution, alternatives considered,
   additional context.
 - **Questions** — please use
-  [GitHub Discussions](https://github.com/sachncs/ucsa/discussions)
+  [GitHub Discussions](https://github.com/sachncs/sachncs.github.io/discussions)
   rather than the issue tracker.
 
 Blank issues are disabled; the templates are the canonical entry
@@ -44,7 +44,7 @@ point.
 ## Development setup
 
 ```bash
-git clone https://github.com/sachncs/ucsa.git
+git clone https://github.com/sachncs/sachncs.github.io.git
 cd ucsa
 
 python -m venv .venv

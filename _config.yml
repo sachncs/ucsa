@@ -11,11 +11,11 @@ plugins:
   - jekyll-remote-theme
 aux_links:
   "Source on GitHub":
-    - "https://github.com/sachncs/ucsa"
+    - "https://github.com/sachncs/sachncs.github.io"
   "Issues":
-    - "https://github.com/sachncs/ucsa/issues"
+    - "https://github.com/sachncs/sachncs.github.io/issues"
   "Discussions":
-    - "https://github.com/sachncs/ucsa/discussions"
+    - "https://github.com/sachncs/sachncs.github.io/discussions"
 aux_links_new_tab: false
 color_scheme: light
 search_enabled: true

@@ -1,10 +1,10 @@
 # UCSA — Unified Cognitive State Architecture
 
-[![CI](https://github.com/sachncs/ucsa/actions/workflows/ci.yml/badge.svg)](https://github.com/sachncs/ucsa/actions/workflows/ci.yml)
+[![CI](https://github.com/sachncs/sachncs.github.io/actions/workflows/ci.yml/badge.svg)](https://github.com/sachncs/sachncs.github.io/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-603%20passing-brightgreen.svg)](https://github.com/sachncs/ucsa)
-[![Coverage](https://img.shields.io/badge/coverage-80%25%20enforced-brightgreen.svg)](https://github.com/sachncs/ucsa)
+[![Tests](https://img.shields.io/badge/tests-603%20passing-brightgreen.svg)](https://github.com/sachncs/sachncs.github.io)
+[![Coverage](https://img.shields.io/badge/coverage-80%25%20enforced-brightgreen.svg)](https://github.com/sachncs/sachncs.github.io)
 [![Docs](https://img.shields.io/badge/docs-site-blue.svg)](https://sachncs.github.io/ucsa/)
 
 **A research-grade foundation model whose entire computation orbits a single,

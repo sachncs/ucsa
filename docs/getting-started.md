@@ -22,7 +22,7 @@ reproduction takes hours on a GPU.
 ## Install
 
 ```bash
-git clone https://github.com/sachncs/ucsa.git
+git clone https://github.com/sachncs/sachncs.github.io.git
 cd ucsa
 
 python -m venv .venv
