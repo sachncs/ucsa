@@ -747,7 +747,7 @@ permalink: /
         <div class="ucsa-terminal__body">
 
 <div class="ucsa-terminal__line"><span class="ucsa-terminal__comment"># 1. install</span></div>
-<div class="ucsa-terminal__line"><span class="ucsa-terminal__prompt">$</span> <span class="ucsa-terminal__cmd">git clone https://github.com/sachncs/sachncs.github.io.git</span></div>
+<div class="ucsa-terminal__line"><span class="ucsa-terminal__prompt">$</span> <span class="ucsa-terminal__cmd">git clone https://github.com/sachncs/ucsa.git</span></div>
 <div class="ucsa-terminal__line"><span class="ucsa-terminal__prompt">$</span> <span class="ucsa-terminal__cmd">cd ucsa && python -m venv .venv && source .venv/bin/activate</span></div>
 <div class="ucsa-terminal__line"><span class="ucsa-terminal__prompt">$</span> <span class="ucsa-terminal__cmd">pip install -e ".[dev]"</span></div>
 <div class="ucsa-terminal__line">&nbsp;</div>
@@ -845,7 +845,7 @@ permalink: /
         </p>
         <div class="ucsa-role__links">
           <a class="ucsa-role__link" href="/docs/contributing/">→ Contributing</a>
-          <a class="ucsa-role__link" href="https://github.com/sachncs/sachncs.github.io/issues" rel="noopener">→ Issues ↗</a>
+          <a class="ucsa-role__link" href="https://github.com/sachncs/ucsa/issues" rel="noopener">→ Issues ↗</a>
         </div>
       </article>
 
@@ -1199,7 +1199,7 @@ permalink: /
           <a class="ucsa-btn ucsa-btn--primary" href="/docs/contributing/">
             Read the contributor guide <span class="ucsa-btn__arrow">→</span>
           </a>
-          <a class="ucsa-btn ucsa-btn--ghost" href="https://github.com/sachncs/sachncs.github.io/issues" rel="noopener">
+          <a class="ucsa-btn ucsa-btn--ghost" href="https://github.com/sachncs/ucsa/issues" rel="noopener">
             Open an issue ↗
           </a>
         </div>
@@ -1295,7 +1295,7 @@ permalink: /
       <a class="ucsa-btn" style="background: transparent; color: #fff; border-color: rgba(255,255,255,0.4);" href="/paper/PAPER/">
         Read the paper
       </a>
-      <a class="ucsa-btn" style="background: transparent; color: #fff; border-color: rgba(255,255,255,0.4);" href="https://github.com/sachncs/sachncs.github.io" rel="noopener">
+      <a class="ucsa-btn" style="background: transparent; color: #fff; border-color: rgba(255,255,255,0.4);" href="https://github.com/sachncs/ucsa" rel="noopener">
         Source on GitHub ↗
       </a>
     </div>

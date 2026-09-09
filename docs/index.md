@@ -128,7 +128,7 @@ permalink: /docs/
         </p>
         <div class="ucsa-role__links">
           <a class="ucsa-role__link" href="/docs/contributing/">→ Contributing</a>
-          <a class="ucsa-role__link" href="https://github.com/sachncs/sachncs.github.io/issues" rel="noopener">→ Issues ↗</a>
+          <a class="ucsa-role__link" href="https://github.com/sachncs/ucsa/issues" rel="noopener">→ Issues ↗</a>
         </div>
       </article>
 

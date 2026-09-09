@@ -51,11 +51,11 @@ ucsa-train = "ucsa.train:main"
 ucsa-infer = "ucsa.infer:main"
 
 [project.urls]
-Homepage = "https://sachncs.github.io/"
-Repository = "https://github.com/sachncs/sachncs.github.io"
-Issues = "https://github.com/sachncs/sachncs.github.io/issues"
-Discussions = "https://github.com/sachncs/sachncs.github.io/discussions"
-Changelog = "https://github.com/sachncs/sachncs.github.io/blob/master/CHANGELOG.md"
+Homepage = "https://sachncs.github.io/ucsa/"
+Repository = "https://github.com/sachncs/ucsa"
+Issues = "https://github.com/sachncs/ucsa/issues"
+Discussions = "https://github.com/sachncs/ucsa/discussions"
+Changelog = "https://github.com/sachncs/ucsa/blob/master/CHANGELOG.md"
 
 [tool.setuptools]
 packages = [
