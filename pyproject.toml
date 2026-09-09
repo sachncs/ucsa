@@ -1,0 +1,163 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ucsa"
+version = "0.1.0"
+description = "Unified Cognitive State Architecture: a research-grade foundation model whose computation revolves around a single persistent differentiable cognitive state."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "sachin", email = "sachncs@gmail.com" }]
+keywords = ["cognitive-architecture", "pytorch", "research", "foundation-model"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "torch>=2.1.0",
+    "transformers>=4.40.0",
+    "datasets>=2.18.0",
+    "accelerate>=0.27.0",
+    "safetensors>=0.4.0",
+    "hydra-core>=1.3.0",
+    "omegaconf>=2.3.0",
+    "tensorboard>=2.15.0",
+    "wandb>=0.16.0",
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.3.0",
+    "black>=24.0.0",
+    "mypy>=1.8.0",
+    "pre-commit>=3.6.0",
+    "types-PyYAML",
+]
+
+[project.scripts]
+ucsa-train = "ucsa.train:main"
+ucsa-infer = "ucsa.infer:main"
+
+[project.urls]
+Homepage = "https://sachncs.github.io/ucsa/"
+Repository = "https://github.com/sachncs/ucsa"
+Issues = "https://github.com/sachncs/ucsa/issues"
+Discussions = "https://github.com/sachncs/ucsa/discussions"
+Changelog = "https://github.com/sachncs/ucsa/blob/master/CHANGELOG.md"
+
+[tool.setuptools]
+packages = [
+    "ucsa",
+    "ucsa.configs",
+    "ucsa.models",
+    "ucsa.training",
+    "ucsa.utils",
+]
+
+[tool.setuptools.package-data]
+ucsa = ["configs/*.yaml"]
+
+[tool.ruff]
+line-length = 80
+target-version = "py311"
+src = ["ucsa", "tests"]
+extend-exclude = ["build", "dist", ".venv"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+    "C4",  # flake8-comprehensions
+    "RET", # flake8-return
+    "YTT", # flake8-2020
+    "PT",  # flake8-pytest-style
+]
+ignore = [
+    "E501", # line length handled by black
+    "B008", # function call in default argument (Hydra/OmegaConf)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PT011"]  # pytest.raises without match is OK in our style
+"__init__.py" = ["F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ucsa"]
+combine-as-imports = true
+
+[tool.black]
+line-length = 80
+target-version = ["py311"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_ignores = false
+warn_return_any = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+no_implicit_optional = false
+check_untyped_defs = false
+ignore_missing_imports = true
+plugins = []
+exclude = ["build/", "dist/", ".venv/"]
+
+# The installed numpy ships stubs written with 3.12 `type` statements,
+# which mypy refuses to parse under python_version 3.11 and then aborts
+# before checking anything. We only use numpy for RNG seeding, so skip
+# following its stubs rather than dropping 3.11 as the target.
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+check_untyped_defs = false
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--tb=short",
+]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "slow: marks tests as slow (deselect with -m 'not slow')",
+    "integration: marks tests that require network or large memory",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["ucsa"]
+omit = ["*/tests/*", "*/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 80
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]

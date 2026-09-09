@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 200" width="540" height="200" role="img" aria-label="Reasoning loop timeline">
+  <title>Reasoning loop — input, N iterations of F, output</title>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+      markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5b6470"/>
+    </marker>
+    <marker id="arrow-back" viewBox="0 0 10 10" refX="9" refY="5"
+      markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1d4ed8"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="540" height="200" rx="12" fill="#ffffff"/>
+
+  <!-- Input token -->
+  <g transform="translate(20 80)">
+    <rect x="0" y="0" width="76" height="40" rx="6" fill="#fbfbfb" stroke="#0a2540" stroke-width="1.4"/>
+    <text x="38" y="18" text-anchor="middle" font-family="Inter, system-ui, sans-serif"
+      font-size="11" font-weight="600" fill="#0a2540">input</text>
+    <text x="38" y="32" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace"
+      font-size="9" letter-spacing="1.2" fill="#5b6470">O₀</text>
+  </g>
+  <line x1="100" y1="100" x2="118" y2="100" stroke="#5b6470" stroke-width="1.4" marker-end="url(#arrow)"/>
+
+  <!-- Iteration 1 -->
+  <g transform="translate(122 80)">
+    <rect x="0" y="0" width="80" height="40" rx="6" fill="#dbeafe" stroke="#1d4ed8"/>
+    <text x="40" y="18" text-anchor="middle" font-family="Inter, system-ui, sans-serif"
+      font-size="11" font-weight="600" fill="#1d4ed8">F iter 1</text>
+    <text x="40" y="32" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace"
+      font-size="9" letter-spacing="1.2" fill="#1d4ed8">C₁ = F(C₀, O₀)</text>
+  </g>
+  <line x1="206" y1="100" x2="224" y2="100" stroke="#5b6470" stroke-width="1.4" marker-end="url(#arrow)"/>
+
+  <!-- Iteration 2 -->
+  <g transform="translate(228 80)">
+    <rect x="0" y="0" width="80" height="40" rx="6" fill="#dbeafe" stroke="#1d4ed8"/>
+    <text x="40" y="18" text-anchor="middle" font-family="Inter, system-ui, sans-serif"
+      font-size="11" font-weight="600" fill="#1d4ed8">F iter 2</text>
+    <text x="40" y="32" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace"
+      font-size="9" letter-spacing="1.2" fill="#1d4ed8">C₂ = F(C₁, O₁)</text>
+  </g>
+  <line x1="312" y1="100" x2="330" y2="100" stroke="#5b6470" stroke-width="1.4" marker-end="url(#arrow)"/>
+
+  <!-- Iteration 3 -->
+  <g transform="translate(334 80)">
+    <rect x="0" y="0" width="80" height="40" rx="6" fill="#dbeafe" stroke="#1d4ed8"/>
+    <text x="40" y="18" text-anchor="middle" font-family="Inter, system-ui, sans-serif"
+      font-size="11" font-weight="600" fill="#1d4ed8">F iter 3</text>
+    <text x="40" y="32" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace"
+      font-size="9" letter-spacing="1.2" fill="#1d4ed8">C₃ = F(C₂, O₂)</text>
+  </g>
+  <line x1="418" y1="100" x2="436" y2="100" stroke="#5b6470" stroke-width="1.4" marker-end="url(#arrow)"/>
+
+  <!-- Iteration 4 -->
+  <g transform="translate(440 80)">
+    <rect x="0" y="0" width="80" height="40" rx="6" fill="#dbeafe" stroke="#1d4ed8"/>
+    <text x="40" y="18" text-anchor="middle" font-family="Inter, system-ui, sans-serif"
+      font-size="11" font-weight="600" fill="#1d4ed8">F iter 4</text>
+    <text x="40" y="32" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace"
+      font-size="9" letter-spacing="1.2" fill="#1d4ed8">C₄ = F(C₃, O₃)</text>
+  </g>
+
+  <!-- Output logits -->
+  <line x1="520" y1="100" x2="538" y2="100" stroke="#5b6470" stroke-width="1.4" marker-end="url(#arrow)"/>
+  <g transform="translate(538 80)" transform-origin="0 0">
+    <circle cx="0" cy="20" r="18" fill="#0a2540"/>
+    <text x="0" y="18" text-anchor="middle" font-family="Inter, system-ui, sans-serif"
+      font-size="9" font-weight="700" fill="#fff">logits</text>
+    <text x="0" y="32" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace"
+      font-size="8" fill="#fff">vocab</text>
+  </g>
+
+  <!-- JEPA back-edges (curved) -->
+  <g fill="none" stroke="#1d4ed8" stroke-width="1.2" stroke-dasharray="2 3" opacity="0.65"
+    marker-end="url(#arrow-back)">
+    <path d="M 162 78 Q 162 40, 162 40" />
+    <path d="M 268 78 Q 268 56, 268 56"/>
+    <path d="M 374 78 Q 374 56, 374 56"/>
+    <path d="M 480 78 Q 480 56, 480 56"/>
+  </g>
+  <text x="270" y="40" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace"
+    font-size="10" fill="#1d4ed8">JEPA chain · predict intermediate latents</text>
+
+  <!-- Footnote -->
+  <text x="270" y="160" text-anchor="middle" font-family="JetBrains Mono, ui-monospace, monospace"
+    font-size="10" fill="#8b95a1">operator F reads PCS, writes PCS · differentiable state carry between iterations</text>
+
+  <!-- Bottom annotation -->
+  <g transform="translate(20 178)" font-family="JetBrains Mono, ui-monospace, monospace" font-size="9" fill="#8b95a1">
+    <text x="0" y="0">α_k = observation_mix · observation_mix_decay^k</text>
+  </g>
+</svg>
