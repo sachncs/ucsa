@@ -16,7 +16,18 @@ choice with the highest log-likelihood wins.
 This module exposes ``evaluate_task(name, model, tokenizer, ...)``
 which returns an ``EvalResult`` with the per-task accuracy plus
 metadata needed by the paper-writing tools.
+
+Reproducibility
+---------------
+
+Each task loader streams from HuggingFace ``datasets`` and is paired
+with a fixed-seed shuffle buffer so the ``max_examples`` cap selects a
+deterministic prefix. Two consecutive runs of ``scripts/eval.py``
+against the same checkpoint therefore report the same accuracy to four
+decimal places. The seed is recorded on every :class:`EvalResult` in
+:attr:`EvalResult.extras` for downstream paper-writing tools.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
@@ -30,6 +41,11 @@ from transformers import PreTrainedTokenizerBase
 
 from ucsa.models.ucsa import UCSA
 
+# Default seed used when callers do not pass one. The same seed is
+# passed to every task loader so a ``max_examples`` cap on a streaming
+# source yields the same prefix on every run.
+DEFAULT_EVAL_SEED: int = 1234
+
 
 @dataclass
 class TaskSpec:
@@ -38,14 +54,21 @@ class TaskSpec:
     Attributes:
         name: Display name (must match keys in :func:`TASK_REGISTRY`).
         loader: Callable returning an iterable of dicts with the keys
-            the score function expects.
+            the score function expects. Loaders that take a seed must
+            accept it as the first positional argument.
         max_examples: Optional cap to keep the harness fast on small
-            machines. ``None`` runs the full split.
+            machines. ``None`` runs the full split. When the loader
+            streams from HuggingFace ``datasets``, the cap selects a
+            deterministic prefix given a fixed seed.
+        seed: Seed used by streaming loaders for deterministic
+            ``max_examples`` selection. Defaults to
+            :data:`DEFAULT_EVAL_SEED`.
     """
 
     name: str
-    loader: Callable[[], Iterable[dict[str, Any]]]
+    loader: Callable[..., Iterable[dict[str, Any]]]
     max_examples: int | None = None
+    seed: int = DEFAULT_EVAL_SEED
 
 
 @dataclass
@@ -67,9 +90,36 @@ class EvalResult:
 # Task datasets
 # ---------------------------------------------------------------------------
 
-def _load_hellaswag() -> Iterable[dict[str, Any]]:
+def _shuffled_stream(
+    ds: Iterable[dict[str, Any]], seed: int, buffer_size: int = 2000
+) -> Iterable[dict[str, Any]]:
+    """Yield a deterministic-shuffled stream from ``ds``.
+
+    Args:
+        ds: A streaming HuggingFace dataset (exposes ``.shuffle``) or
+            any plain iterable of records (e.g. a list).
+        seed: Seed for the deterministic shuffle.
+        buffer_size: Shuffle buffer size for streaming datasets. Ignored
+            for plain iterables.
+
+    Yields:
+        Records from ``ds`` in a deterministic order.
+    """
+    if hasattr(ds, "shuffle"):
+        shuffled = ds.shuffle(seed=seed, buffer_size=buffer_size)
+        yield from shuffled
+        return
+    import random
+
+    rng = random.Random(seed)
+    rows = list(ds)
+    rng.shuffle(rows)
+    yield from rows
+
+
+def _load_hellaswag(seed: int = DEFAULT_EVAL_SEED) -> Iterable[dict[str, Any]]:
     ds = load_dataset("Rowan/hellaswag", split="validation", streaming=True)
-    for ex in ds:
+    for ex in _shuffled_stream(ds, seed):
         yield {
             "context": ex["ctx"],
             "choices": ex["endings"],
@@ -77,11 +127,13 @@ def _load_hellaswag() -> Iterable[dict[str, Any]]:
         }
 
 
-def _load_arc(name: str) -> Iterable[dict[str, Any]]:
+def _load_arc(
+    name: str, seed: int = DEFAULT_EVAL_SEED
+) -> Iterable[dict[str, Any]]:
     ds = load_dataset(
         "allenai/ai2_arc", name, split="test", streaming=True
     )
-    for ex in ds:
+    for ex in _shuffled_stream(ds, seed):
         yield {
             "context": ex["question"],
             "choices": ex["choices"]["text"],
@@ -91,12 +143,12 @@ def _load_arc(name: str) -> Iterable[dict[str, Any]]:
         }
 
 
-def _load_piqa() -> Iterable[dict[str, Any]]:
-    # upstream `ybisk/piqa` is loading-script only and is no longer
-    # supported by the current `datasets` versions we run with. Use
-    # `gimmaru/piqa` which mirrors the same schema (goal/sol1/sol2).
+def _load_piqa(seed: int = DEFAULT_EVAL_SEED) -> Iterable[dict[str, Any]]:
+    # Upstream ``ybisk/piqa`` is loading-script only and is no longer
+    # supported by the current ``datasets`` versions we run with. Use
+    # ``gimmaru/piqa`` which mirrors the same schema (goal/sol1/sol2).
     ds = load_dataset("gimmaru/piqa", split="validation", streaming=True)
-    for ex in ds:
+    for ex in _shuffled_stream(ds, seed):
         yield {
             "context": ex["goal"],
             "choices": [ex["sol1"], ex["sol2"]],
@@ -104,17 +156,19 @@ def _load_piqa() -> Iterable[dict[str, Any]]:
         }
 
 
-def _load_winogrande() -> Iterable[dict[str, Any]]:
+def _load_winogrande(
+    seed: int = DEFAULT_EVAL_SEED
+) -> Iterable[dict[str, Any]]:
     ds = load_dataset(
         "allenai/winogrande", "winogrande_l", split="validation",
         streaming=True,
     )
-    for ex in ds:
+    for ex in _shuffled_stream(ds, seed):
         ctx = ex["sentence"]
         # The dataset exposes ``option1``/``option2``, not an ``options``
-        # list, and ``answer`` is 1-based over those two in order. Building
-        # the choices in the reverse order while keeping ``answer - 1`` as
-        # the label inverted every example.
+        # list, and ``answer`` is 1-based over those two in order.
+        # Building the choices in the reverse order while keeping
+        # ``answer - 1`` as the label inverted every example.
         choices = [
             ctx.replace("_", ex["option1"]),
             ctx.replace("_", ex["option2"]),
@@ -131,11 +185,13 @@ TASK_REGISTRY: dict[str, TaskSpec] = {
         name="hellaswag", loader=_load_hellaswag, max_examples=200
     ),
     "arc_easy": TaskSpec(
-        name="arc_easy", loader=lambda: _load_arc("ARC-Easy"),
+        name="arc_easy",
+        loader=lambda seed=DEFAULT_EVAL_SEED: _load_arc("ARC-Easy", seed),
         max_examples=200,
     ),
     "arc_challenge": TaskSpec(
-        name="arc_challenge", loader=lambda: _load_arc("ARC-Challenge"),
+        name="arc_challenge",
+        loader=lambda seed=DEFAULT_EVAL_SEED: _load_arc("ARC-Challenge", seed),
         max_examples=200,
     ),
     "piqa": TaskSpec(
@@ -228,7 +284,7 @@ def evaluate_task(
     correct = 0
     total = 0
     ll_sum = 0.0
-    for i, ex in enumerate(spec.loader()):
+    for i, ex in enumerate(spec.loader(spec.seed)):
         if spec.max_examples is not None and i >= spec.max_examples:
             break
         ctx = ex["context"]
@@ -251,6 +307,7 @@ def evaluate_task(
         correct=correct,
         accuracy=correct / max(1, total),
         log_likelihood_mean=ll_sum / max(1, total),
+        extras={"seed": spec.seed, "max_examples": spec.max_examples},
     )
 
 
@@ -280,6 +337,7 @@ def evaluate_all(
 
 
 __all__ = [
+    "DEFAULT_EVAL_SEED",
     "EvalResult",
     "TaskSpec",
     "TASK_REGISTRY",

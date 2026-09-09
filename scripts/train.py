@@ -439,13 +439,16 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    # Exit explicitly. `main` runs to completion -- the checkpoint is
-    # saved and the JSON is written -- but the interpreter then deadlocks
-    # in finalisation on this torch/MPS build: no non-daemon threads and no
-    # child processes remain, yet the process never exits. That makes the
+    # `main` runs to completion -- the checkpoint is saved and the JSON
+    # is written -- but on the torch/MPS backend the interpreter then
+    # deadlocks in finalisation: no non-daemon threads and no child
+    # processes remain, yet the process never exits. That makes the
     # script unusable for automation, because `scripts/run_ablations.py`
-    # drives it with `subprocess.run` and blocks forever after the first
-    # arm. Flush and hard-exit past finalisation.
+    # drives it with `subprocess.run` and would block forever after the
+    # first arm. On CPU/CUDA the interpreter exits cleanly, so we gate
+    # the hard exit behind MPS only and let every other backend run
+    # through normal finalisation.
     sys.stdout.flush()
     sys.stderr.flush()
-    os._exit(0)
+    if torch.backends.mps.is_available():
+        os._exit(0)
