@@ -244,9 +244,15 @@ class JEPALoss(nn.Module):
         loss = self._single_pair_loss(predicted, target, for_reg=latent_for_reg)
         if self.mode == "lewm":
             return loss, {
-                "jepa_pred": float(loss.item())
-                if self.gaussian_reg_weight == 0
-                else float(self._single_pair_loss(predicted, target, for_reg=None).item()),
+                "jepa_pred": (
+                    float(loss.item())
+                    if self.gaussian_reg_weight == 0
+                    else float(
+                        self._single_pair_loss(
+                            predicted, target, for_reg=None
+                        ).item()
+                    )
+                ),
                 "jepa_gaussian_reg": float(
                     self._gaussian_kl(predicted, latent_for_reg).item()
                 ),
@@ -260,7 +266,9 @@ class MemoryStabilityLoss(nn.Module):
     Encourages the long-term bank to remain close to a learned baseline.
     """
 
-    def forward(self, long_term: Tensor, baseline: Tensor | None = None) -> Tensor:
+    def forward(
+        self, long_term: Tensor, baseline: Tensor | None = None
+    ) -> Tensor:
         """Compute memory stability loss.
 
         Args:
@@ -391,9 +399,7 @@ class UCSACombinedLoss(nn.Module):
             active_jepa_pairs = [(jepa_predicted, jepa_target)]
 
         if active_jepa_pairs is not None:
-            jepa_out = self.jepa(
-                multi_step_pairs=active_jepa_pairs
-            )
+            jepa_out = self.jepa(multi_step_pairs=active_jepa_pairs)
             if self.jepa.mode == "lewm":
                 jepa_loss, jepa_components = jepa_out
                 components.update(

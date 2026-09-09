@@ -136,9 +136,7 @@ class TestInference:
 
     def test_generate_extends_sequence(self) -> None:
         """``generate`` extends the input sequence by ``max_new_tokens``."""
-        model = UCSA(
-            UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2)
-        )
+        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
         prompt = torch.randint(0, 100, (1, 4))
         out = infer.generate(model, prompt, max_new_tokens=3)
         assert out.shape == (1, 7)
@@ -146,13 +144,9 @@ class TestInference:
     def test_generate_argmax_with_zero_temperature(self) -> None:
         """Zero temperature picks argmax deterministically."""
         torch.manual_seed(0)
-        model = UCSA(
-            UCSAConfig(hidden_size=32, vocab_size=10, num_layers=2)
-        )
+        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=10, num_layers=2))
         prompt = torch.randint(0, 10, (1, 2))
-        first = infer.generate(
-            model, prompt, max_new_tokens=2, temperature=0.0
-        )
+        first = infer.generate(model, prompt, max_new_tokens=2, temperature=0.0)
         second = infer.generate(
             model, prompt, max_new_tokens=2, temperature=0.0
         )
@@ -160,13 +154,9 @@ class TestInference:
 
     def test_generate_stops_at_eos(self) -> None:
         """Generation stops when an EOS token is produced."""
-        model = UCSA(
-            UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2)
-        )
+        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
         prompt = torch.randint(0, 100, (1, 2))
-        out = infer.generate(
-            model, prompt, max_new_tokens=20, eos_token_id=7
-        )
+        out = infer.generate(model, prompt, max_new_tokens=20, eos_token_id=7)
         # Generation stops on EOS or after max_new_tokens.
         assert out.shape[1] <= prompt.shape[1] + 20
 
@@ -176,28 +166,27 @@ class TestUCSAModel:
 
     def test_forward_returns_all_heads(self) -> None:
         """Forward returns language, planning, tool, memory outputs."""
-        model = UCSA(
-            UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2)
-        )
+        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
         inputs = torch.randint(0, 100, (1, 4))
         out = model(inputs)
         assert set(out) >= {"language", "planning", "tool", "memory"}
-        assert set(out) >= {"jepa_predicted", "jepa_target", "long_term", "router_logits"}
+        assert set(out) >= {
+            "jepa_predicted",
+            "jepa_target",
+            "long_term",
+            "router_logits",
+        }
 
     def test_forward_returns_logits_with_correct_vocab(self) -> None:
         """Language logits have shape ``(batch, working_size, vocab)``."""
-        model = UCSA(
-            UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2)
-        )
+        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
         inputs = torch.randint(0, 100, (1, 4))
         out = model(inputs)
         assert out["language"].shape[-1] == 100
 
     def test_forward_lossless_gradients(self) -> None:
         """A loss on the language head flows gradients to PCS parameters."""
-        model = UCSA(
-            UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2)
-        )
+        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
         inputs = torch.randint(0, 100, (1, 4))
         out = model(inputs)
         loss = out["language"].sum()
@@ -211,9 +200,7 @@ class TestUCSAModel:
         differentiable state carry the operator received no gradient at all
         and only the working bank plus the language head were trained.
         """
-        model = UCSA(
-            UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2)
-        )
+        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
         out = model(torch.randint(0, 100, (1, 4)))
         out["language"].pow(2).mean().backward()
         operator_params = list(model.operator.named_parameters())
@@ -227,9 +214,7 @@ class TestUCSAModel:
 
     def test_jepa_chain_is_differentiable(self) -> None:
         """JEPA predictions carry gradients; targets stay detached."""
-        model = UCSA(
-            UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2)
-        )
+        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
         out = model(torch.randint(0, 100, (1, 4)))
         pairs = out["jepa_multi_step"]
         assert pairs
@@ -242,9 +227,7 @@ class TestUCSAModel:
 
         A mismatch here silently broadcasts inside the JEPA loss.
         """
-        model = UCSA(
-            UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2)
-        )
+        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
         out = model(torch.randint(0, 100, (1, 4)))
         assert out["jepa_predicted"].shape == out["jepa_target"].shape
         for predicted, target in out["jepa_multi_step"]:
@@ -274,9 +257,7 @@ class TestUCSAModel:
         The intent bank and generator exist, but ``alpha_k = 1`` keeps the
         exogenous observation, so the default configuration is unchanged.
         """
-        model = UCSA(
-            UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2)
-        )
+        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
         assert model.reasoning_loop.origination is model.heads.origination
         model(torch.randint(0, 100, (1, 4)))
         assert model.reasoning_loop.last_generated_inputs == []
@@ -314,8 +295,7 @@ class TestUCSAModel:
         out = model(torch.randint(0, 100, (1, 4)))
         out["language"].pow(2).mean().backward()
         assert all(
-            p.grad is not None
-            for p in model.heads.origination.parameters()
+            p.grad is not None for p in model.heads.origination.parameters()
         )
         assert model.pcs.banks["intent"].grad is not None
 

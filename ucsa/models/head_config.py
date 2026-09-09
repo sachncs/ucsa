@@ -40,7 +40,9 @@ def build_head_config(
     )
 
 
-def build_head_config_from_cfg(cfg: Mapping[str, object] | object) -> HeadConfig:
+def build_head_config_from_cfg(
+    cfg: Mapping[str, object] | object,
+) -> HeadConfig:
     """Build a :class:`HeadConfig` from a UCSAConfig-like object."""
     hidden_size = int(getattr(cfg, "hidden_size", 128))
     vocab_size = int(getattr(cfg, "vocab_size", 50257))
@@ -70,4 +72,9 @@ def build_head_config_from_cfg(cfg: Mapping[str, object] | object) -> HeadConfig
     return build_head_config(hidden_size, spec)
 
 
-__all__ = ["HeadConfig", "HeadSpec", "build_head_config", "build_head_config_from_cfg"]
+__all__ = [
+    "HeadConfig",
+    "HeadSpec",
+    "build_head_config",
+    "build_head_config_from_cfg",
+]

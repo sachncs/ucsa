@@ -91,6 +91,7 @@ class TestStateTransitionOperatorABC:
 
     def test_abstract_methods_must_be_implemented(self) -> None:
         """A subclass missing abstract methods cannot be instantiated."""
+
         class IncompleteOperator(StateTransitionOperator):
             @property
             def name(self) -> str:

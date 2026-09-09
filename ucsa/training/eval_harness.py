@@ -90,6 +90,7 @@ class EvalResult:
 # Task datasets
 # ---------------------------------------------------------------------------
 
+
 def _shuffled_stream(
     ds: Iterable[dict[str, Any]], seed: int, buffer_size: int = 2000
 ) -> Iterable[dict[str, Any]]:
@@ -130,9 +131,7 @@ def _load_hellaswag(seed: int = DEFAULT_EVAL_SEED) -> Iterable[dict[str, Any]]:
 def _load_arc(
     name: str, seed: int = DEFAULT_EVAL_SEED
 ) -> Iterable[dict[str, Any]]:
-    ds = load_dataset(
-        "allenai/ai2_arc", name, split="test", streaming=True
-    )
+    ds = load_dataset("allenai/ai2_arc", name, split="test", streaming=True)
     for ex in _shuffled_stream(ds, seed):
         yield {
             "context": ex["question"],
@@ -156,11 +155,11 @@ def _load_piqa(seed: int = DEFAULT_EVAL_SEED) -> Iterable[dict[str, Any]]:
         }
 
 
-def _load_winogrande(
-    seed: int = DEFAULT_EVAL_SEED
-) -> Iterable[dict[str, Any]]:
+def _load_winogrande(seed: int = DEFAULT_EVAL_SEED) -> Iterable[dict[str, Any]]:
     ds = load_dataset(
-        "allenai/winogrande", "winogrande_l", split="validation",
+        "allenai/winogrande",
+        "winogrande_l",
+        split="validation",
         streaming=True,
     )
     for ex in _shuffled_stream(ds, seed):
@@ -194,9 +193,7 @@ TASK_REGISTRY: dict[str, TaskSpec] = {
         loader=lambda seed=DEFAULT_EVAL_SEED: _load_arc("ARC-Challenge", seed),
         max_examples=200,
     ),
-    "piqa": TaskSpec(
-        name="piqa", loader=_load_piqa, max_examples=200
-    ),
+    "piqa": TaskSpec(name="piqa", loader=_load_piqa, max_examples=200),
     "winogrande": TaskSpec(
         name="winogrande", loader=_load_winogrande, max_examples=200
     ),
@@ -206,6 +203,7 @@ TASK_REGISTRY: dict[str, TaskSpec] = {
 # ---------------------------------------------------------------------------
 # Scoring
 # ---------------------------------------------------------------------------
+
 
 def _normalize_scores(scores: list[float]) -> list[float]:
     """Length-normalise per-token log-likelihoods so HellaSwag/PIQA-style

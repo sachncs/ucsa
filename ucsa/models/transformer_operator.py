@@ -100,9 +100,13 @@ class TransformerOperatorConfig:
 
     def __post_init__(self) -> None:
         if self.hidden_size <= 0:
-            raise ValueError(f"hidden_size must be positive, got {self.hidden_size}.")
+            raise ValueError(
+                f"hidden_size must be positive, got {self.hidden_size}."
+            )
         if self.num_layers <= 0:
-            raise ValueError(f"num_layers must be positive, got {self.num_layers}.")
+            raise ValueError(
+                f"num_layers must be positive, got {self.num_layers}."
+            )
         if self.num_q_heads <= 0:
             raise ValueError(
                 f"num_q_heads must be positive, got {self.num_q_heads}."
@@ -185,13 +189,16 @@ class RotaryEmbedding(nn.Module):
         self.head_dim = head_dim
         self.base = base
         inv_freq = 1.0 / (
-            base ** (torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
+            base
+            ** (torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
         )
         self.register_buffer("inv_freq", inv_freq, persistent=False)
         self.cos_cache: dict[int, Tensor] = {}
         self.sin_cache: dict[int, Tensor] = {}
 
-    def get_cos_sin(self, seq_len: int, device: torch.device) -> tuple[Tensor, Tensor]:
+    def get_cos_sin(
+        self, seq_len: int, device: torch.device
+    ) -> tuple[Tensor, Tensor]:
         """Return ``(cos, sin)`` tables of length ``seq_len``.
 
         Args:
@@ -288,10 +295,18 @@ class GroupedQueryAttention(nn.Module):
         self.num_kv_heads = num_kv_heads
         self.head_dim = hidden_size // num_q_heads
         self.sliding_window = sliding_window
-        self.q_proj = nn.Linear(hidden_size, num_q_heads * self.head_dim, bias=False)
-        self.k_proj = nn.Linear(hidden_size, num_kv_heads * self.head_dim, bias=False)
-        self.v_proj = nn.Linear(hidden_size, num_kv_heads * self.head_dim, bias=False)
-        self.out_proj = nn.Linear(num_q_heads * self.head_dim, hidden_size, bias=False)
+        self.q_proj = nn.Linear(
+            hidden_size, num_q_heads * self.head_dim, bias=False
+        )
+        self.k_proj = nn.Linear(
+            hidden_size, num_kv_heads * self.head_dim, bias=False
+        )
+        self.v_proj = nn.Linear(
+            hidden_size, num_kv_heads * self.head_dim, bias=False
+        )
+        self.out_proj = nn.Linear(
+            num_q_heads * self.head_dim, hidden_size, bias=False
+        )
         self.attention_dropout = attention_dropout
         self.rotary = RotaryEmbedding(self.head_dim, base=rope_base)
         self.kv_cache: dict[str, Tensor | int | None] = {
@@ -323,15 +338,21 @@ class GroupedQueryAttention(nn.Module):
         """
         batch, q_seq, _ = query.shape
         c_seq = context.shape[1]
-        q = self.q_proj(query).view(
-            batch, q_seq, self.num_q_heads, self.head_dim
-        ).transpose(1, 2)
-        k_new = self.k_proj(context).view(
-            batch, c_seq, self.num_kv_heads, self.head_dim
-        ).transpose(1, 2)
-        v_new = self.v_proj(context).view(
-            batch, c_seq, self.num_kv_heads, self.head_dim
-        ).transpose(1, 2)
+        q = (
+            self.q_proj(query)
+            .view(batch, q_seq, self.num_q_heads, self.head_dim)
+            .transpose(1, 2)
+        )
+        k_new = (
+            self.k_proj(context)
+            .view(batch, c_seq, self.num_kv_heads, self.head_dim)
+            .transpose(1, 2)
+        )
+        v_new = (
+            self.v_proj(context)
+            .view(batch, c_seq, self.num_kv_heads, self.head_dim)
+            .transpose(1, 2)
+        )
 
         cos_q, sin_q = self.rotary.get_cos_sin(q_seq, query.device)
         cos_c, sin_c = self.rotary.get_cos_sin(c_seq, context.device)
@@ -352,8 +373,8 @@ class GroupedQueryAttention(nn.Module):
             v_full = torch.cat([cached_v, v_new], dim=2)
 
         if k_full.shape[2] > self.sliding_window:
-            k_full = k_full[:, :, -self.sliding_window:]
-            v_full = v_full[:, :, -self.sliding_window:]
+            k_full = k_full[:, :, -self.sliding_window :]
+            v_full = v_full[:, :, -self.sliding_window :]
 
         self.kv_cache["k"] = k_full
         self.kv_cache["v"] = v_full
@@ -370,7 +391,9 @@ class GroupedQueryAttention(nn.Module):
             dropout_p=self.attention_dropout if self.training else 0.0,
             is_causal=False,
         )
-        attn_output = attn_output.transpose(1, 2).contiguous().view(batch, q_seq, -1)
+        attn_output = (
+            attn_output.transpose(1, 2).contiguous().view(batch, q_seq, -1)
+        )
         projected: Tensor = self.out_proj(attn_output)
         return projected
 
@@ -427,10 +450,18 @@ class CrossAttention(nn.Module):
         self.num_q_heads = num_q_heads
         self.num_kv_heads = num_kv_heads
         self.head_dim = hidden_size // num_q_heads
-        self.q_proj = nn.Linear(hidden_size, num_q_heads * self.head_dim, bias=False)
-        self.k_proj = nn.Linear(hidden_size, num_kv_heads * self.head_dim, bias=False)
-        self.v_proj = nn.Linear(hidden_size, num_kv_heads * self.head_dim, bias=False)
-        self.out_proj = nn.Linear(num_q_heads * self.head_dim, hidden_size, bias=False)
+        self.q_proj = nn.Linear(
+            hidden_size, num_q_heads * self.head_dim, bias=False
+        )
+        self.k_proj = nn.Linear(
+            hidden_size, num_kv_heads * self.head_dim, bias=False
+        )
+        self.v_proj = nn.Linear(
+            hidden_size, num_kv_heads * self.head_dim, bias=False
+        )
+        self.out_proj = nn.Linear(
+            num_q_heads * self.head_dim, hidden_size, bias=False
+        )
         self.attention_dropout = attention_dropout
 
     def forward(self, query: Tensor, kv_source: Tensor) -> Tensor:
@@ -445,7 +476,9 @@ class CrossAttention(nn.Module):
         """
         batch, q_seq, _ = query.shape
         kv_seq = kv_source.shape[1]
-        q = self.q_proj(query).view(batch, q_seq, self.num_q_heads, self.head_dim)
+        q = self.q_proj(query).view(
+            batch, q_seq, self.num_q_heads, self.head_dim
+        )
         k = self.k_proj(kv_source).view(
             batch, kv_seq, self.num_kv_heads, self.head_dim
         )
@@ -457,12 +490,16 @@ class CrossAttention(nn.Module):
         v = v.transpose(1, 2)
         repeat = self.num_q_heads // self.num_kv_heads
         if repeat > 1:
-            k = k.unsqueeze(2).expand(
-                batch, self.num_kv_heads, repeat, kv_seq, self.head_dim
-            ).reshape(batch, self.num_q_heads, kv_seq, self.head_dim)
-            v = v.unsqueeze(2).expand(
-                batch, self.num_kv_heads, repeat, kv_seq, self.head_dim
-            ).reshape(batch, self.num_q_heads, kv_seq, self.head_dim)
+            k = (
+                k.unsqueeze(2)
+                .expand(batch, self.num_kv_heads, repeat, kv_seq, self.head_dim)
+                .reshape(batch, self.num_q_heads, kv_seq, self.head_dim)
+            )
+            v = (
+                v.unsqueeze(2)
+                .expand(batch, self.num_kv_heads, repeat, kv_seq, self.head_dim)
+                .reshape(batch, self.num_q_heads, kv_seq, self.head_dim)
+            )
         attn_output = torch.nn.functional.scaled_dot_product_attention(
             q,
             k,
@@ -471,7 +508,9 @@ class CrossAttention(nn.Module):
             dropout_p=self.attention_dropout if self.training else 0.0,
             is_causal=False,
         )
-        attn_output = attn_output.transpose(1, 2).contiguous().view(batch, q_seq, -1)
+        attn_output = (
+            attn_output.transpose(1, 2).contiguous().view(batch, q_seq, -1)
+        )
         projected: Tensor = self.out_proj(attn_output)
         return projected
 
@@ -563,7 +602,9 @@ class TransformerBlock(nn.Module):
         self.norm_cross_attn: RMSNorm | None = None
         self.cross_attn: CrossAttention | None = None
         if config.use_memory_index_cross_attention:
-            self.norm_cross_attn = RMSNorm(config.hidden_size, eps=config.norm_eps)
+            self.norm_cross_attn = RMSNorm(
+                config.hidden_size, eps=config.norm_eps
+            )
             self.cross_attn = CrossAttention(
                 hidden_size=config.hidden_size,
                 num_q_heads=config.num_q_heads,
@@ -760,9 +801,7 @@ class TransformerOperator(StateTransitionOperator):
         """
         return self.last_bank_tensors
 
-    def _read_bank(
-        self, cstate: PersistentCognitiveState, name: str
-    ) -> Tensor:
+    def _read_bank(self, cstate: PersistentCognitiveState, name: str) -> Tensor:
         """Read one bank, preferring the carried differentiable tensor.
 
         Args:
@@ -798,7 +837,9 @@ class TransformerOperator(StateTransitionOperator):
             [carried[name] for name in self.stream_bank_names], dim=0
         )
 
-    def _bind_offsets(self, cstate: PersistentCognitiveState) -> dict[str, tuple[int, int]]:
+    def _bind_offsets(
+        self, cstate: PersistentCognitiveState
+    ) -> dict[str, tuple[int, int]]:
         """Bind and return bank offsets for the given PCS.
 
         Args:
@@ -833,8 +874,10 @@ class TransformerOperator(StateTransitionOperator):
             Tokens with bank-id and position embeddings added.
         """
         batch, seq, hidden = tokens.shape
-        positions = torch.arange(seq, device=tokens.device).unsqueeze(0).expand(
-            batch, seq
+        positions = (
+            torch.arange(seq, device=tokens.device)
+            .unsqueeze(0)
+            .expand(batch, seq)
         )
         pos_emb: Tensor = self.position_embedding(positions)
 
@@ -888,7 +931,9 @@ class TransformerOperator(StateTransitionOperator):
         working_start, working_end = offsets["working"]
 
         bank_id_base = len(self.stream_bank_names)
-        all_tokens = self._add_position_signal(all_tokens, offsets, bank_id_base)
+        all_tokens = self._add_position_signal(
+            all_tokens, offsets, bank_id_base
+        )
 
         # The cross-attention keys/values are saved by autograd for the K/V
         # weight gradients. ``set_bank`` below writes the banks back in
@@ -910,7 +955,11 @@ class TransformerOperator(StateTransitionOperator):
             all_tokens, aux = block(
                 all_tokens,
                 is_first_step=self.is_first_step,
-                memory_index=memory_index_tokens if block.cross_attn is not None else None,
+                memory_index=(
+                    memory_index_tokens
+                    if block.cross_attn is not None
+                    else None
+                ),
                 working_slice=(working_start, working_end),
             )
             total_aux = total_aux + aux.moe_load
@@ -921,7 +970,9 @@ class TransformerOperator(StateTransitionOperator):
         all_tokens = self.final_norm(all_tokens)
         self.is_first_step = False
         self.last_aux_loss = total_aux
-        self.last_router_logits = torch.cat(router_pieces, dim=0) if router_pieces else None
+        self.last_router_logits = (
+            torch.cat(router_pieces, dim=0) if router_pieces else None
+        )
 
         new_pcs = cstate
         bank_tensors: dict[str, Tensor] = {}

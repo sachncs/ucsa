@@ -5,7 +5,7 @@
 - :class:`~ucsa.models.perception.Perception` -- text/code in,
   observation tokens out.
 - :class:`~ucsa.models.state.PersistentCognitiveState` -- the
-  six-bank persistent state.
+  seven-bank persistent state.
 - :class:`~ucsa.models.transition_operator.StateTransitionOperator`
   -- the abstract computation engine.
 - :class:`~ucsa.models.reasoning_loop.ReasoningLoop` -- N iterations of
@@ -360,9 +360,7 @@ class UCSA(nn.Module):
             if len(jepa_multi_step) > 0:
                 jepa_multi_step = [
                     (
-                        self._condition_one(
-                            p, token_embeds, k_proj, v
-                        ),
+                        self._condition_one(p, token_embeds, k_proj, v),
                         t,
                     )
                     for p, t in jepa_multi_step
@@ -454,7 +452,9 @@ def build_ucsa(cfg: Any) -> UCSA:
             vocab_size=vocab_size,
             max_seq_len=max_seq_len,
             num_concepts=num_concepts,
-            attention_dropout=float(model_section.get("attention_dropout", 0.0)),
+            attention_dropout=float(
+                model_section.get("attention_dropout", 0.0)
+            ),
             residual_dropout=float(model_section.get("residual_dropout", 0.0)),
             ffn_dropout=float(model_section.get("ffn_dropout", 0.0)),
             moe=moe_cfg,
@@ -465,9 +465,7 @@ def build_ucsa(cfg: Any) -> UCSA:
             observation_mix_decay=float(
                 model_section.get("observation_mix_decay", 1.0)
             ),
-            origination_top_k=int(
-                model_section.get("origination_top_k", 2)
-            ),
+            origination_top_k=int(model_section.get("origination_top_k", 2)),
             origination_aux_loss_weight=float(
                 model_section.get("origination_aux_loss_weight", 0.01)
             ),

@@ -132,15 +132,15 @@ class CosineClusterer:
             assignments = torch.arange(n, dtype=torch.long)
             # Surplus clusters have empty assignment rows; pad with -1
             # so callers can detect empty clusters by ``assignments < 0``.
-            pad = torch.full(
-                (self.num_clusters - n,), -1, dtype=torch.long
-            )
+            pad = torch.full((self.num_clusters - n,), -1, dtype=torch.long)
             assignments = torch.cat([assignments, pad])
             return assignments, centroids
         # Random initial centroids drawn from the input.
         generator = torch.Generator()
         generator.manual_seed(0)
-        init_indices = torch.randperm(n, generator=generator)[: self.num_clusters]
+        init_indices = torch.randperm(n, generator=generator)[
+            : self.num_clusters
+        ]
         centroids = normalised[init_indices].clone()
         assignments = torch.zeros(n, dtype=torch.long)
         for _ in range(self.max_iterations):
@@ -229,7 +229,9 @@ class GraphService:
             concepts.append(
                 Concept(
                     centroid=centroid,
-                    member_indices=[int(i) for i in member_used_indices.tolist()],
+                    member_indices=[
+                        int(i) for i in member_used_indices.tolist()
+                    ],
                     token=token,
                 )
             )
@@ -272,9 +274,7 @@ class GraphService:
         """
         if used_embeddings.shape[0] < 2:
             return []
-        normalised = torch.nn.functional.normalize(
-            used_embeddings, p=2, dim=-1
-        )
+        normalised = torch.nn.functional.normalize(used_embeddings, p=2, dim=-1)
         similarity = normalised @ normalised.T
         # Zero out the diagonal.
         similarity.fill_diagonal_(0.0)
@@ -312,7 +312,9 @@ class GraphService:
             return []
         if query.dim() == 2:
             query = query[0]
-        query_norm = torch.nn.functional.normalize(query.unsqueeze(0), p=2, dim=-1)
+        query_norm = torch.nn.functional.normalize(
+            query.unsqueeze(0), p=2, dim=-1
+        )
         centroids = torch.stack(
             [concept.centroid for concept in self.last_graph.concepts],
             dim=0,

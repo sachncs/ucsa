@@ -36,7 +36,9 @@ from ucsa.models.verification import Verifier
 LOGGER = logging.getLogger(__name__)
 
 
-VerificationHandler = Callable[[MemoryUpdate, PersistentCognitiveState, float, bool], None]
+VerificationHandler = Callable[
+    [MemoryUpdate, PersistentCognitiveState, float, bool], None
+]
 
 
 @dataclass
@@ -144,6 +146,7 @@ class MemoryService:
                 self.started = True
                 return
             import time
+
             time.sleep(0.01)
         self.started = True
 
@@ -260,9 +263,7 @@ class MemoryService:
         """
         if self.loop is None or not self.loop.is_running():
             return None
-        return asyncio.run_coroutine_threadsafe(
-            self.queue.put(task), self.loop
-        )
+        return asyncio.run_coroutine_threadsafe(self.queue.put(task), self.loop)
 
     def submit_sync_inline(self, task: Task) -> None:
         """internal: synchronously process a task without the worker.

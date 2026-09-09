@@ -42,7 +42,6 @@ def tiny_inputs() -> tuple[torch.Tensor, torch.Tensor]:
     return ids, torch.roll(ids, -1, dims=1)
 
 
-
 class TestCriticObjective:
     """The spec's outcome oracle, as a differentiable objective."""
 
@@ -62,7 +61,6 @@ class TestCriticObjective:
         assert logit.dim() == 0
         logit.backward()
         assert model.pcs.get_bank("working").grad is not None
-
 
 
 class TestObjectiveResolution:
@@ -98,7 +96,10 @@ class TestObjectiveResolution:
         model.verifier = LearnedVerifier(hidden_size=32, cstate_summary_size=8)
         # Two iterations to be sure the inner loop runs.
         optimize_intent(
-            model, tiny_inputs()[0], num_steps=2, objective="critic",
+            model,
+            tiny_inputs()[0],
+            num_steps=2,
+            objective="critic",
             restore=True,
         )
 

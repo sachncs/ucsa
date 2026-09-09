@@ -19,6 +19,7 @@ Usage:
         [--no-ema|--no-lewm|--no-recon|--no-tc-jepa|--no-curriculum]
         [--baselines gpt2 gpt2-medium] [--skip-baselines]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,19 +45,30 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--max-steps", type=int, default=12000)
     p.add_argument("--ckpt-dir", default="ckpts")
-    p.add_argument("--ckpt-every", type=int, default=1000,
-                   help="0 disables periodic checkpoints.")
-    p.add_argument("--eval-every", type=int, default=500,
-                   help="0 disables periodic evaluation.")
+    p.add_argument(
+        "--ckpt-every",
+        type=int,
+        default=1000,
+        help="0 disables periodic checkpoints.",
+    )
+    p.add_argument(
+        "--eval-every",
+        type=int,
+        default=500,
+        help="0 disables periodic evaluation.",
+    )
     p.add_argument("--eval-batches", type=int, default=20)
     p.add_argument("--stage-1-end", type=int, default=2000)
     p.add_argument("--stage-2-end", type=int, default=4500)
     p.add_argument("--stage-3-end", type=int, default=6500)
     p.add_argument("--val-skip", type=int, default=10_000)
     p.add_argument("--baseline-eval-batches", type=int, default=20)
-    p.add_argument("--baselines", nargs="*",
-                   default=["gpt2", "gpt2-medium"],
-                   help="HuggingFace model ids evaluated zero-shot on the same val cursor")
+    p.add_argument(
+        "--baselines",
+        nargs="*",
+        default=["gpt2", "gpt2-medium"],
+        help="HuggingFace model ids evaluated zero-shot on the same val cursor",
+    )
     p.add_argument("--skip-baselines", action="store_true")
     # SOTA stack toggles — ablations
     p.add_argument("--no-ema", dest="ema", action="store_false")
@@ -68,31 +80,58 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-tc-jepa", dest="tc_jepa", action="store_false")
     p.add_argument("--text-conditioner-scale", type=float, default=0.1)
     # Endogenous origination (intent bank) toggles
-    p.add_argument("--observation-mix", type=float, default=1.0,
-                   help="alpha_0. 1.0 keeps the exogenous observation and "
-                        "never calls the origination generator.")
+    p.add_argument(
+        "--observation-mix",
+        type=float,
+        default=1.0,
+        help="alpha_0. 1.0 keeps the exogenous observation and "
+        "never calls the origination generator.",
+    )
     p.add_argument("--observation-mix-decay", type=float, default=1.0)
     p.add_argument("--origination-top-k", type=int, default=2)
-    p.add_argument("--no-origination-balance", dest="origination_balance",
-                   action="store_false",
-                   help="Drop the gate's load-balancing loss. Tightens "
-                        "localisation but collapses the gate's mutual "
-                        "information with the input to zero.")
+    p.add_argument(
+        "--no-origination-balance",
+        dest="origination_balance",
+        action="store_false",
+        help="Drop the gate's load-balancing loss. Tightens "
+        "localisation but collapses the gate's mutual "
+        "information with the input to zero.",
+    )
     p.add_argument("--origination-weight", type=float, default=0.01)
-    p.add_argument("--intent-update-scale", type=float, default=0.1,
-                   help="0.0 freezes the intent bank, making the "
-                        "origination signal identical for every input.")
-    p.add_argument("--stream-intent-bank", action="store_true",
-                   help="Also let the operator attend over the intent "
-                        "bank. Destroys per-slot attribution; kept as the "
-                        "ablation that shows why the exclusion is needed.")
-    p.add_argument("--no-curriculum", dest="curriculum", action="store_false",
-                   help="Disable the 4-stage curriculum (all losses always on).")
-    p.add_argument("--ablation", default=None,
-                   help="A short tag appended to --out-json (e.g., 'no-ema').")
+    p.add_argument(
+        "--intent-update-scale",
+        type=float,
+        default=0.1,
+        help="0.0 freezes the intent bank, making the "
+        "origination signal identical for every input.",
+    )
+    p.add_argument(
+        "--stream-intent-bank",
+        action="store_true",
+        help="Also let the operator attend over the intent "
+        "bank. Destroys per-slot attribution; kept as the "
+        "ablation that shows why the exclusion is needed.",
+    )
+    p.add_argument(
+        "--no-curriculum",
+        dest="curriculum",
+        action="store_false",
+        help="Disable the 4-stage curriculum (all losses always on).",
+    )
+    p.add_argument(
+        "--ablation",
+        default=None,
+        help="A short tag appended to --out-json (e.g., 'no-ema').",
+    )
     p.add_argument("--out-json", default=None)
-    p.set_defaults(ema=True, lewm=True, recon=True,
-                   tc_jepa=True, curriculum=True, origination_balance=True)
+    p.set_defaults(
+        ema=True,
+        lewm=True,
+        recon=True,
+        tc_jepa=True,
+        curriculum=True,
+        origination_balance=True,
+    )
     return p.parse_args()
 
 
@@ -207,9 +246,7 @@ def main() -> None:
     # Ablation toggles that all map into the config
     cfg["model"]["jepa_mode"] = "lewm" if args.lewm else "ijepa"
     cfg["model"]["gaussian_reg_weight"] = args.lewm_gaussian_reg
-    cfg["training"]["ema_momentum"] = (
-        args.ema_momentum if args.ema else 0.0
-    )
+    cfg["training"]["ema_momentum"] = args.ema_momentum if args.ema else 0.0
     cfg["training"]["ema_update_every"] = 1
     cfg["model"]["text_conditioner_scale"] = (
         args.text_conditioner_scale if args.tc_jepa else 0.0
@@ -295,19 +332,16 @@ def main() -> None:
     # substitution. The forward path stays unchanged.
     if not args.recon or not args.origination_balance:
         from ucsa.models.losses import LossWeights
+
         trainer.loss_fn.weights = LossWeights(
             jepa=trainer.loss_fn.weights.jepa,
             memory=trainer.loss_fn.weights.memory,
             router=trainer.loss_fn.weights.router,
             reconstruction=(
-                trainer.loss_fn.weights.reconstruction
-                if args.recon
-                else 0.0
+                trainer.loss_fn.weights.reconstruction if args.recon else 0.0
             ),
             origination=(
-                args.origination_weight
-                if args.origination_balance
-                else 0.0
+                args.origination_weight if args.origination_balance else 0.0
             ),
         )
     if not args.tc_jepa:
@@ -343,16 +377,18 @@ def main() -> None:
                 f"lr={lr:.2e} stage={stage} {extras} elapsed={el:.0f}s",
                 flush=True,
             )
-            history.append({
-                "step": step,
-                "loss": loss,
-                "avg": avg,
-                "lr": lr,
-                "stage": stage,
-                "jepa_prediction": snap.get("jepa_prediction", 0),
-                "reconstruction_loss": snap.get("reconstruction_loss", 0),
-                "jepa_steps": int(snap.get("jepa_steps", 0)),
-            })
+            history.append(
+                {
+                    "step": step,
+                    "loss": loss,
+                    "avg": avg,
+                    "lr": lr,
+                    "stage": stage,
+                    "jepa_prediction": snap.get("jepa_prediction", 0),
+                    "reconstruction_loss": snap.get("reconstruction_loss", 0),
+                    "jepa_steps": int(snap.get("jepa_steps", 0)),
+                }
+            )
 
         # ``0`` means never, matching the documented meaning of
         # ``--ckpt-every 0`` ("one final ckpt only") that
@@ -375,15 +411,20 @@ def main() -> None:
             trainer.save_checkpoint(path)
             print(f"  saved {path}", flush=True)
 
-    trainer.save_checkpoint(os.path.join(args.ckpt_dir, "ucsa-final.safetensors"))
+    trainer.save_checkpoint(
+        os.path.join(args.ckpt_dir, "ucsa-final.safetensors")
+    )
     elapsed = time.time() - start
     final_ucsa = _eval(trainer, val_loader, args.eval_batches)
     rows: list[dict] = []
     if not args.skip_baselines:
         device = trainer.device
         rows.append(
-            {"name": "UCSA-small (this run)", "params": n_ucsa_params,
-             "val_ppl": final_ucsa["perplexity"]}
+            {
+                "name": "UCSA-small (this run)",
+                "params": n_ucsa_params,
+                "val_ppl": final_ucsa["perplexity"],
+            }
         )
         bench_ds = TextDataset(
             ucsa_tokenizer,
@@ -391,7 +432,8 @@ def main() -> None:
                 sequence_length=cfg["dataset"]["sequence_length"],
                 primary_dataset=cfg["dataset"]["primary_dataset"],
                 primary_split=cfg["dataset"]["primary_split"],
-                streaming=True, pack_sequences=True,
+                streaming=True,
+                pack_sequences=True,
             ),
         )
         bench_ds.dataset = bench_ds.dataset.skip(args.val_skip)
@@ -400,13 +442,18 @@ def main() -> None:
         for baseline in args.baselines:
             try:
                 metrics = _eval_hf_baseline(
-                    baseline, bench_iter,
-                    args.baseline_eval_batches, device,
+                    baseline,
+                    bench_iter,
+                    args.baseline_eval_batches,
+                    device,
                 )
-                rows.append({
-                    "name": baseline, "params": metrics["params"],
-                    "val_ppl": metrics["perplexity"],
-                })
+                rows.append(
+                    {
+                        "name": baseline,
+                        "params": metrics["params"],
+                        "val_ppl": metrics["perplexity"],
+                    }
+                )
             except Exception as exc:
                 print(f"    {baseline} failed: {exc}", flush=True)
                 rows.append({"name": baseline, "params": 0, "val_ppl": None})

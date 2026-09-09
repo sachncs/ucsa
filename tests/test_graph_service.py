@@ -22,7 +22,9 @@ def tiny_pcs() -> PersistentCognitiveState:
     return PersistentCognitiveState(PCSConfig(hidden_size=32))
 
 
-def populate_long_term(pcs: PersistentCognitiveState, num_tokens: int = 20) -> None:
+def populate_long_term(
+    pcs: PersistentCognitiveState, num_tokens: int = 20
+) -> None:
     """Fill the long-term bank with ``num_tokens`` random tokens."""
     mem = Memory(pcs)
     candidate = MemoryUpdate(
@@ -114,7 +116,7 @@ class TestGraphServiceConstruction:
             GraphService(co_activation_threshold=1.5)
 
     def test_supported_banks(self) -> None:
-        """``supported_banks`` returns the six PCS bank names."""
+        """``supported_banks`` returns every PCS bank name."""
         banks = supported_banks()
         assert "long_term" in banks
         assert "working" in banks
@@ -201,9 +203,7 @@ class TestGraphServiceRetrieval:
             ],
             dim=0,
         )
-        candidate = MemoryUpdate(
-            tokens=tokens, importance=torch.ones(15)
-        )
+        candidate = MemoryUpdate(tokens=tokens, importance=torch.ones(15))
         Memory(pcs).accept_into_long_term(candidate, max_slots=15)
         gs.build_graph(pcs)
         # Use one concept's centroid as the query.
@@ -316,7 +316,9 @@ class TestInjection:
         # Ask for many more tokens than the working bank can hold.
         n = gs.inject_into_working(pcs, torch.randn(32), top_k=200)
         # Capped by the working bank size and by the number of concepts.
-        assert n <= min(200, pcs.bank_size("working"), len(gs.last_graph.concepts))
+        assert n <= min(
+            200, pcs.bank_size("working"), len(gs.last_graph.concepts)
+        )
 
     def test_inject_query_batch_dim(self) -> None:
         """Batch-dim query is accepted."""
@@ -405,6 +407,9 @@ class TestCoActivationEdges:
         edges = gs.build_edges(embeddings, used_indices)
         pairs: set[tuple[int, int]] = set()
         for edge in edges:
-            pair = (min(edge.source, edge.target), max(edge.source, edge.target))
+            pair = (
+                min(edge.source, edge.target),
+                max(edge.source, edge.target),
+            )
             assert pair not in pairs
             pairs.add(pair)

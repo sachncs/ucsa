@@ -72,6 +72,7 @@ class TestResolveBankSizes:
     def test_overrides_apply(self) -> None:
         """Overrides replace default sizes for named banks."""
         from ucsa.models.state import resolve_bank_sizes
+
         resolved = resolve_bank_sizes({"working": 200})
         assert resolved["working"] == 200
         assert resolved["long_term"] == DEFAULT_BANK_SIZES["long_term"]
@@ -79,6 +80,7 @@ class TestResolveBankSizes:
     def test_invalid_override_rejected(self) -> None:
         """Non-positive override size must raise."""
         from ucsa.models.state import resolve_bank_sizes
+
         with pytest.raises(ValueError):
             resolve_bank_sizes({"working": 0})
 
@@ -233,7 +235,9 @@ class TestPersistentCognitiveState:
         """A fresh PCS instance."""
         return PersistentCognitiveState(config)
 
-    def test_all_default_banks_present(self, state: PersistentCognitiveState) -> None:
+    def test_all_default_banks_present(
+        self, state: PersistentCognitiveState
+    ) -> None:
         """Every default bank exists with its default size."""
         for name in BANK_NAMES:
             assert name in state.bank_specs
@@ -245,14 +249,18 @@ class TestPersistentCognitiveState:
             tensor = state.get_bank(name)
             assert tensor.shape == (DEFAULT_BANK_SIZES[name], 32)
 
-    def test_get_all_tokens_concatenates(self, state: PersistentCognitiveState) -> None:
+    def test_get_all_tokens_concatenates(
+        self, state: PersistentCognitiveState
+    ) -> None:
         """``get_all_tokens`` returns the concatenation of every bank."""
         all_tokens = state.get_all_tokens()
         assert all_tokens.shape == (state.total_tokens, 32)
         expected_total = sum(state.bank_size(n) for n in BANK_NAMES)
         assert state.total_tokens == expected_total
 
-    def test_banks_are_parameters(self, state: PersistentCognitiveState) -> None:
+    def test_banks_are_parameters(
+        self, state: PersistentCognitiveState
+    ) -> None:
         """Every default bank is a learnable :class:`nn.Parameter`."""
         for name in BANK_NAMES:
             tensor = state.get_bank(name)
@@ -265,17 +273,23 @@ class TestPersistentCognitiveState:
         total = sum(DEFAULT_BANK_SIZES[name] * 32 for name in BANK_NAMES)
         assert sum(p.numel() for p in params) == total
 
-    def test_bank_size_unknown_raises(self, state: PersistentCognitiveState) -> None:
+    def test_bank_size_unknown_raises(
+        self, state: PersistentCognitiveState
+    ) -> None:
         """Querying an unknown bank raises ``KeyError``."""
         with pytest.raises(KeyError):
             state.bank_size("nope")
 
-    def test_get_bank_unknown_raises(self, state: PersistentCognitiveState) -> None:
+    def test_get_bank_unknown_raises(
+        self, state: PersistentCognitiveState
+    ) -> None:
         """``get_bank`` with an unknown name raises ``KeyError``."""
         with pytest.raises(KeyError):
             state.get_bank("nope")
 
-    def test_set_bank_replaces_contents(self, state: PersistentCognitiveState) -> None:
+    def test_set_bank_replaces_contents(
+        self, state: PersistentCognitiveState
+    ) -> None:
         """``set_bank`` writes the provided tensor into the bank."""
         replacement = torch.full((state.bank_size("working"), 32), 0.5)
         state.set_bank("working", replacement)
@@ -289,7 +303,9 @@ class TestPersistentCognitiveState:
         with pytest.raises(ValueError):
             state.set_bank("working", torch.zeros(3, 3))
 
-    def test_set_bank_unknown_raises(self, state: PersistentCognitiveState) -> None:
+    def test_set_bank_unknown_raises(
+        self, state: PersistentCognitiveState
+    ) -> None:
         """Unknown bank name raises ``KeyError``."""
         with pytest.raises(KeyError):
             state.set_bank("nope", torch.zeros(1, 32))
@@ -370,7 +386,9 @@ class TestPersistentCognitiveState:
         retention.fill_(1.0)
         retention[:2] = 0.0
         replacement = torch.full((2, 32), 7.0)
-        recycled = state.recycle_bottom_k("long_term", k=2, replacement=replacement)
+        recycled = state.recycle_bottom_k(
+            "long_term", k=2, replacement=replacement
+        )
         slot_values = state.get_bank("long_term")[recycled]
         assert torch.all(slot_values == 7.0)
 

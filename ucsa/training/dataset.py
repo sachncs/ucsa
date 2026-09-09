@@ -122,9 +122,7 @@ class TextDataset:
             f"{sorted(sample.keys())}."
         )
 
-    def pack_token_ids(
-        self, token_buffer: list[int]
-    ) -> Iterator[Tensor]:
+    def pack_token_ids(self, token_buffer: list[int]) -> Iterator[Tensor]:
         """Pack tokenised text into fixed-length tensors.
 
         Args:
@@ -180,7 +178,7 @@ class TextDataset:
                     chunk = torch.tensor(
                         token_buffer[: seq_len + 1], dtype=torch.long
                     )
-                    token_buffer = token_buffer[seq_len + 1:]
+                    token_buffer = token_buffer[seq_len + 1 :]
                     inputs = chunk[:-1].unsqueeze(0)
                     targets = chunk[1:].unsqueeze(0)
                     yield inputs, targets

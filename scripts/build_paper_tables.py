@@ -15,6 +15,7 @@ paper" — the script deliberately consumes the same JSONs the
 training / eval / probe scripts emit, so a real experiment run
 populates paper tables with one extra command.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -47,19 +48,22 @@ def _load_jsons(root: str, pattern: str) -> list[dict]:
 
 def _agg(rows: list[dict], key: str) -> tuple[float, float, int]:
     vals = [
-        r["data"][key] for r in rows
+        r["data"][key]
+        for r in rows
         if isinstance(r["data"].get(key), (int, float))
     ]
     if not vals:
         return float("nan"), float("nan"), 0
     if len(vals) == 1:
         return float(vals[0]), 0.0, 1
-    return float(statistics.mean(vals)), float(statistics.stdev(vals)), len(vals)
+    return (
+        float(statistics.mean(vals)),
+        float(statistics.stdev(vals)),
+        len(vals),
+    )
 
 
-def build_main_table(
-    ucsa_paths: list[dict], baseline_paths: list[dict]
-) -> str:
+def build_main_table(ucsa_paths: list[dict], baseline_paths: list[dict]) -> str:
     """Table 1: matched-compute comparison."""
     ucsa_loss, ucsa_sd, n_u = _agg(ucsa_paths, "best_val_ppl")
     base_ppl, base_sd, n_b = _agg(baseline_paths, "final_val_ppl")
@@ -71,7 +75,9 @@ def build_main_table(
     s = "## Table 1 — Matched-compute comparison (fineweb-edu, "
     s += f"{n_u} UCSA seeds, {n_b} baseline seeds)\n\n"
     s += "| Model                      | Val PPL (mean ± std)  | Best Val PPL |\n"
-    s += "| -------------------------- | -------------------- | ------------ |\n"
+    s += (
+        "| -------------------------- | -------------------- | ------------ |\n"
+    )
     if not math.isnan(base_ppl):
         s += (
             f"| Vanilla-Transformer (no PCS) "
@@ -133,8 +139,13 @@ def build_eval_table(eval_paths: list[dict]) -> str:
     # Use the first eval JSON
     rep = eval_paths[0]["data"]
     tasks = rep.get("tasks", {})
-    for name in ("hellaswag", "arc_easy", "arc_challenge",
-                 "piqa", "winogrande"):
+    for name in (
+        "hellaswag",
+        "arc_easy",
+        "arc_challenge",
+        "piqa",
+        "winogrande",
+    ):
         if name in tasks:
             acc = tasks[name].get("accuracy")
             if isinstance(acc, (int, float)):
@@ -170,7 +181,9 @@ def build_bank_probe_table(probe_paths: list[dict]) -> str:
         s += "| | " + " | ".join(sim["names"]) + " |\n"
         s += "| " + " | ".join(["---"] * len(sim["names"])) + " |\n"
         for i, name in enumerate(sim["names"]):
-            row = " | ".join(f"{sim['matrix'][i][j]:.3f}" for j in range(len(sim["names"])))
+            row = " | ".join(
+                f"{sim['matrix'][i][j]:.3f}" for j in range(len(sim["names"]))
+            )
             s += f"| **{name}** | {row} |\n"
     s += "\n"
     return s
@@ -189,8 +202,7 @@ def main() -> None:
 
     ucsa_files = _load_jsons(runs, r"^ucsa-(?!baseline).*-seed\d+\.json$")
     ucsa_files = [
-        f for f in ucsa_files
-        if not f["name"].startswith("ucsa-baseline-")
+        f for f in ucsa_files if not f["name"].startswith("ucsa-baseline-")
     ]
     baseline_files = _load_jsons(
         runs, r"^baseline.*\.json$|^ucsa-baseline-.*\.json$"

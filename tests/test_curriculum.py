@@ -57,39 +57,27 @@ class TestCurriculumGetStage:
             CurriculumSchedule(stage_1_end=10, stage_2_end=20, stage_3_end=30)
         )
 
-    def test_stage_1_at_step_zero(
-        self, curriculum: Curriculum
-    ) -> None:
+    def test_stage_1_at_step_zero(self, curriculum: Curriculum) -> None:
         """At step 0, the stage is LANGUAGE_ONLY."""
         assert curriculum.get_stage(0) is CurriculumStage.LANGUAGE_ONLY
 
-    def test_stage_1_at_step_9(
-        self, curriculum: Curriculum
-    ) -> None:
+    def test_stage_1_at_step_9(self, curriculum: Curriculum) -> None:
         """At step 9 (just before stage 1 ends), still LANGUAGE_ONLY."""
         assert curriculum.get_stage(9) is CurriculumStage.LANGUAGE_ONLY
 
-    def test_stage_2_at_step_10(
-        self, curriculum: Curriculum
-    ) -> None:
+    def test_stage_2_at_step_10(self, curriculum: Curriculum) -> None:
         """At step 10, the stage is LANGUAGE_JEPA."""
         assert curriculum.get_stage(10) is CurriculumStage.LANGUAGE_JEPA
 
-    def test_stage_3_at_step_20(
-        self, curriculum: Curriculum
-    ) -> None:
+    def test_stage_3_at_step_20(self, curriculum: Curriculum) -> None:
         """At step 20, the stage is LANGUAGE_JEPA_MEMORY."""
         assert curriculum.get_stage(20) is CurriculumStage.LANGUAGE_JEPA_MEMORY
 
-    def test_stage_4_at_step_30(
-        self, curriculum: Curriculum
-    ) -> None:
+    def test_stage_4_at_step_30(self, curriculum: Curriculum) -> None:
         """At step 30, the stage is JOINT."""
         assert curriculum.get_stage(30) is CurriculumStage.JOINT
 
-    def test_stage_4_at_large_step(
-        self, curriculum: Curriculum
-    ) -> None:
+    def test_stage_4_at_large_step(self, curriculum: Curriculum) -> None:
         """At very large step, the stage remains JOINT."""
         assert curriculum.get_stage(1_000_000) is CurriculumStage.JOINT
 
@@ -104,34 +92,24 @@ class TestCurriculumActiveComponents:
             CurriculumSchedule(stage_1_end=10, stage_2_end=20, stage_3_end=30)
         )
 
-    def test_stage_1_components(
-        self, curriculum: Curriculum
-    ) -> None:
+    def test_stage_1_components(self, curriculum: Curriculum) -> None:
         """Stage 1 has only AR."""
         components = curriculum.active_components(CurriculumStage.LANGUAGE_ONLY)
         assert components == {"ar"}
 
-    def test_stage_2_components(
-        self, curriculum: Curriculum
-    ) -> None:
+    def test_stage_2_components(self, curriculum: Curriculum) -> None:
         """Stage 2 adds JEPA."""
-        components = curriculum.active_components(
-            CurriculumStage.LANGUAGE_JEPA
-        )
+        components = curriculum.active_components(CurriculumStage.LANGUAGE_JEPA)
         assert components == {"ar", "jepa"}
 
-    def test_stage_3_components(
-        self, curriculum: Curriculum
-    ) -> None:
+    def test_stage_3_components(self, curriculum: Curriculum) -> None:
         """Stage 3 adds memory."""
         components = curriculum.active_components(
             CurriculumStage.LANGUAGE_JEPA_MEMORY
         )
         assert components == {"ar", "jepa", "memory"}
 
-    def test_stage_4_components(
-        self, curriculum: Curriculum
-    ) -> None:
+    def test_stage_4_components(self, curriculum: Curriculum) -> None:
         """Stage 4 adds router (joint)."""
         components = curriculum.active_components(CurriculumStage.JOINT)
         assert components == {"ar", "jepa", "memory", "router"}

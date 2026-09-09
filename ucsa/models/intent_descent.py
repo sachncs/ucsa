@@ -369,7 +369,6 @@ def critic_objective(
     return logit
 
 
-
 def _resolved_objective(model: UCSA, requested: str) -> str:
     """Pick the actual objective to descend on.
 
@@ -388,7 +387,6 @@ def _resolved_objective(model: UCSA, requested: str) -> str:
     if isinstance(verifier, LearnedVerifier):
         return "critic"
     return "jepa"
-
 
 
 def optimize_intent(

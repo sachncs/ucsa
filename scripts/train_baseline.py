@@ -13,6 +13,7 @@ Why a from-scratch vanilla Transformer instead of GPT-2?
   exact same dataset/step budget isolates the architectural
   contribution of UCSA.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -34,6 +35,7 @@ from ucsa.utils.seed import set_seed
 # ---------------------------------------------------------------------------
 # Vanilla modern Transformer LM (no PCS, no MoE, no JEPA)
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class VanillaConfig:
@@ -103,10 +105,17 @@ class VanillaBlock(nn.Module):
         if self.repeat > 1:
             k = k.repeat_interleave(self.repeat, dim=2)
             v = v.repeat_interleave(self.repeat, dim=2)
-        out = F.scaled_dot_product_attention(
-            q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
-            is_causal=True,
-        ).transpose(1, 2).contiguous().view(b, s, -1)
+        out = (
+            F.scaled_dot_product_attention(
+                q.transpose(1, 2),
+                k.transpose(1, 2),
+                v.transpose(1, 2),
+                is_causal=True,
+            )
+            .transpose(1, 2)
+            .contiguous()
+            .view(b, s, -1)
+        )
         x = x + self.o(out)
         n = self.norm2(x)
         return x + self.down(F.silu(self.gate(n)) * self.up(n))
@@ -156,8 +165,12 @@ def _build_vanilla(target_params: int = 63_000_000) -> VanillaConfig:
                     best = (hidden, nl, heads, hidden * ffm)
     hidden, nl, qheads, ffn = best
     return VanillaConfig(
-        vocab_size=50257, hidden=hidden, num_layers=nl,
-        num_q_heads=qheads, num_kv_heads=max(2, qheads // 2), ffn_dim=ffn,
+        vocab_size=50257,
+        hidden=hidden,
+        num_layers=nl,
+        num_q_heads=qheads,
+        num_kv_heads=max(2, qheads // 2),
+        ffn_dim=ffn,
     )
 
 
@@ -165,9 +178,13 @@ def _build_vanilla(target_params: int = 63_000_000) -> VanillaConfig:
 # Train loop
 # ---------------------------------------------------------------------------
 
+
 class _IterableOver(torch.utils.data.IterableDataset):
-    def __init__(self, ds): self.ds = ds
-    def __iter__(self): return iter(self.ds)
+    def __init__(self, ds):
+        self.ds = ds
+
+    def __iter__(self):
+        return iter(self.ds)
 
 
 def _infinite(loader):
@@ -187,8 +204,9 @@ def parse_args():
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--max-seq-len", type=int, default=1024)
     p.add_argument("--target-params", type=int, default=63_000_000)
-    p.add_argument("--out-json", default=None,
-                   help="Write eval history to this JSON file")
+    p.add_argument(
+        "--out-json", default=None, help="Write eval history to this JSON file"
+    )
     return p.parse_args()
 
 
@@ -207,7 +225,8 @@ def main():
         sequence_length=args.max_seq_len,
         primary_dataset=cfg["dataset"]["primary_dataset"],
         primary_split=cfg["dataset"]["primary_split"],
-        streaming=True, pack_sequences=True,
+        streaming=True,
+        pack_sequences=True,
     )
     train_ds = TextDataset(tokenizer, ds_cfg)
     val_ds = TextDataset(tokenizer, ds_cfg)
@@ -226,9 +245,13 @@ def main():
     print(f"Params: {n_params:,}  (target {args.target_params:,})", flush=True)
 
     device = (
-        torch.device("mps", 0) if torch.backends.mps.is_available()
-        else torch.device("cuda", 0) if torch.cuda.is_available()
-        else torch.device("cpu")
+        torch.device("mps", 0)
+        if torch.backends.mps.is_available()
+        else (
+            torch.device("cuda", 0)
+            if torch.cuda.is_available()
+            else torch.device("cpu")
+        )
     )
     model = model.to(device)
 
@@ -239,11 +262,19 @@ def main():
         optim,
         lr_lambda=lambda step: min(
             (step + 1) / max(1, args.warmup_steps),
-            0.5 * (1 + math.cos(
-                math.pi * (step - args.warmup_steps)
-                / max(1, args.max_steps - args.warmup_steps)
-            )) if step >= args.warmup_steps
-            else (step + 1) / max(1, args.warmup_steps),
+            (
+                0.5
+                * (
+                    1
+                    + math.cos(
+                        math.pi
+                        * (step - args.warmup_steps)
+                        / max(1, args.max_steps - args.warmup_steps)
+                    )
+                )
+                if step >= args.warmup_steps
+                else (step + 1) / max(1, args.warmup_steps)
+            ),
         ),
     )
     model.train()
@@ -286,19 +317,20 @@ def main():
             )
 
         if step > 0 and step % args.eval_every == 0:
-            vppl = _eval_ppl(model, val_ds, args.eval_batches,
-                             args.max_seq_len, device)
+            vppl = _eval_ppl(
+                model, val_ds, args.eval_batches, args.max_seq_len, device
+            )
             if vppl < best_val:
                 best_val = vppl
             history.append({"step": step, "val_ppl": vppl})
             print(
-                f"  eval@{step}: val_ppl={vppl:.1f} "
-                f"(best={best_val:.1f})",
+                f"  eval@{step}: val_ppl={vppl:.1f} " f"(best={best_val:.1f})",
                 flush=True,
             )
 
-    final_ppl = _eval_ppl(model, val_ds, args.eval_batches,
-                         args.max_seq_len, device)
+    final_ppl = _eval_ppl(
+        model, val_ds, args.eval_batches, args.max_seq_len, device
+    )
     elapsed = time.time() - start
     print(f"\nDone: {args.max_steps} steps in {elapsed:.0f}s", flush=True)
     print(f"Final val_ppl (vanilla baseline) = {final_ppl:.1f}", flush=True)

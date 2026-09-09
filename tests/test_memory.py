@@ -135,16 +135,22 @@ class TestMemory:
         snapshot = memory.cstate.get_all_metadata()
         accepted_indices = slice(0, 5)
         # Accepted slots have positive importance and usage; non-zero retention.
-        assert torch.all(snapshot["long_term"]["retention"][accepted_indices] >= 0)
+        assert torch.all(
+            snapshot["long_term"]["retention"][accepted_indices] >= 0
+        )
 
     def test_accept_after_full_bank_recycles(self, memory: Memory) -> None:
         """When the bank is full, acceptance triggers recycle."""
         # Fill the long-term bank with high-retention tokens.
         candidate = memory.propose_candidate()
-        memory.accept_into_long_term(candidate, max_slots=memory.long_term_capacity)
+        memory.accept_into_long_term(
+            candidate, max_slots=memory.long_term_capacity
+        )
         # Now lower retention and try to accept more.
         memory.cstate.meta_retention_long_term[:] = 0.0
-        candidate2 = memory.propose_candidate(importance=torch.zeros(candidate.tokens.shape[0]))
+        candidate2 = memory.propose_candidate(
+            importance=torch.zeros(candidate.tokens.shape[0])
+        )
         indices = memory.accept_into_long_term(candidate2)
         assert len(indices) > 0
 
@@ -154,7 +160,9 @@ class TestMemory:
         episode = memory.cstate.get_bank("episode")
         assert episode.shape == (memory.cstate.bank_size("episode"), 32)
 
-    def test_snapshot_episode_uses_provided_tokens(self, memory: Memory) -> None:
+    def test_snapshot_episode_uses_provided_tokens(
+        self, memory: Memory
+    ) -> None:
         """Provided tokens are included in the snapshot."""
         custom = torch.ones(10, 32)
         out = memory.snapshot_episode(working_tokens=custom)
@@ -180,9 +188,7 @@ class TestMemory:
 
     def test_update_working(self, memory: Memory) -> None:
         """``update_working`` replaces the working bank."""
-        new_tokens = torch.full(
-            (memory.cstate.bank_size("working"), 32), 0.7
-        )
+        new_tokens = torch.full((memory.cstate.bank_size("working"), 32), 0.7)
         memory.update_working(new_tokens)
         current = memory.read_working()
         assert torch.all(current == 0.7)
@@ -212,7 +218,9 @@ class TestMemory:
     def test_long_term_capacity_used(self, memory: Memory) -> None:
         """``long_term_capacity_used`` is usage / capacity."""
         candidate = memory.propose_candidate()
-        memory.accept_into_long_term(candidate, max_slots=memory.long_term_capacity // 2)
+        memory.accept_into_long_term(
+            candidate, max_slots=memory.long_term_capacity // 2
+        )
         assert memory.long_term_capacity_used() == pytest.approx(0.5)
 
     def test_recycle_zero_returns_empty(self, memory: Memory) -> None:

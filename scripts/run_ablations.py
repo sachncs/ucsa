@@ -18,6 +18,7 @@ Each ablation toggles a single feature off its default-on state:
 - ``no-tc-jepa`` — TC-JEPA sparse cross-attention conditioner disabled.
 - ``no-curriculum`` — all losses on from step 1 (no 4-stage gating).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,7 +45,10 @@ ABLATIONS = [
     {
         "tag": "origination-static-bank",
         "flags": [
-            "--observation-mix", "0.5", "--intent-update-scale", "0.0",
+            "--observation-mix",
+            "0.5",
+            "--intent-update-scale",
+            "0.0",
         ],
     },
     {
@@ -63,16 +67,21 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max-steps", type=int, default=4000)
     p.add_argument("--seeds", nargs="*", type=int, default=[42])
     p.add_argument(
-        "--out-dir", default="runs/ablations",
+        "--out-dir",
+        default="runs/ablations",
         help="Per-ablation JSON files land here.",
     )
     p.add_argument("--skip-baselines", action="store_true")
     p.add_argument(
-        "--tags", nargs="*", default=None,
+        "--tags",
+        nargs="*",
+        default=None,
         help="Only run these ablation tags. Defaults to all of them.",
     )
     p.add_argument(
-        "--eval-every", type=int, default=200,
+        "--eval-every",
+        type=int,
+        default=200,
         help="0 disables periodic evaluation.",
     )
     p.add_argument("--eval-batches", type=int, default=10)
@@ -83,14 +92,22 @@ def main() -> None:
     args = parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
     cmd_base = [
-        sys.executable, "scripts/train.py",
-        "--max-steps", str(args.max_steps),
-        "--ckpt-every", "0",  # one final ckpt only
-        "--eval-every", str(args.eval_every),
-        "--eval-batches", str(args.eval_batches),
-        "--stage-1-end", "400",
-        "--stage-2-end", "1200",
-        "--stage-3-end", "2400",
+        sys.executable,
+        "scripts/train.py",
+        "--max-steps",
+        str(args.max_steps),
+        "--ckpt-every",
+        "0",  # one final ckpt only
+        "--eval-every",
+        str(args.eval_every),
+        "--eval-batches",
+        str(args.eval_batches),
+        "--stage-1-end",
+        "400",
+        "--stage-2-end",
+        "1200",
+        "--stage-3-end",
+        "2400",
     ]
     if args.skip_baselines:
         cmd_base.append("--skip-baselines")
@@ -120,22 +137,31 @@ def main() -> None:
             # The tag has to be passed through, not left as a
             # placeholder: it names the run inside the JSON and is what
             # ``build_paper_tables.py`` groups on.
-            cmd = list(cmd_base) + list(abl["flags"]) + [
-                "--ablation", str(abl["tag"]),
-                "--seed", str(seed),
-                "--out-json", out_path,
-            ]
+            cmd = (
+                list(cmd_base)
+                + list(abl["flags"])
+                + [
+                    "--ablation",
+                    str(abl["tag"]),
+                    "--seed",
+                    str(seed),
+                    "--out-json",
+                    out_path,
+                ]
+            )
             subprocess.run(cmd, check=False)
             if os.path.exists(out_path):
                 with open(out_path) as f:
                     data = json.load(f)
-                rows.append({
-                    "ablation": abl["tag"],
-                    "seed": seed,
-                    "best_val_ppl": data.get("best_val_ppl"),
-                    "final_val_ppl": data.get("final_val_ppl"),
-                    "n_ucsa_params": data.get("n_ucsa_params"),
-                })
+                rows.append(
+                    {
+                        "ablation": abl["tag"],
+                        "seed": seed,
+                        "best_val_ppl": data.get("best_val_ppl"),
+                        "final_val_ppl": data.get("final_val_ppl"),
+                        "n_ucsa_params": data.get("n_ucsa_params"),
+                    }
+                )
 
     summary_path = os.path.join(args.out_dir, "summary.json")
     with open(summary_path, "w") as f:

@@ -10,7 +10,9 @@ from ucsa.models.ucsa import UCSA, UCSAConfig
 
 def test_probe_banks_summarises_every_bank():
     cfg = UCSAConfig(
-        hidden_size=32, vocab_size=200, num_layers=2,
+        hidden_size=32,
+        vocab_size=200,
+        num_layers=2,
         reasoning_iterations=2,
     )
     model = UCSA(cfg)
@@ -25,7 +27,9 @@ def test_probe_banks_summarises_every_bank():
 
 def test_probe_banks_centroid_matrix_is_symmetric_self_one():
     cfg = UCSAConfig(
-        hidden_size=32, vocab_size=200, num_layers=2,
+        hidden_size=32,
+        vocab_size=200,
+        num_layers=2,
         reasoning_iterations=2,
     )
     model = UCSA(cfg)
@@ -45,7 +49,9 @@ def test_probe_banks_centroid_matrix_is_symmetric_self_one():
 
 def test_probe_banks_top_tokens_are_strings():
     cfg = UCSAConfig(
-        hidden_size=32, vocab_size=200, num_layers=2,
+        hidden_size=32,
+        vocab_size=200,
+        num_layers=2,
         reasoning_iterations=2,
     )
     model = UCSA(cfg)
@@ -59,14 +65,23 @@ def test_probe_banks_top_tokens_are_strings():
 
 def test_probe_banks_norm_stats_are_finite():
     cfg = UCSAConfig(
-        hidden_size=32, vocab_size=200, num_layers=2,
+        hidden_size=32,
+        vocab_size=200,
+        num_layers=2,
         reasoning_iterations=2,
     )
     model = UCSA(cfg)
     report = probe_banks(model, top_k=3)
     for s in report["banks"]:
-        for k in ("norm_mean", "norm_std", "norm_min", "norm_max",
-                  "retention_mean", "retention_min", "retention_max"):
+        for k in (
+            "norm_mean",
+            "norm_std",
+            "norm_min",
+            "norm_max",
+            "retention_mean",
+            "retention_min",
+            "retention_max",
+        ):
             assert k in s
             v = s[k]
             assert isinstance(v, (int, float))

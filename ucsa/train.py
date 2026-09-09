@@ -110,9 +110,7 @@ def build_trainer(
     model_section = cfg_dict.get("model", {})
     jepa_mode = model_section.get("jepa_mode", "ijepa")
     jepa_alpha = float(model_section.get("jepa_alpha", 0.5))
-    gaussian_reg_weight = float(
-        model_section.get("gaussian_reg_weight", 0.1)
-    )
+    gaussian_reg_weight = float(model_section.get("gaussian_reg_weight", 0.1))
     loss_fn = UCSACombinedLoss(
         jepa_mode=jepa_mode,
         jepa_alpha=jepa_alpha,
@@ -224,9 +222,7 @@ def main() -> None:
     try:
         from hydra import compose, initialize_config_dir
     except Exception as exc:  # pragma: no cover - environment-dependent
-        raise RuntimeError(
-            "Hydra is required for the ucsa.train CLI."
-        ) from exc
+        raise RuntimeError("Hydra is required for the ucsa.train CLI.") from exc
     config_dir = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "configs")
     )

@@ -10,6 +10,7 @@ Usage:
     from ucsa.training.optimizer import Muon
     opt = Muon(model.parameters(), lr=2e-2, momentum=0.95)
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
@@ -97,10 +98,14 @@ class Muon(torch.optim.Optimizer):
                     # Scale by ``sqrt(max(rows, cols) / cols)`` so the
                     # update RMS is approximately invariant to aspect ratio.
                     update = _newton_schulz_5(buf, group["ns_steps"])
-                    update = update * max(
-                        1.0,
-                        update.size(-2) / update.size(-1),
-                    ) ** 0.5
+                    update = (
+                        update
+                        * max(
+                            1.0,
+                            update.size(-2) / update.size(-1),
+                        )
+                        ** 0.5
+                    )
                 else:
                     update = buf
                 p.data.add_(update, alpha=-group["lr"])

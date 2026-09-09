@@ -124,12 +124,20 @@ class TestCheckpoint:
     def test_metadata_from_dict(self) -> None:
         """``metadata_from_dict`` builds a metadata object."""
         meta = metadata_from_dict(
-            {"step": 5, "epoch": 1, "config": None, "metrics": None, "extras": {}}
+            {
+                "step": 5,
+                "epoch": 1,
+                "config": None,
+                "metrics": None,
+                "extras": {},
+            }
         )
         assert meta.step == 5
         assert meta.epoch == 1
 
-    def test_no_metadata_file_returns_default(self, tiny_model: nn.Module) -> None:
+    def test_no_metadata_file_returns_default(
+        self, tiny_model: nn.Module
+    ) -> None:
         """Missing metadata file returns an empty :class:`CheckpointMetadata`."""
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "ckpt.safetensors")
@@ -143,9 +151,7 @@ class TestCheckpoint:
         """The save call writes a ``.meta.json`` file when metadata exists."""
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "ckpt.safetensors")
-            save_checkpoint(
-                tiny_model, path, CheckpointMetadata(step=1)
-            )
+            save_checkpoint(tiny_model, path, CheckpointMetadata(step=1))
             meta_path = path + ".meta.json"
             assert os.path.exists(meta_path)
             with open(meta_path, encoding="utf-8") as fp:
@@ -263,7 +269,9 @@ class TestLogging:
         """``configure_logging`` runs without error."""
         configure_logging(level=logging_level_from_int(20))
 
-    def test_build_logger_with_tensorboard(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_build_logger_with_tensorboard(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """TensorBoard writer is constructed when enabled."""
         fake_writer = _FakeSummaryWriter()
 
@@ -272,9 +280,7 @@ class TestLogging:
                 fake_writer.init_log_dir = log_dir
                 self.scalars: list[tuple[str, float, int]] = []
 
-            def add_scalar(
-                self, name: str, value: float, step: int
-            ) -> None:
+            def add_scalar(self, name: str, value: float, step: int) -> None:
                 self.scalars.append((name, value, step))
 
             def flush(self) -> None:
@@ -286,13 +292,10 @@ class TestLogging:
         import sys
 
         sys.modules.setdefault(
-            "torch.utils.tensorboard", __import__("types").ModuleType(
-                "torch.utils.tensorboard"
-            )
+            "torch.utils.tensorboard",
+            __import__("types").ModuleType("torch.utils.tensorboard"),
         )
-        sys.modules["torch.utils.tensorboard"].SummaryWriter = (
-            FakeSummaryWriter
-        )
+        sys.modules["torch.utils.tensorboard"].SummaryWriter = FakeSummaryWriter
         with tempfile.TemporaryDirectory() as tmp:
             config = LoggerConfig(
                 log_dir=tmp,

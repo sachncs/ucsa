@@ -145,13 +145,13 @@ class TestEvaluationLoopEvaluate:
         loop.evaluate(dataloader, max_batches=1)
         assert model.training
 
-    def test_evaluate_empty_dataloader(
-        self, model: ToyModel
-    ) -> None:
+    def test_evaluate_empty_dataloader(self, model: ToyModel) -> None:
         """An empty dataloader leaves the state unchanged."""
         loss_fn = BoundARLoss(model)
         loop = EvaluationLoop(model, loss_fn)
-        empty_loader = DataLoader(TensorDataset(torch.empty(0, 4), torch.empty(0, 4)))
+        empty_loader = DataLoader(
+            TensorDataset(torch.empty(0, 4), torch.empty(0, 4))
+        )
         result = loop.evaluate(empty_loader)
         assert result["loss"] == 0.0
 

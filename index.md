@@ -42,7 +42,7 @@ permalink: /
         <div class="ucsa-hero__signals">
           <div class="ucsa-hero__signal">
             <span class="ucsa-hero__signal-dot"></span>
-            <span class="ucsa-hero__signal-value">603</span>
+            <span class="ucsa-hero__signal-value">607</span>
             <span>tests passing</span>
           </div>
           <div class="ucsa-hero__signal">
@@ -543,7 +543,7 @@ permalink: /
             <path d="M5 10l3 3 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </div>
-        <div class="ucsa-evidence__metric">603<span class="ucsa-evidence__metric-suffix">tests</span></div>
+        <div class="ucsa-evidence__metric">607<span class="ucsa-evidence__metric-suffix">tests</span></div>
         <h3 class="ucsa-evidence__title">Test suite</h3>
         <p class="ucsa-evidence__desc">
           Unit tests across every subsystem: PCS, operator,
@@ -637,7 +637,7 @@ permalink: /
             <path d="M3 8h14" stroke="currentColor" stroke-width="1.6"/>
           </svg>
         </div>
-        <div class="ucsa-evidence__metric">4<span class="ucsa-evidence__metric-suffix">tasks</span></div>
+        <div class="ucsa-evidence__metric">5<span class="ucsa-evidence__metric-suffix">tasks</span></div>
         <h3 class="ucsa-evidence__title">Standard eval harness</h3>
         <p class="ucsa-evidence__desc">
           HellaSwag, ARC-easy, ARC-challenge, PIQA, and WinoGrande
@@ -1241,7 +1241,7 @@ permalink: /
           <span class="ucsa-contrib-step__num">step 04</span>
           <h3 class="ucsa-contrib-step__title">Tests</h3>
           <p class="ucsa-contrib-step__desc">
-            603 fast tests. The slow marker runs in a separate
+            600 fast tests (607 total). The slow marker runs in a separate
             job. New behaviour must ship with a test.
           </p>
           <code class="ucsa-contrib-step__cmd">pytest -q -m "not slow"</code>

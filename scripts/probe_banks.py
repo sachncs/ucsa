@@ -14,6 +14,7 @@ The output is a single JSON file that the paper's analysis plots
 consume. We use the language head's tied projection (``token_emb
 weight.T``) as the readout.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -33,8 +34,9 @@ from ucsa.utils.seed import set_seed
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
-    p.add_argument("--ckpt", required=True,
-                   help="Path to a UCSA safetensors checkpoint.")
+    p.add_argument(
+        "--ckpt", required=True, help="Path to a UCSA safetensors checkpoint."
+    )
     p.add_argument("--ucsa-config", default="ucsa/configs/default.yaml")
     p.add_argument("--out-json", default="runs/bank-probe.json")
     p.add_argument("--seed", type=int, default=42)
@@ -64,28 +66,27 @@ def probe_banks(model, top_k: int = 20) -> dict:
         topk = torch.topk(topk_logits, k=top_k, dim=-1)
         token_ids = topk.indices.tolist()
         tok = model.perception.tokenizer.tokenizer
-        token_strs = [
-            [tok.decode([t]) for t in row]
-            for row in token_ids
-        ]
+        token_strs = [[tok.decode([t]) for t in row] for row in token_ids]
         top1_str = [r[0] for r in token_strs]
         retention = model.memory.get_retention_scores(name)
         ret = retention.detach().cpu().numpy().tolist()
         centroid = flat.mean(dim=0)
         bank_centroids[name] = centroid
-        bank_summaries.append({
-            "name": name,
-            "n_tokens": int(flat.shape[0]),
-            "norm_mean": float(norms.mean().item()),
-            "norm_std": float(norms.std().item()),
-            "norm_min": float(norms.min().item()),
-            "norm_max": float(norms.max().item()),
-            "retention_mean": sum(ret) / max(1, len(ret)),
-            "retention_min": min(ret) if ret else 0.0,
-            "retention_max": max(ret) if ret else 0.0,
-            "top_tokens": top1_str[:10],
-            "all_top_tokens": token_strs[:5],
-        })
+        bank_summaries.append(
+            {
+                "name": name,
+                "n_tokens": int(flat.shape[0]),
+                "norm_mean": float(norms.mean().item()),
+                "norm_std": float(norms.std().item()),
+                "norm_min": float(norms.min().item()),
+                "norm_max": float(norms.max().item()),
+                "retention_mean": sum(ret) / max(1, len(ret)),
+                "retention_min": min(ret) if ret else 0.0,
+                "retention_max": max(ret) if ret else 0.0,
+                "top_tokens": top1_str[:10],
+                "all_top_tokens": token_strs[:5],
+            }
+        )
     report["banks"] = bank_summaries
 
     names = [s["name"] for s in bank_summaries if not s.get("empty")]

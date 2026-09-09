@@ -143,9 +143,7 @@ class TestMixtureOfExperts:
         # Force router to send equal weight to each expert.
         with torch.no_grad():
             balanced.router.weight.zero_()
-            balanced.router.weight[:4, :4] = (
-                torch.eye(4)  # type: ignore[index]
-            )
+            balanced.router.weight[:4, :4] = torch.eye(4)  # type: ignore[index]
         x = torch.randn(8, 4, 16)
         _, balanced_loss = balanced(x)
 

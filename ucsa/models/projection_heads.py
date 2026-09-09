@@ -104,9 +104,7 @@ class HeadConfig:
             # Default the reconstruction dim to ``hidden_size`` so the
             # reconstructed token embeddings line up with
             # ``perception.embed_tokens`` for an element-wise loss.
-            object.__setattr__(
-                self, "reconstruction_dim", self.hidden_size
-            )
+            object.__setattr__(self, "reconstruction_dim", self.hidden_size)
 
 
 class LanguageHead(nn.Module):

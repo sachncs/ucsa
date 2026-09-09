@@ -100,9 +100,7 @@ class TestMemoryServiceInline:
         service.submit_sync_inline(PruneTask(k=2))
         assert service.stats.pruned == 2
 
-    def test_on_complete_callback_invoked(
-        self, service: MemoryService
-    ) -> None:
+    def test_on_complete_callback_invoked(self, service: MemoryService) -> None:
         """The ``on_complete`` callback is invoked after verification."""
         captured: list[tuple[float, bool]] = []
 
@@ -115,9 +113,7 @@ class TestMemoryServiceInline:
             captured.append((score, accepted))
 
         service.submit_sync_inline(
-            VerificationTask(
-                tiny_update(), tiny_pcs(), on_complete=callback
-            )
+            VerificationTask(tiny_update(), tiny_pcs(), on_complete=callback)
         )
         assert len(captured) == 1
         assert 0.0 <= captured[0][0] <= 1.0
@@ -150,7 +146,9 @@ class TestMemoryServiceAsync:
         yield service, pcs
         service.stop()
 
-    def test_start_creates_loop(self, started_service: tuple[MemoryService, PersistentCognitiveState]) -> None:
+    def test_start_creates_loop(
+        self, started_service: tuple[MemoryService, PersistentCognitiveState]
+    ) -> None:
         """``start`` creates an asyncio loop running in a thread."""
         service, _ = started_service
         assert service.loop is not None
@@ -196,6 +194,7 @@ class TestMemoryServiceAsync:
                 accepted: bool,
             ) -> None:
                 scores_seen.append(observed_score)
+
             return callback
 
         # Submit 5 tasks each with a different confidence so scores differ.

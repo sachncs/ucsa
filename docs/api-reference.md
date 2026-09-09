@@ -32,7 +32,7 @@ pre-Phase-11 state dicts.
 
 | Symbol | Purpose |
 | --- | --- |
-| `save_state_dict(model, path)` | Save the model state dict to a safetensors file. |
+| `save_checkpoint(model, path)` | Save the model state dict to a safetensors file, with optional metadata. |
 | `load_state_dict_compat(path)` | Load a state dict, remapping legacy bank-name keys via `adapt_legacy_state_dict`. |
 | `adapt_legacy_state_dict(state_dict)` | Translate pre-`intent`-bank checkpoints in place. |
 
@@ -56,7 +56,7 @@ The persistent cognitive state and its seven banks.
 | --- | --- |
 | `BANK_NAMES` | Tuple of the seven default bank names. |
 | `INTENT_BANK` | The bank name for the origination signal. |
-| `PCSConfig` | Dataclass for hidden size, vocabulary size, and per-bank sizes. |
+| `PCSConfig` | Dataclass for hidden size, per-bank sizes, and retention-tuning weights. |
 | `BankSpec` | Static spec for one bank: name and token count. |
 | `PersistentCognitiveState` | The PCS module itself. Owns the seven bank tensors and their retention metadata. |
 | `retention_score(...)` | Compute the retention score from `importance`, `usage`, and `age`. |
@@ -67,7 +67,7 @@ The PCS exposes:
 - `get_all_tokens()` → flat `Tensor` of every bank concatenated
 - `set_bank(name, tensor)` → write a new tensor to a bank
 - `bank_size(name)` → `int` token count
-- `recycle_bottom_k(k)` → run the recycle policy on the bottom-k
+- `recycle_bottom_k(name, k)` → run the recycle policy on the bottom-k
   long-term memory tokens
 
 ## `ucsa.models.transition_operator` — the operator ABC
@@ -222,7 +222,7 @@ the origination generator.
 | Symbol | Purpose |
 | --- | --- |
 | `optimize_intent(model, inputs, K)` | K-step gradient descent on the `intent` bank alone. |
-| `descent_sweep(model, pairs, steps)` | Run a sweep across multiple `K`. |
+| `descent_sweep(model, pairs, steps)` | Sweep across multiple `K` (defined in `scripts/probe_origination.py`). |
 | `compute_matched_comparison(model, pairs, K)` | Compare to repeat-and-average and more-reasoning controls. |
 
 ## `ucsa.training.curriculum` — the 4-stage curriculum

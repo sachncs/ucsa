@@ -66,13 +66,15 @@ def make_fake_dataset(
     class FakeBackedDataset(TextDataset):
         def _initialise_dataset(self_inner) -> object:  # type: ignore[override]
             data = {
-                "text": texts
-                if texts is not None
-                else [
-                    "hello world " * 10,
-                    "another example sentence " * 8,
-                    "yet more tokens for the loader " * 12,
-                ]
+                "text": (
+                    texts
+                    if texts is not None
+                    else [
+                        "hello world " * 10,
+                        "another example sentence " * 8,
+                        "yet more tokens for the loader " * 12,
+                    ]
+                )
             }
             return Dataset.from_dict(data)
 

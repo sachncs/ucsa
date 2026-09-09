@@ -39,6 +39,7 @@ Usage:
         [--no-csa-hca] [--no-mhc] [--no-mtp]
         [--no-mla] [--no-muon] [--no-moe]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -60,6 +61,7 @@ from ucsa.training.optimizer import Muon  # local: orthogonalised-momentum SGD
 # Shared utilities
 # ---------------------------------------------------------------------------
 
+
 class _IterableOver(torch.utils.data.IterableDataset):
     def __init__(self, ds) -> None:
         self.ds = ds
@@ -77,6 +79,7 @@ def _infinite(loader):
 # Modern Transformer LM layers
 # ---------------------------------------------------------------------------
 
+
 class RMSNorm(nn.Module):
     def __init__(self, dim: int, eps: float = 1e-6) -> None:
         super().__init__()
@@ -88,10 +91,10 @@ class RMSNorm(nn.Module):
         return (x.float() / rms).to(x.dtype) * self.weight
 
 
-def _rope_freqs(head_dim: int, max_seq: int, base: float = 10000.0) -> torch.Tensor:
-    inv_freq = 1.0 / (
-        base ** (torch.arange(0, head_dim, 2).float() / head_dim)
-    )
+def _rope_freqs(
+    head_dim: int, max_seq: int, base: float = 10000.0
+) -> torch.Tensor:
+    inv_freq = 1.0 / (base ** (torch.arange(0, head_dim, 2).float() / head_dim))
     pos = torch.arange(max_seq).float()
     freqs = torch.outer(pos, inv_freq)
     return torch.polar(torch.ones_like(freqs), freqs)
@@ -133,7 +136,8 @@ class GQAttention(nn.Module):
         self.q_norm = RMSNorm(head_dim)
         self.k_norm = RMSNorm(head_dim)
         self.register_buffer(
-            "rope_freqs", _rope_freqs(head_dim, max_seq, base=rope_base),
+            "rope_freqs",
+            _rope_freqs(head_dim, max_seq, base=rope_base),
             persistent=False,
         )
 
@@ -150,11 +154,15 @@ class GQAttention(nn.Module):
             k = k.repeat_interleave(self.repeat, dim=2)
             v = v.repeat_interleave(self.repeat, dim=2)
         out = F.scaled_dot_product_attention(
-            q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
+            q.transpose(1, 2),
+            k.transpose(1, 2),
+            v.transpose(1, 2),
             is_causal=True,
         )
-        out = out.transpose(1, 2).contiguous().view(
-            b, s, self.num_q_heads * self.head_dim
+        out = (
+            out.transpose(1, 2)
+            .contiguous()
+            .view(b, s, self.num_q_heads * self.head_dim)
         )
         return self.o_proj(out)
 
@@ -192,17 +200,14 @@ class MLAAttention(nn.Module):
         # The compressed KV representation per token.
         self.kv_down = nn.Linear(hidden, kv_latent_dim, bias=False)
         # Up-project into per-head K and V for attention compute.
-        self.k_up = nn.Linear(
-            kv_latent_dim, num_q_heads * head_dim, bias=False
-        )
-        self.v_up = nn.Linear(
-            kv_latent_dim, num_q_heads * head_dim, bias=False
-        )
+        self.k_up = nn.Linear(kv_latent_dim, num_q_heads * head_dim, bias=False)
+        self.v_up = nn.Linear(kv_latent_dim, num_q_heads * head_dim, bias=False)
         self.o_proj = nn.Linear(num_q_heads * head_dim, hidden, bias=False)
         self.q_norm = RMSNorm(head_dim)
         self.k_norm = RMSNorm(head_dim)
         self.register_buffer(
-            "rope_freqs", _rope_freqs(head_dim, max_seq, base=rope_base),
+            "rope_freqs",
+            _rope_freqs(head_dim, max_seq, base=rope_base),
             persistent=False,
         )
 
@@ -217,11 +222,15 @@ class MLAAttention(nn.Module):
         q = _apply_rope(q, self.rope_freqs)
         k = _apply_rope(k, self.rope_freqs)
         out = F.scaled_dot_product_attention(
-            q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
+            q.transpose(1, 2),
+            k.transpose(1, 2),
+            v.transpose(1, 2),
             is_causal=True,
         )
-        out = out.transpose(1, 2).contiguous().view(
-            b, s, self.num_q_heads * self.head_dim
+        out = (
+            out.transpose(1, 2)
+            .contiguous()
+            .view(b, s, self.num_q_heads * self.head_dim)
         )
         return self.o_proj(out)
 
@@ -278,12 +287,12 @@ class DeepSeekMoEFFN(nn.Module):
         self.num_routed = num_routed_experts
         self.num_shared = num_shared_experts
         self.top_k = top_k
-        self.routed = nn.ModuleList([
-            SwiGLU(hidden, ffn_dim) for _ in range(num_routed_experts)
-        ])
-        self.shared = nn.ModuleList([
-            SwiGLU(hidden, ffn_dim) for _ in range(num_shared_experts)
-        ])
+        self.routed = nn.ModuleList(
+            [SwiGLU(hidden, ffn_dim) for _ in range(num_routed_experts)]
+        )
+        self.shared = nn.ModuleList(
+            [SwiGLU(hidden, ffn_dim) for _ in range(num_shared_experts)]
+        )
         self.gate = nn.Linear(hidden, num_routed_experts, bias=False)
         # Aux-loss-free per-expert bias (DeepSeek-V3 §3.2).
         self.register_buffer("expert_bias", torch.zeros(num_routed_experts))
@@ -311,18 +320,14 @@ class DeepSeekMoEFFN(nn.Module):
             expert_in = x_flat[token_ids]
             expert_out = expert(expert_in)
             w = topk_w[token_ids, slot_ids]
-            routed_out.index_add_(
-                0, token_ids, expert_out * w
-            )
+            routed_out.index_add_(0, token_ids, expert_out * w)
         # update bias: low expert gets a positive nudge.
         with torch.no_grad():
             counts = torch.bincount(
                 topk_idx.flatten(), minlength=self.num_routed
             ).float()
             target = counts.mean()
-            self.expert_bias.add_(
-                torch.sign(target - counts) * 1e-4
-            )
+            self.expert_bias.add_(torch.sign(target - counts) * 1e-4)
         out = routed_out + shared_out
         return out.view(b, s, h)
 
@@ -438,8 +443,12 @@ class CSAHCAAttention(nn.Module):
             out_sw = self._attend_to(q, k_sw, v_sw, is_causal=True)
         else:
             out_sw = torch.zeros(
-                b, s, self.num_q_heads, self.head_dim,
-                device=x.device, dtype=x.dtype,
+                b,
+                s,
+                self.num_q_heads,
+                self.head_dim,
+                device=x.device,
+                dtype=x.dtype,
             )
 
         # CSA branch: top-k compressed blocks.
@@ -459,9 +468,7 @@ class CSAHCAAttention(nn.Module):
         if self.hca_block_size > 0 and s >= self.hca_block_size:
             k_hca = self._compress(k, self.hca_block_size)
             v_hca = self._compress(v, self.hca_block_size)
-            out_hca = self._attend_to(
-                q, k_hca, v_hca, is_causal=False
-            )
+            out_hca = self._attend_to(q, k_hca, v_hca, is_causal=False)
         else:
             out_hca = torch.zeros_like(out_sw)
 
@@ -495,20 +502,15 @@ class GatedMLA(nn.Module):
         self.kv_latent_dim = kv_latent_dim
         self.q_proj = nn.Linear(hidden, num_q_heads * head_dim, bias=False)
         self.kv_down = nn.Linear(hidden, kv_latent_dim, bias=False)
-        self.k_up = nn.Linear(
-            kv_latent_dim, num_q_heads * head_dim, bias=False
-        )
-        self.v_up = nn.Linear(
-            kv_latent_dim, num_q_heads * head_dim, bias=False
-        )
+        self.k_up = nn.Linear(kv_latent_dim, num_q_heads * head_dim, bias=False)
+        self.v_up = nn.Linear(kv_latent_dim, num_q_heads * head_dim, bias=False)
         self.gate = nn.Linear(hidden, num_q_heads * head_dim, bias=False)
-        self.o_proj = nn.Linear(
-            num_q_heads * head_dim, hidden, bias=False
-        )
+        self.o_proj = nn.Linear(num_q_heads * head_dim, hidden, bias=False)
         self.q_norm = RMSNorm(head_dim)
         self.k_norm = RMSNorm(head_dim)
         self.register_buffer(
-            "rope_freqs", _rope_freqs(head_dim, max_seq),
+            "rope_freqs",
+            _rope_freqs(head_dim, max_seq),
             persistent=False,
         )
 
@@ -523,14 +525,16 @@ class GatedMLA(nn.Module):
         q = _apply_rope(q, self.rope_freqs)
         k = _apply_rope(k, self.rope_freqs)
         attn = F.scaled_dot_product_attention(
-            q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
+            q.transpose(1, 2),
+            k.transpose(1, 2),
+            v.transpose(1, 2),
             is_causal=True,
         ).transpose(1, 2)
         g = torch.sigmoid(
             self.gate(x).view(b, s, self.num_q_heads, self.head_dim)
         )
-        out = (attn * g).contiguous().view(
-            b, s, self.num_q_heads * self.head_dim
+        out = (
+            (attn * g).contiguous().view(b, s, self.num_q_heads * self.head_dim)
         )
         return self.o_proj(out)
 
@@ -578,17 +582,23 @@ class KDAAttention(nn.Module):
         k = self.k_norm(k)
         outs = []
         M = torch.zeros(
-            b, self.num_heads, self.head_dim, self.head_dim,
-            device=x.device, dtype=x.dtype,
+            b,
+            self.num_heads,
+            self.head_dim,
+            self.head_dim,
+            device=x.device,
+            dtype=x.dtype,
         )
         for t in range(s):
-            kt = k[:, t]                              # (b, h, d)
+            kt = k[:, t]  # (b, h, d)
             vt = v[:, t]
             qt = q[:, t]
             # delta update: subtract old (M k) k, add v kᵀ
             Mk = torch.einsum("bhde,bhe->bhd", M, kt).unsqueeze(-1)
-            M = M - Mk * kt.unsqueeze(-2) + torch.einsum(
-                "bhd,bhe->bhde", vt, kt
+            M = (
+                M
+                - Mk * kt.unsqueeze(-2)
+                + torch.einsum("bhd,bhe->bhde", vt, kt)
             )
             outs.append(torch.einsum("bhde,bhe->bhd", M, qt))
         out = torch.stack(outs, dim=1)
@@ -626,9 +636,9 @@ class StableLatentMoE(nn.Module):
         self.gate = nn.Linear(hidden, num_experts, bias=False)
         # Shared expert: SwiGLU on the un-routed stream
         self.shared = SwiGLU(hidden, ffn_dim)
-        self.experts = nn.ModuleList([
-            SwiGLU(hidden, ffn_dim) for _ in range(num_experts)
-        ])
+        self.experts = nn.ModuleList(
+            [SwiGLU(hidden, ffn_dim) for _ in range(num_experts)]
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         b, s, h = x.shape
@@ -686,10 +696,17 @@ class AttnResBlock(nn.Module):
         q = self.q(x).view(b, s, self.num_heads, self.head_dim)
         k = self.k(prior).view(b, s, self.num_heads, self.head_dim)
         v = self.v(prior).view(b, s, self.num_heads, self.head_dim)
-        attn = F.scaled_dot_product_attention(
-            q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
-            is_causal=False,
-        ).transpose(1, 2).contiguous().view(b, s, h)
+        attn = (
+            F.scaled_dot_product_attention(
+                q.transpose(1, 2),
+                k.transpose(1, 2),
+                v.transpose(1, 2),
+                is_causal=False,
+            )
+            .transpose(1, 2)
+            .contiguous()
+            .view(b, s, h)
+        )
         retrieved = self.o(attn)
         with torch.no_grad():
             self._memory = (prior + block_out).detach()
@@ -713,9 +730,9 @@ class MHCBlock(nn.Module):
         # Initial stream values are learned per token position 0 and
         # broadcast over the sequence at runtime — keeps params tight.
         self.streams_init = nn.Parameter(torch.zeros(n, hidden))
-        self.pre_w = nn.Parameter(torch.zeros(n, 1))   # Pre Mapping
+        self.pre_w = nn.Parameter(torch.zeros(n, 1))  # Pre Mapping
         self.post_w = nn.Parameter(torch.zeros(1, n))  # Post Mapping
-        self.res_w = nn.Parameter(torch.zeros(n, n))   # Res Mapping
+        self.res_w = nn.Parameter(torch.zeros(n, n))  # Res Mapping
         # Constraints are non-negative + bounded (mHC). Bias-free.
         self.base_block = base_block
 
@@ -731,9 +748,8 @@ class MHCBlock(nn.Module):
         # x: (b, s, hidden). Initialise streams to a learned broadcast
         # plus the input; expand to (b, s, n, hidden).
         b, s, h = x.shape
-        streams = (
-            self.streams_init.unsqueeze(0).unsqueeze(0)
-            + x.unsqueeze(2)
+        streams = self.streams_init.unsqueeze(0).unsqueeze(0) + x.unsqueeze(
+            2
         )  # (b, s, n, h)
         # Pre Mapping: combine n streams into the block's input.
         pre = F.softplus(self.pre_w)  # (n, 1) ≥ 0
@@ -744,14 +760,14 @@ class MHCBlock(nn.Module):
         # Post Mapping: split block_out into n streams.
         post = F.softplus(self.post_w)  # (1, n) ≥ 0
         post = post / (post.sum() + 1e-8)
-        post_streams = (
-            block_out.unsqueeze(2) * post.view(1, 1, -1, 1)
+        post_streams = block_out.unsqueeze(2) * post.view(
+            1, 1, -1, 1
         )  # (b, s, n, h)
         # Res Mapping: doubly-stochastic mixing between streams.
         res = self._bistochastic(self.res_w)
-        streams = torch.einsum(
-            "bsnd,nm->bsmd", streams, res
-        ) + post_streams  # (b, s, n, h)
+        streams = (
+            torch.einsum("bsnd,nm->bsmd", streams, res) + post_streams
+        )  # (b, s, n, h)
         # Output: average streams back into the residual pathway.
         return streams.mean(dim=2)
 
@@ -798,9 +814,9 @@ class ModernTransformerLM(nn.Module):
         self.hidden = hidden
         self.num_layers = num_layers
         self.token_emb = nn.Embedding(vocab_size, hidden)
-        self.blocks = nn.ModuleList([
-            block_factory() for _ in range(num_layers)
-        ])
+        self.blocks = nn.ModuleList(
+            [block_factory() for _ in range(num_layers)]
+        )
         self.final_norm = RMSNorm(hidden)
         # tied LM head: reuse the embedding matrix at output
         self.max_seq = max_seq
@@ -828,6 +844,7 @@ class ModernTransformerLM(nn.Module):
 # ---------------------------------------------------------------------------
 # Param-target search for the baseline
 # ---------------------------------------------------------------------------
+
 
 def _target_param_count(target: int, mla: bool) -> dict:
     """Pick (hidden, num_layers, num_q_heads, ffn) to land near ``target``.
@@ -881,6 +898,7 @@ def _target_param_count(target: int, mla: bool) -> dict:
 # Training loop (one model at a time)
 # ---------------------------------------------------------------------------
 
+
 def _train_one(
     model: nn.Module,
     loader: DataLoader,
@@ -893,26 +911,41 @@ def _train_one(
     weight_decay: float = 0.1,
 ) -> tuple[list[float], float]:
     """Standalone AdamW-or-Muon train loop with cosine warmup."""
+
     def optim_cls(params):
-        return (Muon(params, lr=lr, momentum=0.95,
-                                weight_decay=weight_decay)
+        return (
+            Muon(params, lr=lr, momentum=0.95, weight_decay=weight_decay)
             if use_muon
-            else torch.optim.AdamW)
+            else torch.optim.AdamW
+        )
+
     optim = (
         optim_cls(model.parameters())
         if use_muon
-        else torch.optim.AdamW(model.parameters(), lr=lr,
-                               weight_decay=weight_decay, betas=(0.9, 0.95))
+        else torch.optim.AdamW(
+            model.parameters(),
+            lr=lr,
+            weight_decay=weight_decay,
+            betas=(0.9, 0.95),
+        )
     )
     sched = torch.optim.lr_scheduler.LambdaLR(
         optim,
         lr_lambda=lambda step: min(
             (step + 1) / max(1, warmup_steps),
-            0.5 * (1 + math.cos(
-                math.pi * (step - warmup_steps)
-                / max(1, max_steps - warmup_steps)
-            )) if step >= warmup_steps
-            else (step + 1) / max(1, warmup_steps),
+            (
+                0.5
+                * (
+                    1
+                    + math.cos(
+                        math.pi
+                        * (step - warmup_steps)
+                        / max(1, max_steps - warmup_steps)
+                    )
+                )
+                if step >= warmup_steps
+                else (step + 1) / max(1, warmup_steps)
+            ),
         ),
     )
     model.train()
@@ -985,14 +1018,19 @@ def _eval_one(
 # Main
 # ---------------------------------------------------------------------------
 
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--max-steps", type=int, default=4000)
     p.add_argument("--baseline-param-target", type=int, default=63_000_000)
     p.add_argument("--warmup-steps", type=int, default=200)
     p.add_argument("--lr", type=float, default=6e-4)
-    p.add_argument("--muon-lr", type=float, default=2e-2,
-                   help="Muon uses a larger lr than AdamW (typical: 0.02)")
+    p.add_argument(
+        "--muon-lr",
+        type=float,
+        default=2e-2,
+        help="Muon uses a larger lr than AdamW (typical: 0.02)",
+    )
     p.add_argument("--log-every", type=int, default=100)
     p.add_argument("--val-skip", type=int, default=10_000)
     p.add_argument("--val-batches", type=int, default=20)
@@ -1003,35 +1041,81 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--no-muon", dest="muon", action="store_false")
     p.add_argument("--moe", dest="moe", action="store_true", default=False)
     p.add_argument("--no-moe", dest="moe", action="store_false")
-    p.add_argument("--csa-hca", dest="csa_hca", action="store_true", default=False,
-                   help="Use CSA+HCA hybrid compressed attention (DeepSeek-V4 §1.3)")
+    p.add_argument(
+        "--csa-hca",
+        dest="csa_hca",
+        action="store_true",
+        default=False,
+        help="Use CSA+HCA hybrid compressed attention (DeepSeek-V4 §1.3)",
+    )
     p.add_argument("--no-csa-hca", dest="csa_hca", action="store_false")
-    p.add_argument("--mhc", dest="mhc", action="store_true", default=False,
-                   help="Manifold-Constrained Hyper-Connections (DeepSeek-V4 §1.3)")
+    p.add_argument(
+        "--mhc",
+        dest="mhc",
+        action="store_true",
+        default=False,
+        help="Manifold-Constrained Hyper-Connections (DeepSeek-V4 §1.3)",
+    )
     p.add_argument("--no-mhc", dest="mhc", action="store_false")
-    p.add_argument("--mtp", dest="mtp", action="store_true", default=False,
-                   help="Multi-token prediction auxiliary head (DeepSeek-V3 §2.4)")
+    p.add_argument(
+        "--mtp",
+        dest="mtp",
+        action="store_true",
+        default=False,
+        help="Multi-token prediction auxiliary head (DeepSeek-V3 §2.4)",
+    )
     p.add_argument("--no-mtp", dest="mtp", action="store_false")
     # ---- Kimi K3 (Moonshot, Jul 2026) features -----------------------------
-    p.add_argument("--kda", dest="kda", action="store_true", default=False,
-                   help="Replace attention with Kimi Delta Attention (KDA).")
+    p.add_argument(
+        "--kda",
+        dest="kda",
+        action="store_true",
+        default=False,
+        help="Replace attention with Kimi Delta Attention (KDA).",
+    )
     p.add_argument("--no-kda", dest="kda", action="store_false")
-    p.add_argument("--gated-mla", dest="gated_mla", action="store_true", default=False,
-                   help="Use Gated MLA instead of plain MLA.")
+    p.add_argument(
+        "--gated-mla",
+        dest="gated_mla",
+        action="store_true",
+        default=False,
+        help="Use Gated MLA instead of plain MLA.",
+    )
     p.add_argument("--no-gated-mla", dest="gated_mla", action="store_false")
-    p.add_argument("--stable-moe", dest="stable_moe", action="store_true", default=False,
-                   help="Use Kimi K3 Stable LatentMoE instead of DeepSeekMoE.")
+    p.add_argument(
+        "--stable-moe",
+        dest="stable_moe",
+        action="store_true",
+        default=False,
+        help="Use Kimi K3 Stable LatentMoE instead of DeepSeekMoE.",
+    )
     p.add_argument("--no-stable-moe", dest="stable_moe", action="store_false")
-    p.add_argument("--attn-res", dest="attn_res", action="store_true", default=False,
-                   help="Wrap blocks with Attention Residuals (AttnRes).")
+    p.add_argument(
+        "--attn-res",
+        dest="attn_res",
+        action="store_true",
+        default=False,
+        help="Wrap blocks with Attention Residuals (AttnRes).",
+    )
     p.add_argument("--no-attn-res", dest="attn_res", action="store_false")
-    p.add_argument("--situ", dest="situ", action="store_true", default=False,
-                   help="Replace SiLU with SiTU in FFN.")
+    p.add_argument(
+        "--situ",
+        dest="situ",
+        action="store_true",
+        default=False,
+        help="Replace SiLU with SiTU in FFN.",
+    )
     p.add_argument("--no-situ", dest="situ", action="store_false")
-    p.add_argument("--per-head-muon", dest="per_head_muon", action="store_true",
-                   default=False,
-                   help="K3's per-head-Muon variant. Falls back to plain Muon.")
-    p.add_argument("--no-per-head-muon", dest="per_head_muon", action="store_false")
+    p.add_argument(
+        "--per-head-muon",
+        dest="per_head_muon",
+        action="store_true",
+        default=False,
+        help="K3's per-head-Muon variant. Falls back to plain Muon.",
+    )
+    p.add_argument(
+        "--no-per-head-muon", dest="per_head_muon", action="store_false"
+    )
     # -----------------------------------------------------------------------
     p.add_argument("--num-routed-experts", type=int, default=4)
     p.add_argument("--num-shared-experts", type=int, default=1)
@@ -1045,6 +1129,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     from ucsa.utils.seed import set_seed
+
     set_seed(args.seed)
     if args.baseline_param_target > 500_000_000:
         raise SystemExit(
@@ -1084,7 +1169,8 @@ def main() -> None:
         sequence_length=args.max_seq_len,
         primary_dataset=cfg["dataset"]["primary_dataset"],
         primary_split=cfg["dataset"]["primary_split"],
-        streaming=True, pack_sequences=True,
+        streaming=True,
+        pack_sequences=True,
     )
 
     print("Loading dataset...", flush=True)
@@ -1094,9 +1180,13 @@ def main() -> None:
 
     train_loader = DataLoader(_IterableOver(train_ds), batch_size=None)
     device = (
-        torch.device("mps", 0) if torch.backends.mps.is_available()
-        else torch.device("cuda", 0) if torch.cuda.is_available()
-        else torch.device("cpu")
+        torch.device("mps", 0)
+        if torch.backends.mps.is_available()
+        else (
+            torch.device("cuda", 0)
+            if torch.cuda.is_available()
+            else torch.device("cpu")
+        )
     )
     print(f"Device: {device}", flush=True)
 
@@ -1175,7 +1265,8 @@ def main() -> None:
         else:
             ff_label = "SwiGLU" + ("+SiTU" if args.situ else "")
         opt_label = (
-            "Muon(per-head)" if args.muon and args.per_head_muon
+            "Muon(per-head)"
+            if args.muon and args.per_head_muon
             else "Muon" if args.muon else "AdamW"
         )
         mtp_label = "+MTP" if args.mtp else ""
@@ -1195,75 +1286,87 @@ def main() -> None:
 
         head_dim = cfg_b["hidden"] // cfg_b["num_q_heads"]
         if args.kda:
+
             def attn_factory():
                 return KDAAttention(
-                            hidden=cfg_b["hidden"],
-                            num_heads=cfg_b["num_q_heads"],
-                            head_dim=head_dim,
-                            max_seq=args.max_seq_len,
-                        )
+                    hidden=cfg_b["hidden"],
+                    num_heads=cfg_b["num_q_heads"],
+                    head_dim=head_dim,
+                    max_seq=args.max_seq_len,
+                )
+
         elif args.csa_hca:
+
             def attn_factory():
                 return CSAHCAAttention(
-                            hidden=cfg_b["hidden"],
-                            num_q_heads=cfg_b["num_q_heads"],
-                            head_dim=head_dim,
-                            csa_block_size=4,
-                            hca_block_size=16,
-                            top_k_blocks=4,
-                            sliding_window=min(128, args.max_seq_len // 4),
-                            max_seq=args.max_seq_len,
-                        )
+                    hidden=cfg_b["hidden"],
+                    num_q_heads=cfg_b["num_q_heads"],
+                    head_dim=head_dim,
+                    csa_block_size=4,
+                    hca_block_size=16,
+                    top_k_blocks=4,
+                    sliding_window=min(128, args.max_seq_len // 4),
+                    max_seq=args.max_seq_len,
+                )
+
         elif args.gated_mla:
+
             def attn_factory():
                 return GatedMLA(
-                            hidden=cfg_b["hidden"],
-                            num_q_heads=cfg_b["num_q_heads"],
-                            head_dim=head_dim,
-                            kv_latent_dim=max(64, cfg_b["hidden"] // 4),
-                            max_seq=args.max_seq_len,
-                        )
+                    hidden=cfg_b["hidden"],
+                    num_q_heads=cfg_b["num_q_heads"],
+                    head_dim=head_dim,
+                    kv_latent_dim=max(64, cfg_b["hidden"] // 4),
+                    max_seq=args.max_seq_len,
+                )
+
         elif args.mla:
+
             def attn_factory():
                 return MLAAttention(
-                            hidden=cfg_b["hidden"],
-                            num_q_heads=cfg_b["num_q_heads"],
-                            head_dim=head_dim,
-                            kv_latent_dim=max(64, cfg_b["hidden"] // 4),
-                            max_seq=args.max_seq_len,
-                        )
+                    hidden=cfg_b["hidden"],
+                    num_q_heads=cfg_b["num_q_heads"],
+                    head_dim=head_dim,
+                    kv_latent_dim=max(64, cfg_b["hidden"] // 4),
+                    max_seq=args.max_seq_len,
+                )
+
         else:
+
             def attn_factory():
                 return GQAttention(
-                            hidden=cfg_b["hidden"],
-                            num_q_heads=cfg_b["num_q_heads"],
-                            num_kv_heads=max(2, cfg_b["num_q_heads"] // 2),
-                            head_dim=head_dim,
-                            max_seq=args.max_seq_len,
-                        )
+                    hidden=cfg_b["hidden"],
+                    num_q_heads=cfg_b["num_q_heads"],
+                    num_kv_heads=max(2, cfg_b["num_q_heads"] // 2),
+                    head_dim=head_dim,
+                    max_seq=args.max_seq_len,
+                )
 
         if args.stable_moe and args.moe:
+
             def ffn_factory():
                 return StableLatentMoE(
-                            hidden=cfg_b["hidden"],
-                            ffn_dim=cfg_b["ffn_dim"],
-                            num_experts=args.num_routed_experts,
-                            top_k=args.top_k,
-                        )
+                    hidden=cfg_b["hidden"],
+                    ffn_dim=cfg_b["ffn_dim"],
+                    num_experts=args.num_routed_experts,
+                    top_k=args.top_k,
+                )
+
         elif args.moe:
+
             def ffn_factory():
                 return DeepSeekMoEFFN(
-                            hidden=cfg_b["hidden"],
-                            ffn_dim=cfg_b["ffn_dim"],
-                            num_routed_experts=args.num_routed_experts,
-                            num_shared_experts=args.num_shared_experts,
-                            top_k=args.top_k,
-                        )
+                    hidden=cfg_b["hidden"],
+                    ffn_dim=cfg_b["ffn_dim"],
+                    num_routed_experts=args.num_routed_experts,
+                    num_shared_experts=args.num_shared_experts,
+                    top_k=args.top_k,
+                )
+
         else:
+
             def ffn_factory():
-                return SwiGLU(
-                            cfg_b["hidden"], cfg_b["ffn_dim"]
-                        )
+                return SwiGLU(cfg_b["hidden"], cfg_b["ffn_dim"])
 
         # If mHC is enabled, wrap each block in MHCBlock so the model picks
         # up n=4 parallel residual streams.
@@ -1271,9 +1374,7 @@ def main() -> None:
         # AttnRes is the outermost read-from-prior read; mHC sits inside
         # it when both are enabled.
         def _inner():
-            return ModernBlock(
-                cfg_b["hidden"], attn_factory(), ffn_factory()
-            )
+            return ModernBlock(cfg_b["hidden"], attn_factory(), ffn_factory())
 
         if args.mhc and args.attn_res:
 
@@ -1283,18 +1384,23 @@ def main() -> None:
                     cfg_b["hidden"],
                     num_heads=cfg_b["num_q_heads"],
                 )
+
         elif args.mhc:
 
             def block_factory():
                 return MHCBlock(_inner(), cfg_b["hidden"], n=4)
+
         elif args.attn_res:
 
             def block_factory():
                 return AttnResBlock(
-                    _inner(), cfg_b["hidden"],
+                    _inner(),
+                    cfg_b["hidden"],
                     num_heads=cfg_b["num_q_heads"],
                 )
+
         else:
+
             def block_factory():
                 return _inner()
 
@@ -1316,7 +1422,9 @@ def main() -> None:
         baseline.resize_max_seq(args.max_seq_len)
         baseline_lr = args.muon_lr if args.muon else args.lr
         _train_one(
-            baseline, train_loader, device,
+            baseline,
+            train_loader,
+            device,
             max_steps=args.max_steps,
             warmup_steps=args.warmup_steps,
             lr=baseline_lr,
@@ -1328,15 +1436,21 @@ def main() -> None:
         val_b_loader = DataLoader(_IterableOver(val_b), batch_size=None)
         bm = _eval_one(baseline, val_b_loader, args.val_batches, device)
         baseline_ppl = bm["perplexity"]
-        print(f"  baseline val loss={bm['loss']:.4f} ppl={baseline_ppl:.1f}",
-              flush=True)
+        print(
+            f"  baseline val loss={bm['loss']:.4f} ppl={baseline_ppl:.1f}",
+            flush=True,
+        )
 
     # --- Comparison --------------------------------------------------------
     print("\n=== Matched-compute SOTA comparison ===", flush=True)
-    print("  Model                                Params        Val PPL",
-          flush=True)
-    print("  -----------------------------------  ------------  --------",
-          flush=True)
+    print(
+        "  Model                                Params        Val PPL",
+        flush=True,
+    )
+    print(
+        "  -----------------------------------  ------------  --------",
+        flush=True,
+    )
     print(
         f"  UCSA-small (ours)                    "
         f"{ucsa_params/1e6:>7.0f}M       {ucsa_ppl:.1f}",

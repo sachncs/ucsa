@@ -98,7 +98,9 @@ class HeuristicVerifier(Verifier):
             acceptance_threshold: Minimum score required for acceptance.
         """
         super().__init__()
-        total = confidence_weight + novelty_weight + recency_weight + usage_weight
+        total = (
+            confidence_weight + novelty_weight + recency_weight + usage_weight
+        )
         if total <= 0.0:
             raise ValueError("At least one verifier weight must be positive.")
         self.confidence_weight = confidence_weight / total
@@ -293,9 +295,7 @@ class LearnedVerifier(Verifier):
         pooled = self.pool_candidate(candidate)
         summary = self.summarize_cstate(cstate)
         logit = self.mlp(torch.cat([pooled, summary], dim=-1))
-        target = torch.tensor(
-            1.0 if was_used else 0.0, device=logit.device
-        )
+        target = torch.tensor(1.0 if was_used else 0.0, device=logit.device)
         return torch.nn.functional.binary_cross_entropy_with_logits(
             logit.squeeze(-1), target
         )

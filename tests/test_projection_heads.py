@@ -147,7 +147,8 @@ class TestOriginationHead:
         """``G`` emits one token per input token, whatever the count."""
         for tokens in (1, 4, 13):
             out = head(
-                torch.randn(16, 32), torch.randn(64, 32),
+                torch.randn(16, 32),
+                torch.randn(64, 32),
                 torch.randn(1, tokens, 32),
             )
             assert out.shape == (1, tokens, 32)
@@ -183,17 +184,17 @@ class TestOriginationHead:
         """Banks must be 2D ``(tokens, hidden)``."""
         with pytest.raises(ValueError):
             head(
-                torch.randn(1, 16, 32), torch.randn(64, 32),
+                torch.randn(1, 16, 32),
+                torch.randn(64, 32),
                 torch.randn(1, 4, 32),
             )
 
-    def test_rejects_hidden_size_mismatch(
-        self, head: OriginationHead
-    ) -> None:
+    def test_rejects_hidden_size_mismatch(self, head: OriginationHead) -> None:
         """A hidden-size disagreement raises rather than broadcasting."""
         with pytest.raises(ValueError):
             head(
-                torch.randn(16, 8), torch.randn(64, 32),
+                torch.randn(16, 8),
+                torch.randn(64, 32),
                 torch.randn(1, 4, 32),
             )
 
@@ -224,14 +225,16 @@ class TestProjectionHeads:
         """
         assert "origination" not in heads(torch.randn(2, 4, 32))
 
-    def test_forward_returns_all_outputs(
-        self, heads: ProjectionHeads
-    ) -> None:
+    def test_forward_returns_all_outputs(self, heads: ProjectionHeads) -> None:
         """``forward`` returns language, planning, tool, and memory outputs."""
         x = torch.randn(2, 4, 32)
         out = heads(x)
         assert set(out) == {
-            "language", "planning", "tool", "memory", "input_reconstruct"
+            "language",
+            "planning",
+            "tool",
+            "memory",
+            "input_reconstruct",
         }
         assert out["language"].shape == (2, 4, 100)
         assert out["planning"].shape == (2, 4, 16)
@@ -241,7 +244,9 @@ class TestProjectionHeads:
     def test_head_outputs_alias(self, heads: ProjectionHeads) -> None:
         """``head_outputs`` is an alias for ``forward``."""
         x = torch.randn(1, 4, 32)
-        assert torch.allclose(heads(x)["language"], heads.head_outputs(x)["language"])
+        assert torch.allclose(
+            heads(x)["language"], heads.head_outputs(x)["language"]
+        )
 
     def test_heads_have_independent_parameters(
         self, heads: ProjectionHeads
@@ -251,9 +256,12 @@ class TestProjectionHeads:
         planning_params = {id(p) for p in heads.planning.parameters()}
         tool_params = {id(p) for p in heads.tool.parameters()}
         memory_params = {id(p) for p in heads.memory.parameters()}
-        all_params = language_params | planning_params | tool_params | memory_params
+        all_params = (
+            language_params | planning_params | tool_params | memory_params
+        )
         assert len(all_params) == sum(
-            len(p) for p in (
+            len(p)
+            for p in (
                 language_params,
                 planning_params,
                 tool_params,
@@ -278,9 +286,7 @@ class TestProjectionHeads:
         for name, _ in heads.named_parameters():
             assert "meta_" not in name
 
-    def test_inputs_only_working_memory(
-        self, heads: ProjectionHeads
-    ) -> None:
+    def test_inputs_only_working_memory(self, heads: ProjectionHeads) -> None:
         """Changing the input changes every head's output."""
         x_a = torch.randn(1, 4, 32)
         x_b = x_a + 0.1
@@ -289,9 +295,7 @@ class TestProjectionHeads:
         for key in ("language", "planning", "tool", "memory"):
             assert not torch.allclose(out_a[key], out_b[key])
 
-    def test_parameter_count_reasonable(
-        self, heads: ProjectionHeads
-    ) -> None:
+    def test_parameter_count_reasonable(self, heads: ProjectionHeads) -> None:
         """Parameter count is positive and below a sanity ceiling."""
         n = sum(p.numel() for p in heads.parameters())
         assert n > 0

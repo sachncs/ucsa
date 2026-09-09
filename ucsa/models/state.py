@@ -222,7 +222,9 @@ def retention_score(
     if torch.any(age < 0):
         raise ValueError("age must be non-negative.")
 
-    importance_term = weights.retention_importance_weight * torch.sigmoid(importance)
+    importance_term = weights.retention_importance_weight * torch.sigmoid(
+        importance
+    )
     usage_term = weights.retention_usage_weight * torch.sigmoid(usage)
     age_term = weights.retention_age_weight * (age / (age + 1.0))
     raw = importance_term + usage_term - age_term
@@ -267,7 +269,9 @@ class PersistentCognitiveState(nn.Module):
 
         self.banks = bank_parameter_dict
         self.bank_specs = {spec.name: spec for spec in bank_specs}
-        self.bank_order: tuple[str, ...] = tuple(spec.name for spec in bank_specs)
+        self.bank_order: tuple[str, ...] = tuple(
+            spec.name for spec in bank_specs
+        )
 
         for spec in bank_specs:
             num_tokens = spec.num_tokens
@@ -430,7 +434,9 @@ class PersistentCognitiveState(nn.Module):
         for name in self.bank_order:
             self.metadata(name, "age").add_(1)
 
-    def record_usage(self, name: str, indices: Tensor, increment: float = 1.0) -> None:
+    def record_usage(
+        self, name: str, indices: Tensor, increment: float = 1.0
+    ) -> None:
         """Increment the usage counter for specific slots in ``name``.
 
         Args:
@@ -492,7 +498,10 @@ class PersistentCognitiveState(nn.Module):
         target = self.get_bank(name)
         if replacement is None:
             replacement_tensor = torch.zeros(
-                k_eff, self.config.hidden_size, device=target.device, dtype=target.dtype
+                k_eff,
+                self.config.hidden_size,
+                device=target.device,
+                dtype=target.dtype,
             )
         else:
             expected_shape = (k_eff, self.config.hidden_size)

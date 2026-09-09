@@ -4,6 +4,7 @@ Kept small and offline-friendly: only smoke tests the loader
 definitions, registry, and dataclass shape. The full task data
 needs network access; that's exercised by ``scripts/eval.py``.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -91,7 +92,9 @@ def test_evaluate_all_smoke_with_fake_examples(monkeypatch):
         def __call__(self, ids):
             # (B, S, V) zeros — all choices equally likely
             return torch.zeros(
-                ids.shape[0], ids.shape[1], 256,
+                ids.shape[0],
+                ids.shape[1],
+                256,
                 dtype=torch.float32,
             )
 
@@ -119,7 +122,9 @@ def test_evaluate_all_smoke_with_fake_examples(monkeypatch):
     finally:
         for n, s in saved.items():
             eval_harness.TASK_REGISTRY[n] = eval_harness.TaskSpec(
-                name=n, loader=s, max_examples=eval_harness.TASK_REGISTRY[n].max_examples
+                name=n,
+                loader=s,
+                max_examples=eval_harness.TASK_REGISTRY[n].max_examples,
             )
 
 
@@ -164,9 +169,7 @@ class TestWinograndeLoader:
         Reading ``options`` raised ``KeyError`` and the task never ran.
         """
         rows = self.fake_dataset()
-        monkeypatch.setattr(
-            eval_harness, "load_dataset", lambda *a, **k: rows
-        )
+        monkeypatch.setattr(eval_harness, "load_dataset", lambda *a, **k: rows)
         examples = list(eval_harness._load_winogrande(seed=42))
         assert len(examples) == 2
 
@@ -179,9 +182,7 @@ class TestWinograndeLoader:
         label inverted every example.
         """
         rows = self.fake_dataset()
-        monkeypatch.setattr(
-            eval_harness, "load_dataset", lambda *a, **k: rows
-        )
+        monkeypatch.setattr(eval_harness, "load_dataset", lambda *a, **k: rows)
         # Seed chosen so the shuffle preserves the input order for this
         # tiny 2-row fixture.
         examples = list(eval_harness._load_winogrande(seed=0))
@@ -200,8 +201,7 @@ def test_streaming_loader_is_seed_deterministic(
     upstream stream order and report different accuracy numbers.
     """
     rows = [
-        {"ctx": str(i), "endings": ["a", "b"], "label": 0}
-        for i in range(20)
+        {"ctx": str(i), "endings": ["a", "b"], "label": 0} for i in range(20)
     ]
 
     class FakeStreaming:
@@ -212,6 +212,7 @@ def test_streaming_loader_is_seed_deterministic(
 
         def shuffle(self, seed: int, buffer_size: int):
             import random
+
             rng = random.Random(seed)
             order = list(range(len(self.rows)))
             rng.shuffle(order)
@@ -225,7 +226,8 @@ def test_streaming_loader_is_seed_deterministic(
             return iter(self.items)
 
     monkeypatch.setattr(
-        eval_harness, "load_dataset",
+        eval_harness,
+        "load_dataset",
         lambda *a, **k: FakeStreaming(rows),
     )
     spec = eval_harness.TaskSpec(
@@ -233,8 +235,12 @@ def test_streaming_loader_is_seed_deterministic(
         loader=eval_harness._load_hellaswag,
         max_examples=5,
     )
-    first = [ex["context"] for ex in spec.loader(spec.seed)][: spec.max_examples]
-    second = [ex["context"] for ex in spec.loader(spec.seed)][: spec.max_examples]
+    first = [ex["context"] for ex in spec.loader(spec.seed)][
+        : spec.max_examples
+    ]
+    second = [ex["context"] for ex in spec.loader(spec.seed)][
+        : spec.max_examples
+    ]
     assert first == second
     # And a different seed picks a different prefix.
     other_spec = eval_harness.TaskSpec(
@@ -243,9 +249,9 @@ def test_streaming_loader_is_seed_deterministic(
         max_examples=5,
         seed=999,
     )
-    other = [
-        ex["context"] for ex in other_spec.loader(other_spec.seed)
-    ][: other_spec.max_examples]
+    other = [ex["context"] for ex in other_spec.loader(other_spec.seed)][
+        : other_spec.max_examples
+    ]
     # Both prefixes are deterministic; the second one just comes
     # from a different shuffle.
     assert other is not None

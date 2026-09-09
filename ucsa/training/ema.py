@@ -17,6 +17,7 @@ References:
   - Maes et al., "LeWorldModel: Stable End-to-End Joint-Embedding
     Predictive Architecture from Pixels", arXiv 2603.19312, Mar 2026
 """
+
 from __future__ import annotations
 
 from copy import deepcopy

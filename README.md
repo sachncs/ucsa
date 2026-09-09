@@ -3,7 +3,7 @@
 [![CI](https://github.com/sachncs/ucsa/actions/workflows/ci.yml/badge.svg)](https://github.com/sachncs/ucsa/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-603%20passing-brightgreen.svg)](https://github.com/sachncs/ucsa)
+[![Tests](https://img.shields.io/badge/tests-607%20passing-brightgreen.svg)](https://github.com/sachncs/ucsa)
 [![Coverage](https://img.shields.io/badge/coverage-80%25%20enforced-brightgreen.svg)](https://github.com/sachncs/ucsa)
 [![Docs](https://img.shields.io/badge/docs-site-blue.svg)](https://sachncs.github.io/ucsa/)
 
@@ -114,7 +114,7 @@ ucsa/
 ├── training/        trainer, dataset, curriculum, metrics,
 │                    evaluation, EMA, Muon optimiser, eval harness
 ├── utils/           seed, checkpoint, logging
-├── tests/           603 tests, run with `pytest -q`
+├── tests/           607 tests, run with `pytest -q`
 ├── train.py         training entrypoint
 ├── infer.py         inference entrypoint
 └── paper/           paper draft (PAPER.md, TABLES.md)
@@ -200,11 +200,12 @@ Ablation flags accepted by `scripts/train.py`:
 ## Tests
 
 ```bash
-pytest -q           # 603 tests, no integration marker
-pytest -q -m slow   # 603 tests including the slow localisation-claim run
-ruff check          # lint
-ruff check --fix    # autofix safe violations
-black --check ucsa tests
+pytest -q               # 607 tests total
+pytest -q -m "not slow" # 600 fast tests, runs in ~2 minutes
+pytest -q -m slow       # 7 slow tests (the localisation-claim run)
+ruff check ucsa tests scripts  # lint
+ruff check --fix ucsa tests scripts  # autofix safe violations
+black --check ucsa tests scripts  # format check
 ```
 
 Coverage is enforced at 80% in CI

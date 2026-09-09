@@ -177,9 +177,7 @@ def attention_entropy(attention_weights: Tensor) -> float:
     return float(entropy.mean().item())
 
 
-def throughput(
-    num_tokens: int, elapsed_seconds: float
-) -> float:
+def throughput(num_tokens: int, elapsed_seconds: float) -> float:
     """Compute tokens-per-second throughput."""
     if elapsed_seconds <= 0.0:
         return 0.0
@@ -195,18 +193,14 @@ def gpu_memory_bytes(device: torch.device | None = None) -> int:
     return int(torch.cuda.max_memory_allocated(device))
 
 
-def memory_utilization(
-    used: int, capacity: int
-) -> float:
+def memory_utilization(used: int, capacity: int) -> float:
     """Compute memory utilisation in ``[0, 1]``."""
     if capacity <= 0:
         return 0.0
     return float(used) / float(capacity)
 
 
-def memory_replacement_rate(
-    num_recycled: int, total_slots: int
-) -> float:
+def memory_replacement_rate(num_recycled: int, total_slots: int) -> float:
     """Compute replacement rate as recycled / total slots."""
     if total_slots <= 0:
         return 0.0

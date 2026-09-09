@@ -208,10 +208,10 @@ class Trainer:
             max_steps=config.max_steps,
         )
         self.state = TrainerState()
-        self.amp_enabled = (
-            self.device.type in ("cuda", "mps")
-            and config.amp_dtype in (torch.float16, torch.bfloat16)
-        )
+        self.amp_enabled = self.device.type in (
+            "cuda",
+            "mps",
+        ) and config.amp_dtype in (torch.float16, torch.bfloat16)
         # Stash a reference for the scheduler to read.
         self.optimizer._ucsa_trainer_state = self.state  # type: ignore[attr-defined]
 
@@ -220,10 +220,9 @@ class Trainer:
         # use its JEPA predicted embedding as ``jepa_target`` instead
         # of the previous-iteration working memory.
         self.target_encoder: nn.Module | None = None
-        if config.ema_momentum > 0.0 and isinstance(
-            self.model, nn.Module
-        ):
+        if config.ema_momentum > 0.0 and isinstance(self.model, nn.Module):
             from ucsa.training.ema import EMATargetEncoder
+
             self.target_encoder = EMATargetEncoder(
                 self.model, momentum=config.ema_momentum
             )
@@ -284,7 +283,7 @@ class Trainer:
         # Align targets length to logits sequence length (model output may be shorter
         # than dataset sequence length when working-bank < dataset seq_len).
         if targets.shape[1] > logits.shape[1]:
-            targets = targets[:, -logits.shape[1]:]
+            targets = targets[:, -logits.shape[1] :]
         elif targets.shape[1] < logits.shape[1]:
             pad = logits.shape[1] - targets.shape[1]
             # Pad with the loss's ignore index, not with zero. Padding with
@@ -302,10 +301,20 @@ class Trainer:
         # Prefer real model aux outputs over randn dummies. Fall back only
         # when the model doesn't expose them (e.g. callable test models).
         if "jepa" in active:
-            jp = outputs.get("jepa_predicted") if isinstance(outputs, dict) else None
-            jt = outputs.get("jepa_target") if isinstance(outputs, dict) else None
+            jp = (
+                outputs.get("jepa_predicted")
+                if isinstance(outputs, dict)
+                else None
+            )
+            jt = (
+                outputs.get("jepa_target")
+                if isinstance(outputs, dict)
+                else None
+            )
             multi_step = (
-                outputs.get("jepa_multi_step") if isinstance(outputs, dict) else None
+                outputs.get("jepa_multi_step")
+                if isinstance(outputs, dict)
+                else None
             )
             # When an EMA target encoder is active, swap the targets in the
             # multi-step list (or the single pair) for the EMA model's
@@ -363,7 +372,11 @@ class Trainer:
                 lt = torch.randn(8, logits.shape[-1])
                 kwargs["long_term"] = lt
         if "router" in active:
-            rl = outputs.get("router_logits") if isinstance(outputs, dict) else None
+            rl = (
+                outputs.get("router_logits")
+                if isinstance(outputs, dict)
+                else None
+            )
             if rl is not None:
                 kwargs["router_logits"] = rl
         aux = (
@@ -378,9 +391,7 @@ class Trainer:
         )
         return combined
 
-    def train_step(
-        self, batch: tuple[Tensor, Tensor]
-    ) -> dict[str, float]:
+    def train_step(self, batch: tuple[Tensor, Tensor]) -> dict[str, float]:
         """Run a single training step.
 
         Args:

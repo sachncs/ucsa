@@ -382,7 +382,9 @@ class TestTransformerOperator:
         self, state: PersistentCognitiveState
     ) -> None:
         """Disabling cross attention removes the cross-attn module."""
-        op = TransformerOperator(tiny_config(use_memory_index_cross_attention=False))
+        op = TransformerOperator(
+            tiny_config(use_memory_index_cross_attention=False)
+        )
         assert all(block.cross_attn is None for block in op.blocks)
 
     def test_cross_attention_enabled_by_default(
@@ -404,9 +406,13 @@ class TestTransformerOperator:
     ) -> None:
         """KV cache length grows by the full concatenated sequence length."""
         operator(state, torch.randn(1, 3, 32))
-        first_lengths = [b.self_attn.kv_cache["length"] for b in operator.blocks]
+        first_lengths = [
+            b.self_attn.kv_cache["length"] for b in operator.blocks
+        ]
         operator(state, torch.randn(1, 5, 32))
-        second_lengths = [b.self_attn.kv_cache["length"] for b in operator.blocks]
+        second_lengths = [
+            b.self_attn.kv_cache["length"] for b in operator.blocks
+        ]
         # Second call adds (streamed PCS tokens + 5) to the cache. The intent
         # bank is not streamed, so it does not contribute.
         streamed = sum(

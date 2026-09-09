@@ -36,7 +36,9 @@ class FakeTokenizer:
         self.eos_token_id = 1
         self.calls: list[list[str]] = []
 
-    def encode(self, text: str, add_special_tokens: bool = True, **kwargs: object) -> list[int]:
+    def encode(
+        self, text: str, add_special_tokens: bool = True, **kwargs: object
+    ) -> list[int]:
         del add_special_tokens, kwargs
         return [(ord(c) % self.vocab_size) for c in text[:32]]
 
@@ -45,8 +47,7 @@ class FakeTokenizer:
         ids_list = [self.encode(t) for t in texts]
         max_len = max(len(ids) for ids in ids_list)
         padded = [
-            ids + [self.pad_token_id] * (max_len - len(ids))
-            for ids in ids_list
+            ids + [self.pad_token_id] * (max_len - len(ids)) for ids in ids_list
         ]
         return {"input_ids": torch.tensor(padded, dtype=torch.long)}
 
@@ -129,7 +130,9 @@ class TestPerception:
     def perception(self) -> Perception:
         """Provide a perception instance with a fake tokenizer."""
         config = tiny_config()
-        fake = FakeTokenizer(vocab_size=config.vocab_size, pad_token_id=config.pad_token_id)
+        fake = FakeTokenizer(
+            vocab_size=config.vocab_size, pad_token_id=config.pad_token_id
+        )
         wrapper = TokenizerWrapper.__new__(TokenizerWrapper)
         wrapper.tokenizer = fake
         wrapper.max_seq_len = config.max_seq_len
@@ -148,14 +151,18 @@ class TestPerception:
         out = perception.project(x, modality=MODALITY_TEXT)
         assert out.shape == x.shape
 
-    def test_project_modality_changes_output(self, perception: Perception) -> None:
+    def test_project_modality_changes_output(
+        self, perception: Perception
+    ) -> None:
         """Different modalities produce different projected outputs."""
         x = torch.randn(1, 4, 32)
         out_text = perception.project(x, modality=MODALITY_TEXT)
         out_code = perception.project(x, modality=MODALITY_CODE)
         assert not torch.allclose(out_text, out_code)
 
-    def test_project_unknown_modality_raises(self, perception: Perception) -> None:
+    def test_project_unknown_modality_raises(
+        self, perception: Perception
+    ) -> None:
         """An unknown modality raises ``ValueError``."""
         with pytest.raises(ValueError):
             perception.project(torch.randn(1, 4, 32), modality=999)
@@ -197,7 +204,9 @@ class TestPerception:
     def test_perception_without_modality_embedding(self) -> None:
         """Modality embedding is optional."""
         config = tiny_config(add_modality_embedding=False)
-        fake = FakeTokenizer(vocab_size=config.vocab_size, pad_token_id=config.pad_token_id)
+        fake = FakeTokenizer(
+            vocab_size=config.vocab_size, pad_token_id=config.pad_token_id
+        )
         wrapper = TokenizerWrapper.__new__(TokenizerWrapper)
         wrapper.tokenizer = fake
         wrapper.max_seq_len = config.max_seq_len
@@ -217,7 +226,9 @@ class TestPerception:
 
     def test_pad_token_zero_grad(self, perception: Perception) -> None:
         """Pad tokens contribute zero gradient when padding_idx is set."""
-        ids = torch.tensor([[1, 2, perception.config.pad_token_id]], dtype=torch.long)
+        ids = torch.tensor(
+            [[1, 2, perception.config.pad_token_id]], dtype=torch.long
+        )
         out = perception.embed_tokens(ids)
         out.sum().backward()
         grad = perception.token_embedding.weight.grad

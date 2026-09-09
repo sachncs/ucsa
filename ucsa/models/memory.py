@@ -190,7 +190,8 @@ class Memory:
             device=long_term.device, dtype=long_term.dtype
         )
         importance_to_write = candidate.importance[:k].to(
-            device=long_term.device, dtype=self.cstate.metadata("long_term", "importance").dtype
+            device=long_term.device,
+            dtype=self.cstate.metadata("long_term", "importance").dtype,
         )
         empty = self._empty_long_term_indices(limit=k)
         empty_indices = torch.tensor(empty, dtype=torch.long)
@@ -201,9 +202,9 @@ class Memory:
 
         with torch.no_grad():
             long_term[empty_indices] = tokens_to_write
-            self.cstate.metadata("long_term", "importance")[empty_indices] = (
-                importance_to_write
-            )
+            self.cstate.metadata("long_term", "importance")[
+                empty_indices
+            ] = importance_to_write
             self.cstate.metadata("long_term", "age")[empty_indices] = 0
             self.cstate.metadata("long_term", "usage")[empty_indices] = 1.0
         self.cstate.update_retention()
@@ -310,9 +311,7 @@ class Memory:
             Scalar threshold.
         """
         if not 0.0 <= percentile <= 1.0:
-            raise ValueError(
-                f"percentile must be in [0, 1], got {percentile}."
-            )
+            raise ValueError(f"percentile must be in [0, 1], got {percentile}.")
         scores = self.get_retention_scores("long_term")
         if scores.numel() == 0:
             return 0.0

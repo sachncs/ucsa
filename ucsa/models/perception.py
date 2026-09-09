@@ -56,7 +56,9 @@ class PerceptionConfig:
                 f"hidden_size must be positive, got {self.hidden_size}."
             )
         if self.vocab_size <= 0:
-            raise ValueError(f"vocab_size must be positive, got {self.vocab_size}.")
+            raise ValueError(
+                f"vocab_size must be positive, got {self.vocab_size}."
+            )
         if self.max_seq_len <= 0:
             raise ValueError(
                 f"max_seq_len must be positive, got {self.max_seq_len}."
@@ -201,7 +203,9 @@ class Perception(nn.Module):
             )
         else:
             self.modality_embedding = None
-        self.modality_projection = nn.Linear(config.hidden_size, config.hidden_size)
+        self.modality_projection = nn.Linear(
+            config.hidden_size, config.hidden_size
+        )
         self.modality_to_index: dict[int, int] = {
             modality: index for index, modality in enumerate(config.modalities)
         }

@@ -184,7 +184,7 @@ class TestReasoningLoop:
         assert isinstance(out, PersistentCognitiveState)
 
     def test_forward_preserves_pcs_structure(self) -> None:
-        """After a forward pass the PCS still has all six banks."""
+        """After a forward pass the PCS still has all of its banks."""
         loop = ReasoningLoop(
             tiny_operator(), ReasoningLoopConfig(num_iterations=1)
         )
@@ -196,6 +196,7 @@ class TestReasoningLoop:
             "episode",
             "task",
             "memory_index",
+            "intent",
         ):
             assert name in out.bank_specs
 

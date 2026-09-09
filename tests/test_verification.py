@@ -65,7 +65,9 @@ class TestHeuristicVerifier:
         """Provide a default heuristic verifier."""
         return HeuristicVerifier()
 
-    def test_construction_default_weights(self, verifier: HeuristicVerifier) -> None:
+    def test_construction_default_weights(
+        self, verifier: HeuristicVerifier
+    ) -> None:
         """Default weights are non-negative and sum to one."""
         total = (
             verifier.confidence_weight
@@ -125,11 +127,15 @@ class TestHeuristicVerifier:
         )
         assert novelty == pytest.approx(1.0)
 
-    def test_novelty_low_for_duplicate(self, verifier: HeuristicVerifier) -> None:
+    def test_novelty_low_for_duplicate(
+        self, verifier: HeuristicVerifier
+    ) -> None:
         """A candidate identical to long-term memory has low novelty."""
         tokens = torch.randn(4, 32)
         novelty = HeuristicVerifier.novelty(
-            tokens, tokens, torch.ones(4),
+            tokens,
+            tokens,
+            torch.ones(4),
         )
         assert novelty < 0.1
 
@@ -141,9 +147,7 @@ class TestHeuristicVerifier:
         recency = HeuristicVerifier.recency(importance)
         assert 0.0 <= recency <= 1.0
 
-    def test_usage_signal_above_half(
-        self, verifier: HeuristicVerifier
-    ) -> None:
+    def test_usage_signal_above_half(self, verifier: HeuristicVerifier) -> None:
         """Usage signal is at least 0.5."""
         usage = HeuristicVerifier.usage_signal(torch.tensor([1.0, 2.0]))
         assert usage >= 0.5
@@ -155,9 +159,7 @@ class TestHeuristicVerifier:
         loss = verifier.update_signal(tiny_update(), tiny_pcs(), was_used=True)
         assert loss.item() == 0.0
 
-    def test_score_bounded_zero_one(
-        self, verifier: HeuristicVerifier
-    ) -> None:
+    def test_score_bounded_zero_one(self, verifier: HeuristicVerifier) -> None:
         """Output score is always in ``[0, 1]``."""
         for _ in range(20):
             update = tiny_update(

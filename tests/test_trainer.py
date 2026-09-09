@@ -102,9 +102,7 @@ class TestTargetAlignment:
                 self.positions = positions
                 self.vocab_size = vocab_size
                 torch.manual_seed(0)
-                self.table = nn.Parameter(
-                    torch.randn(positions, vocab_size)
-                )
+                self.table = nn.Parameter(torch.randn(positions, vocab_size))
 
             def forward(self, inputs: Tensor) -> Tensor:
                 """Return the same logits regardless of input."""
@@ -207,10 +205,15 @@ class TestTrainerBasics:
 
     def test_train_returns_history(self, dataset: DataLoader) -> None:
         """``train`` returns a list of metric snapshots."""
-        trainer = tiny_trainer(config=TrainerConfig(
-            learning_rate=3e-4, max_steps=10, warmup_steps=1,
-            log_every_n_steps=1, amp_dtype=torch.float32,
-        ))
+        trainer = tiny_trainer(
+            config=TrainerConfig(
+                learning_rate=3e-4,
+                max_steps=10,
+                warmup_steps=1,
+                log_every_n_steps=1,
+                amp_dtype=torch.float32,
+            )
+        )
         history = trainer.train(dataset, num_steps=5)
         assert len(history) >= 1
         for snapshot in history:
@@ -331,9 +334,7 @@ class TestTrainerBasics:
         one.
         """
         curriculum = Curriculum(
-            CurriculumSchedule(
-                stage_1_end=1, stage_2_end=2, stage_3_end=3
-            )
+            CurriculumSchedule(stage_1_end=1, stage_2_end=2, stage_3_end=3)
         )
         trainer = tiny_trainer(curriculum=curriculum)
         for _ in range(5):

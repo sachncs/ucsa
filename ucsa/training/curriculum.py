@@ -129,7 +129,9 @@ class Curriculum:
             return CurriculumStage.LANGUAGE_JEPA_MEMORY
         return CurriculumStage.JOINT
 
-    def active_components(self, stage: CurriculumStage | None = None) -> set[str]:
+    def active_components(
+        self, stage: CurriculumStage | None = None
+    ) -> set[str]:
         """Return the set of loss component names active at ``stage``.
 
         Args:

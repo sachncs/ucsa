@@ -199,12 +199,17 @@ class MixtureOfExperts(nn.Module):
         topk_weights, topk_indices = torch.topk(
             routing_weights, self.config.top_k, dim=-1
         )
-        topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True).clamp(min=1e-9)
+        topk_weights = topk_weights / topk_weights.sum(
+            dim=-1, keepdim=True
+        ).clamp(min=1e-9)
 
-        expert_capacity = int(
-            (num_tokens * self.config.top_k / self.config.num_experts)
-            * self.config.capacity_factor
-        ) + 1
+        expert_capacity = (
+            int(
+                (num_tokens * self.config.top_k / self.config.num_experts)
+                * self.config.capacity_factor
+            )
+            + 1
+        )
         output = torch.zeros_like(flat_x)
         router_prob_per_expert = routing_weights.sum(dim=0) / num_tokens
 
@@ -226,7 +231,9 @@ class MixtureOfExperts(nn.Module):
             )
 
         output = output.reshape(batch, seq, hidden)
-        aux_loss = self._load_balancing_loss(router_logits, router_prob_per_expert)
+        aux_loss = self._load_balancing_loss(
+            router_logits, router_prob_per_expert
+        )
         return output, aux_loss
 
     def _load_balancing_loss(
