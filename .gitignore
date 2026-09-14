@@ -46,9 +46,10 @@ wandb/
 logs/
 *.log
 *.tmp
-
-# Model weights (uncomment if you want to ignore them; we keep them in repo)
-# *.safetensors
-# *.pt
-# *.pthckpts/
 ckpts/
+
+# Site
+site/dist
+site/node_modules
+site/.vite
+site/tsconfig.tsbuildinfo

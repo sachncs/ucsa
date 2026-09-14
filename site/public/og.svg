@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" role="img" aria-label="UCSA">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0a0e1a"/>
+      <stop offset="100%" stop-color="#111a2e"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.78" cy="0.18" r="0.6">
+      <stop offset="0%" stop-color="#7c5cff" stop-opacity="0.32"/>
+      <stop offset="100%" stop-color="#7c5cff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="ring" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="60%" stop-color="#0a0e1a" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#7c5cff" stop-opacity="0.18"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+
+  <g transform="translate(940 200)">
+    <circle cx="0" cy="0" r="160" fill="url(#ring)"/>
+    <circle cx="0" cy="0" r="100" fill="none" stroke="#7c5cff" stroke-width="1" stroke-dasharray="2 4" opacity="0.5"/>
+    <g fill="#c0b6ff">
+      <circle cx="0" cy="-100" r="9"/>
+      <circle cx="87" cy="-50" r="9"/>
+      <circle cx="87" cy="50" r="9"/>
+      <circle cx="0" cy="100" r="9"/>
+      <circle cx="-87" cy="50" r="9"/>
+      <circle cx="-87" cy="-50" r="9"/>
+    </g>
+    <g transform="translate(0 138)">
+      <circle cx="0" cy="0" r="14" fill="#ff6a6a"/>
+      <circle cx="0" cy="0" r="14" fill="none" stroke="#ffd2d2" stroke-width="1" opacity="0.6"/>
+    </g>
+    <circle cx="0" cy="0" r="30" fill="#ffffff"/>
+    <circle cx="0" cy="0" r="30" fill="none" stroke="#7c5cff" stroke-width="2"/>
+    <circle cx="0" cy="0" r="16" fill="#0a0e1a"/>
+    <text x="0" y="3" text-anchor="middle" font-family="Inter, system-ui, sans-serif"
+      font-size="7" font-weight="700" fill="#fff" letter-spacing="1.4">PCS</text>
+  </g>
+
+  <text x="80" y="170" font-family="Inter, system-ui, sans-serif" font-size="22"
+    font-weight="600" letter-spacing="3" fill="#aab2d5">UCSA</text>
+  <text x="80" y="280" font-family="Inter, system-ui, sans-serif" font-size="78"
+    font-weight="700" letter-spacing="-2" fill="#ffffff">One state.</text>
+  <text x="80" y="370" font-family="Inter, system-ui, sans-serif" font-size="78"
+    font-weight="700" letter-spacing="-2" fill="#ffffff">Seven banks.</text>
+  <text x="80" y="460" font-family="Newsreader, serif" font-size="78"
+    font-style="italic" font-weight="400" letter-spacing="-2" fill="#c0b6ff">Persistent.</text>
+
+  <text x="80" y="540" font-family="Inter, system-ui, sans-serif" font-size="20"
+    fill="#aab2d5">A foundation model whose entire computation orbits one differentiable state.</text>
+</svg>
