@@ -323,8 +323,7 @@ class Memory:
         return float(torch.quantile(scores, percentile).item())
 
     def recycle_below(self, threshold: float) -> list[int]:
-        """Recycle every long-term slot whose retention score is below
-        ``threshold``.
+        """Recycles every long-term slot scoring below ``threshold``.
 
         Args:
             threshold: Retention score cutoff.
