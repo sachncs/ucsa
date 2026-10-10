@@ -109,26 +109,26 @@ class TestBuildHelpers:
         assert trainer.config.max_steps == 3
 
     def test_resolve_dtype(self) -> None:
-        """``_resolve_dtype`` maps strings to torch dtypes."""
-        assert train._resolve_dtype("float32") is torch.float32
-        assert train._resolve_dtype("float16") is torch.float16
-        assert train._resolve_dtype("bfloat16") is torch.bfloat16
+        """``resolve_dtype`` maps strings to torch dtypes."""
+        assert train.resolve_dtype("float32") is torch.float32
+        assert train.resolve_dtype("float16") is torch.float16
+        assert train.resolve_dtype("bfloat16") is torch.bfloat16
         with pytest.raises(ValueError):
-            train._resolve_dtype("bogus")
+            train.resolve_dtype("bogus")
 
 
 class TestConfigConversion:
     """Tests for the config-to-dict helper."""
 
     def test_dict_passthrough(self) -> None:
-        """``_config_to_dict`` returns dicts unchanged."""
+        """``config_to_dict`` returns dicts unchanged."""
         cfg = {"a": 1}
-        assert train._config_to_dict(cfg) is cfg
+        assert train.config_to_dict(cfg) is cfg
 
     def test_non_dict_rejected(self) -> None:
         """Non-dict configs without omegaconf are rejected."""
         with pytest.raises(TypeError):
-            train._config_to_dict(42)
+            train.config_to_dict(42)
 
 
 class TestInference:
