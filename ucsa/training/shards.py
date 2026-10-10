@@ -85,7 +85,7 @@ def write_shard(
     return written
 
 
-class TokenShard:
+class Shard:
     """A memory-mapped token file that yields language-model batches."""
 
     def __init__(self, path: str) -> None:
