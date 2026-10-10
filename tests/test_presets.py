@@ -1,7 +1,8 @@
 """Presets and overrides: one config file, validated before any compute."""
 
+import json
+
 import pytest
-import yaml
 
 from ucsa.training import presets
 
@@ -32,7 +33,7 @@ def test_malformed_overrides_are_rejected(bad):
         presets.apply_overrides(presets.load("tiny"), [bad])
 
 
-def test_overrides_parse_yaml_values():
+def test_overrides_parse_json_values():
     config = presets.apply_overrides(
         presets.load("tiny"),
         ["model.read_gate=true", "train.lr=2.4e-3", "model.chunk_size=16"],
@@ -53,6 +54,7 @@ def test_overrides_parse_yaml_values():
         ("[1, 2]", [1, 2]),
         ("64", 64),
         ("word", "word"),
+        ("train-zfilter.bin", "train-zfilter.bin"),
     ],
 )
 def test_values_parse_the_way_they_look(raw, value):
@@ -86,8 +88,8 @@ def test_seed_and_output_directory_reach_the_train_config():
 
 
 def test_a_custom_file_replaces_the_default(tmp_path):
-    path = tmp_path / "c.yaml"
-    path.write_text(yaml.safe_dump({"presets": {"mine": {"model": {}}}}))
+    path = tmp_path / "c.json"
+    path.write_text(json.dumps({"presets": {"mine": {"model": {}}}}))
     assert presets.names(str(path)) == ["mine"]
     assert presets.load("mine", str(path)) == {"model": {}, "train": {}}
 
