@@ -1,4 +1,4 @@
-"""Tests for :mod:`ucsa.models.state`."""
+"""Tests for :mod:`ucsa.models.cognitive`."""
 
 from __future__ import annotations
 
@@ -6,22 +6,21 @@ import pytest
 import torch
 from torch import Tensor
 
-from ucsa.models.state import (
+from ucsa.models import cognitive
+from ucsa.models.cognitive import (
     BANK_NAMES,
     DEFAULT_BANK_SIZES,
     BankSpec,
-    PCSConfig,
-    PersistentCognitiveState,
     retention_score,
 )
 
 
 class TestPCSConfig:
-    """Tests for :class:`PCSConfig`."""
+    """Tests for :class:`cognitive.Config`."""
 
     def test_default_config_is_valid(self) -> None:
         """Default config constructs without error and exposes sane values."""
-        config = PCSConfig()
+        config = cognitive.Config()
         assert config.hidden_size == 128
         assert config.init_std > 0.0
         assert config.retention_floor >= 0.0
@@ -29,12 +28,12 @@ class TestPCSConfig:
     def test_zero_hidden_size_rejected(self) -> None:
         """``hidden_size`` of zero or less must raise."""
         with pytest.raises(ValueError):
-            PCSConfig(hidden_size=0)
+            cognitive.Config(hidden_size=0)
 
     def test_negative_init_std_rejected(self) -> None:
         """``init_std`` of zero or less must raise."""
         with pytest.raises(ValueError):
-            PCSConfig(init_std=-0.1)
+            cognitive.Config(init_std=-0.1)
 
 
 class TestBankSpec:
@@ -71,7 +70,7 @@ class TestResolveBankSizes:
 
     def test_overrides_apply(self) -> None:
         """Overrides replace default sizes for named banks."""
-        from ucsa.models.state import resolve_bank_sizes
+        from ucsa.models.cognitive import resolve_bank_sizes
 
         resolved = resolve_bank_sizes({"working": 200})
         assert resolved["working"] == 200
@@ -79,7 +78,7 @@ class TestResolveBankSizes:
 
     def test_invalid_override_rejected(self) -> None:
         """Non-positive override size must raise."""
-        from ucsa.models.state import resolve_bank_sizes
+        from ucsa.models.cognitive import resolve_bank_sizes
 
         with pytest.raises(ValueError):
             resolve_bank_sizes({"working": 0})
@@ -90,7 +89,7 @@ class TestIntentBank:
 
     def test_intent_bank_exists_with_default_size(self) -> None:
         """The intent bank is present, trainable, and 16 tokens by default."""
-        state = PersistentCognitiveState(PCSConfig(hidden_size=32))
+        state = cognitive.State(cognitive.Config(hidden_size=32))
         assert "intent" in state.bank_specs
         assert state.bank_size("intent") == 16
         assert DEFAULT_BANK_SIZES["intent"] == 16
@@ -117,8 +116,8 @@ class TestIntentBank:
 
     def test_intent_bank_size_override(self) -> None:
         """``bank_sizes`` can resize the intent bank like any other."""
-        state = PersistentCognitiveState(
-            PCSConfig(hidden_size=16, bank_sizes={"intent": 4})
+        state = cognitive.State(
+            cognitive.Config(hidden_size=16, bank_sizes={"intent": 4})
         )
         assert state.bank_size("intent") == 4
         assert state.get_bank("intent").shape == (4, 16)
@@ -129,8 +128,8 @@ class TestIntentBank:
         Callers passing ``bank_sizes`` for the original six banks must keep
         working, with the intent bank falling back to its default.
         """
-        state = PersistentCognitiveState(
-            PCSConfig(
+        state = cognitive.State(
+            cognitive.Config(
                 hidden_size=16,
                 bank_sizes={
                     "working": 8,
@@ -147,7 +146,7 @@ class TestIntentBank:
 
     def test_intent_bank_has_retention_metadata(self) -> None:
         """The bank carries the same metadata buffers as every other bank."""
-        state = PersistentCognitiveState(PCSConfig(hidden_size=16))
+        state = cognitive.State(cognitive.Config(hidden_size=16))
         snapshot = state.get_all_metadata()
         assert "intent" in snapshot
         for field_name in ("importance", "usage", "age", "retention"):
@@ -162,14 +161,14 @@ class TestRetentionScore:
         importance = torch.tensor([0.0, 1.0, 5.0, 8.0])
         usage = torch.tensor([0.0, 0.0, 3.0, 3.0])
         age = torch.tensor([0, 1, 10, 10])
-        config = PCSConfig()
+        config = cognitive.Config()
         score = retention_score(importance, usage, age, config)
         assert torch.all(score >= 0.0)
         assert torch.all(score <= 1.0)
 
     def test_higher_importance_increases_score(self) -> None:
         """All else equal, higher importance raises the score."""
-        config = PCSConfig()
+        config = cognitive.Config()
         importance = torch.tensor([0.0, 10.0])
         usage = torch.zeros(2)
         age = torch.zeros(2)
@@ -178,7 +177,7 @@ class TestRetentionScore:
 
     def test_higher_age_decreases_score(self) -> None:
         """All else equal, higher age lowers the score."""
-        config = PCSConfig()
+        config = cognitive.Config()
         importance = torch.ones(3)
         usage = torch.ones(3)
         age = torch.tensor([0, 5, 50])
@@ -187,7 +186,7 @@ class TestRetentionScore:
 
     def test_shape_mismatch_raises(self) -> None:
         """Mismatched shapes raise ``ValueError``."""
-        config = PCSConfig()
+        config = cognitive.Config()
         with pytest.raises(ValueError):
             retention_score(
                 torch.zeros(2),
@@ -198,7 +197,7 @@ class TestRetentionScore:
 
     def test_negative_inputs_raise(self) -> None:
         """Negative importance, usage, or age raise ``ValueError``."""
-        config = PCSConfig()
+        config = cognitive.Config()
         with pytest.raises(ValueError):
             retention_score(
                 torch.tensor([-1.0]),
@@ -223,73 +222,61 @@ class TestRetentionScore:
 
 
 class TestPersistentCognitiveState:
-    """Tests for :class:`PersistentCognitiveState`."""
+    """Tests for :class:`cognitive.State`."""
 
     @pytest.fixture
-    def config(self) -> PCSConfig:
+    def config(self) -> cognitive.Config:
         """Default PCS config for tests."""
-        return PCSConfig(hidden_size=32)
+        return cognitive.Config(hidden_size=32)
 
     @pytest.fixture
-    def state(self, config: PCSConfig) -> PersistentCognitiveState:
+    def state(self, config: cognitive.Config) -> cognitive.State:
         """A fresh PCS instance."""
-        return PersistentCognitiveState(config)
+        return cognitive.State(config)
 
-    def test_all_default_banks_present(
-        self, state: PersistentCognitiveState
-    ) -> None:
+    def test_all_default_banks_present(self, state: cognitive.State) -> None:
         """Every default bank exists with its default size."""
         for name in BANK_NAMES:
             assert name in state.bank_specs
             assert state.bank_size(name) == DEFAULT_BANK_SIZES[name]
 
-    def test_bank_tensor_shape(self, state: PersistentCognitiveState) -> None:
+    def test_bank_tensor_shape(self, state: cognitive.State) -> None:
         """Bank tensors have shape ``(num_tokens, hidden_size)``."""
         for name in BANK_NAMES:
             tensor = state.get_bank(name)
             assert tensor.shape == (DEFAULT_BANK_SIZES[name], 32)
 
-    def test_get_all_tokens_concatenates(
-        self, state: PersistentCognitiveState
-    ) -> None:
+    def test_get_all_tokens_concatenates(self, state: cognitive.State) -> None:
         """``get_all_tokens`` returns the concatenation of every bank."""
         all_tokens = state.get_all_tokens()
         assert all_tokens.shape == (state.total_tokens, 32)
         expected_total = sum(state.bank_size(n) for n in BANK_NAMES)
         assert state.total_tokens == expected_total
 
-    def test_banks_are_parameters(
-        self, state: PersistentCognitiveState
-    ) -> None:
+    def test_banks_are_parameters(self, state: cognitive.State) -> None:
         """Every default bank is a learnable :class:`nn.Parameter`."""
         for name in BANK_NAMES:
             tensor = state.get_bank(name)
             assert isinstance(tensor, Tensor)
             assert tensor.requires_grad
 
-    def test_parameter_count(self, state: PersistentCognitiveState) -> None:
+    def test_parameter_count(self, state: cognitive.State) -> None:
         """The number of trainable parameters matches the PCS layout."""
         params = list(state.parameters())
         total = sum(DEFAULT_BANK_SIZES[name] * 32 for name in BANK_NAMES)
         assert sum(p.numel() for p in params) == total
 
-    def test_bank_size_unknown_raises(
-        self, state: PersistentCognitiveState
-    ) -> None:
+    def test_bank_size_unknown_raises(self, state: cognitive.State) -> None:
         """Querying an unknown bank raises ``KeyError``."""
         with pytest.raises(KeyError):
             state.bank_size("nope")
 
-    def test_get_bank_unknown_raises(
-        self, state: PersistentCognitiveState
-    ) -> None:
+    def test_get_bank_unknown_raises(self, state: cognitive.State) -> None:
         """``get_bank`` with an unknown name raises ``KeyError``."""
         with pytest.raises(KeyError):
             state.get_bank("nope")
 
-    def test_set_bank_replaces_contents(
-        self, state: PersistentCognitiveState
-    ) -> None:
+    def test_set_bank_replaces_contents(self, state: cognitive.State) -> None:
         """``set_bank`` writes the provided tensor into the bank."""
         replacement = torch.full((state.bank_size("working"), 32), 0.5)
         state.set_bank("working", replacement)
@@ -297,22 +284,18 @@ class TestPersistentCognitiveState:
         assert torch.allclose(current, replacement)
 
     def test_set_bank_shape_mismatch_raises(
-        self, state: PersistentCognitiveState
+        self, state: cognitive.State
     ) -> None:
         """Wrong-shape replacement raises ``ValueError``."""
         with pytest.raises(ValueError):
             state.set_bank("working", torch.zeros(3, 3))
 
-    def test_set_bank_unknown_raises(
-        self, state: PersistentCognitiveState
-    ) -> None:
+    def test_set_bank_unknown_raises(self, state: cognitive.State) -> None:
         """Unknown bank name raises ``KeyError``."""
         with pytest.raises(KeyError):
             state.set_bank("nope", torch.zeros(1, 32))
 
-    def test_reset_metadata_zeros_all(
-        self, state: PersistentCognitiveState
-    ) -> None:
+    def test_reset_metadata_zeros_all(self, state: cognitive.State) -> None:
         """``reset_metadata`` zeroes every metadata field."""
         for name in BANK_NAMES:
             getattr(state, f"meta_importance_{name}").fill_(0.7)
@@ -327,7 +310,7 @@ class TestPersistentCognitiveState:
             assert torch.all(snapshot[name]["age"] == 0)
             assert torch.all(snapshot[name]["retention"] == 0)
 
-    def test_step_age_increments(self, state: PersistentCognitiveState) -> None:
+    def test_step_age_increments(self, state: cognitive.State) -> None:
         """``step_age`` increments every metadata age buffer by one."""
         state.step_age()
         state.step_age()
@@ -335,9 +318,7 @@ class TestPersistentCognitiveState:
         for name in BANK_NAMES:
             assert torch.all(snapshot[name]["age"] == 2)
 
-    def test_record_usage_resets_age(
-        self, state: PersistentCognitiveState
-    ) -> None:
+    def test_record_usage_resets_age(self, state: cognitive.State) -> None:
         """Recording usage at an index resets that slot's age to zero."""
         state.step_age()
         indices = torch.tensor([0, 5, 10])
@@ -347,14 +328,14 @@ class TestPersistentCognitiveState:
         assert torch.all(snapshot["long_term"]["usage"][indices] == 2.0)
 
     def test_record_usage_unknown_bank_raises(
-        self, state: PersistentCognitiveState
+        self, state: cognitive.State
     ) -> None:
         """Recording usage on an unknown bank raises ``KeyError``."""
         with pytest.raises(KeyError):
             state.record_usage("nope", torch.tensor([0]))
 
     def test_update_retention_populates_buffers(
-        self, state: PersistentCognitiveState
+        self, state: cognitive.State
     ) -> None:
         """``update_retention`` writes scores into the retention buffers."""
         importance = state.meta_importance_long_term
@@ -367,7 +348,7 @@ class TestPersistentCognitiveState:
         assert torch.all(snapshot["long_term"]["retention"] <= 1.0)
 
     def test_recycle_bottom_k_returns_indices(
-        self, state: PersistentCognitiveState
+        self, state: cognitive.State
     ) -> None:
         """``recycle_bottom_k`` returns the indices of recycled slots."""
         retention = state.meta_retention_long_term
@@ -379,7 +360,7 @@ class TestPersistentCognitiveState:
         assert torch.all(replacement == 0)
 
     def test_recycle_with_custom_replacement(
-        self, state: PersistentCognitiveState
+        self, state: cognitive.State
     ) -> None:
         """A custom replacement tensor is written into recycled slots."""
         retention = state.meta_retention_long_term
@@ -392,9 +373,7 @@ class TestPersistentCognitiveState:
         slot_values = state.get_bank("long_term")[recycled]
         assert torch.all(slot_values == 7.0)
 
-    def test_recycle_resets_metadata(
-        self, state: PersistentCognitiveState
-    ) -> None:
+    def test_recycle_resets_metadata(self, state: cognitive.State) -> None:
         """Recycled slots have their metadata zeroed."""
         retention = state.meta_retention_long_term
         retention.fill_(1.0)
@@ -407,9 +386,7 @@ class TestPersistentCognitiveState:
         assert torch.all(snapshot["long_term"]["age"][idx] == 0)
         assert torch.all(snapshot["long_term"]["retention"][idx] == 0)
 
-    def test_recycle_k_zero_returns_empty(
-        self, state: PersistentCognitiveState
-    ) -> None:
+    def test_recycle_k_zero_returns_empty(self, state: cognitive.State) -> None:
         """``k=0`` returns an empty index tensor and mutates nothing."""
         before = state.get_bank("long_term").clone()
         recycled = state.recycle_bottom_k("long_term", k=0)
@@ -418,7 +395,7 @@ class TestPersistentCognitiveState:
         assert torch.allclose(before, after)
 
     def test_recycle_replacement_shape_mismatch(
-        self, state: PersistentCognitiveState
+        self, state: cognitive.State
     ) -> None:
         """Wrong-shape replacement raises ``ValueError``."""
         with pytest.raises(ValueError):
@@ -428,16 +405,12 @@ class TestPersistentCognitiveState:
                 replacement=torch.zeros(3, 32),
             )
 
-    def test_recycle_unknown_bank_raises(
-        self, state: PersistentCognitiveState
-    ) -> None:
+    def test_recycle_unknown_bank_raises(self, state: cognitive.State) -> None:
         """Unknown bank name raises ``KeyError``."""
         with pytest.raises(KeyError):
             state.recycle_bottom_k("nope", k=1)
 
-    def test_gradients_flow_through_banks(
-        self, state: PersistentCognitiveState
-    ) -> None:
+    def test_gradients_flow_through_banks(self, state: cognitive.State) -> None:
         """A loss on every bank tensor flows gradients to those parameters."""
         for name in BANK_NAMES:
             state.zero_grad(set_to_none=True)
@@ -448,7 +421,7 @@ class TestPersistentCognitiveState:
             assert torch.all(bank.grad == 1.0)
 
     def test_extra_repr_includes_dimensions(
-        self, state: PersistentCognitiveState
+        self, state: cognitive.State
     ) -> None:
         """``extra_repr`` mentions the hidden size and total token count."""
         text = state.extra_repr()
@@ -456,13 +429,13 @@ class TestPersistentCognitiveState:
         assert "total_tokens" in text
 
     def test_overrides_change_total_tokens(self) -> None:
-        """``PCSConfig.bank_sizes`` overrides change the PCS layout."""
-        config = PCSConfig(hidden_size=16, bank_sizes={"working": 8})
-        state = PersistentCognitiveState(config)
+        """``cognitive.Config.bank_sizes`` overrides change the PCS layout."""
+        config = cognitive.Config(hidden_size=16, bank_sizes={"working": 8})
+        state = cognitive.State(config)
         assert state.bank_size("working") == 8
         assert state.total_tokens == 8 + 128 + 16 + 32 + 16 + 32 + 16
 
-    def test_device_movement(self, state: PersistentCognitiveState) -> None:
+    def test_device_movement(self, state: cognitive.State) -> None:
         """``.to(device)`` moves banks and metadata together."""
         state.to(torch.device("cpu"))
         assert state.get_bank("working").device.type == "cpu"
