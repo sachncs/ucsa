@@ -130,7 +130,6 @@ def build_trainer(
         grad_clip_norm=training["grad_clip_norm"],
         warmup_steps=training["warmup_steps"],
         max_steps=training["max_steps"],
-        amp_dtype=resolve_dtype(training["amp_dtype"]),
         log_every_n_steps=training["log_every_n_steps"],
         checkpoint_every_n_steps=training["checkpoint_every_n_steps"],
         gradient_checkpointing=training["gradient_checkpointing"],
@@ -155,18 +154,6 @@ def build_trainer(
         curriculum=curriculum,
         metrics=metrics,
     )
-
-
-def resolve_dtype(name: str) -> torch.dtype:
-    """Resolve a dtype name string to a :class:`torch.dtype`."""
-    mapping: dict[str, torch.dtype] = {
-        "float32": torch.float32,
-        "float16": torch.float16,
-        "bfloat16": torch.bfloat16,
-    }
-    if name not in mapping:
-        raise ValueError(f"Unsupported amp_dtype '{name}'.")
-    return mapping[name]
 
 
 def run_training(cfg: Any) -> dict[str, Any]:
