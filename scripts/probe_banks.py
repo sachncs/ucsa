@@ -103,7 +103,7 @@ def probe_banks(model, top_k: int = 20) -> dict:
     return report
 
 
-def _print_human(report: dict) -> None:
+def print_human(report: dict) -> None:
     bank_summaries = report["banks"]
     hidden = report["hidden_size"]
     print("\nBank probe summary:", flush=True)
@@ -152,7 +152,7 @@ def main() -> None:
     with open(args.out_json, "w") as f:
         json.dump(report, f, indent=2)
     print(f"Wrote {args.out_json}", flush=True)
-    _print_human(report)
+    print_human(report)
 
 
 if __name__ == "__main__":
