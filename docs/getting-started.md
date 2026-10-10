@@ -13,7 +13,7 @@ reproduction takes hours on a GPU.
 
 ## Prerequisites
 
-- Python 3.11 or 3.12
+- Python 3.14
 - A virtual environment tool (`venv`, `uv`, `conda`)
 - PyTorch 2.1 or newer with a working CUDA, MPS, or CPU backend
 - An optional HuggingFace token for downloading the GPT-2 baselines
@@ -54,7 +54,6 @@ target encoder, and the trainer all wire up correctly.
     --max-steps 5 \
     --ckpt-every 0 \
     --eval-every 0 \
-    --skip-baselines \
     --seed 42
 ```
 
