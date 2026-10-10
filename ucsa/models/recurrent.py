@@ -67,9 +67,13 @@ class Config:
       importance, so memory can be shrunk at inference with graceful
       degradation. 0 disables it.
     min_slots: Smallest prefix sampled by `slot_dropout`.
-    read_gate: Scale each block's state read by a learned scalar that starts
-      at zero, so the model begins identical to the chunk-local control and
-      uses the state only as far as training finds it useful.
+    window: Sliding-window size in tokens. Each token attends to the last
+      `window` tokens, which reaches back into the previous chunk, plus the
+      state slots. None means one chunk (`chunk_size`); 0 restricts attention
+      to the current chunk.
+    read_gate: Scale the keys and values of the state slots in every block by
+      a learned scalar that starts at zero, so the model begins unable to use
+      the state and learns to use it only as far as it helps.
     surprise_gate: Write more when the state failed to predict the chunk.
       The JEPA predictor's error for a chunk (its surprise) shifts the write
       gate through a learned per-slot gain that starts at zero, so the model
@@ -107,6 +111,7 @@ class Config:
     use_state: bool = True
     slot_dropout: float = 0.0
     min_slots: int = 4
+    window: int | None = None
     read_gate: bool = False
     surprise_gate: bool = False
     jepa_weight: float = 0.1
@@ -134,6 +139,10 @@ class Config:
                 "head_dim must be even",
             ),
             (self.chunk_size >= 2, "chunk_size must be >= 2"),
+            (
+                self.window is None or 0 <= self.window <= self.chunk_size,
+                "window must be None or in [0, chunk_size]",
+            ),
             (self.encoder_layers >= 1, "encoder_layers must be >= 1"),
             (
                 len(self.banks) > 0 and all(n > 0 for _, n in self.banks),
@@ -171,6 +180,11 @@ class Config:
         }
         if unknown:
             raise ValueError(f"bank_write_bias names unknown banks: {unknown}")
+
+    @property
+    def window_tokens(self) -> int:
+        """The sliding-window size in tokens, with None resolved."""
+        return self.chunk_size if self.window is None else self.window
 
     @property
     def num_slots(self) -> int:
@@ -251,48 +265,12 @@ def apply_rope(
     return torch.cat((x1 * c - x2 * s, x1 * s + x2 * c), dim=-1)
 
 
-class SelfAttention(nn.Module):
-    """Fused-QKV multi-head self-attention with RoPE."""
+class Attention(nn.Module):
+    """Multi-head attention with separate query and key/value projections.
 
-    def __init__(self, dim: int, heads: int, causal: bool) -> None:
-        """Initialises the layer.
-
-        Args:
-          dim: Model width.
-          heads: Number of heads.
-          causal: Whether positions may only attend backwards.
-        """
-        super().__init__()
-        self.heads = heads
-        self.causal = causal
-        self.qkv = nn.Linear(dim, 3 * dim, bias=False)
-        self.out = nn.Linear(dim, dim, bias=False)
-
-    def forward(
-        self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
-    ) -> torch.Tensor:
-        """Attends within `x`.
-
-        Args:
-          x: Input of shape `(batch, seq, dim)`.
-          cos: RoPE cosine table.
-          sin: RoPE sine table.
-
-        Returns:
-          Output of shape `(batch, seq, dim)`.
-        """
-        b, t, d = x.shape
-        qkv = self.qkv(x).view(b, t, 3, self.heads, d // self.heads)
-        q, k, v = qkv.permute(2, 0, 3, 1, 4)
-        q, k = apply_rope(q, cos, sin), apply_rope(k, cos, sin)
-        out = functional.scaled_dot_product_attention(
-            q, k, v, is_causal=self.causal
-        )
-        return self.out(out.transpose(1, 2).reshape(b, t, d))
-
-
-class CrossAttention(nn.Module):
-    """Multi-head attention with queries from `x` and keys from a context."""
+    The caller assembles keys and values, so the same layer serves windowed
+    token attention, bidirectional chunk encoding and the state update.
+    """
 
     def __init__(self, dim: int, heads: int) -> None:
         """Initialises the layer.
@@ -307,25 +285,117 @@ class CrossAttention(nn.Module):
         self.key_value = nn.Linear(dim, 2 * dim, bias=False)
         self.out = nn.Linear(dim, dim, bias=False)
 
-    def forward(self, x: torch.Tensor, context: torch.Tensor) -> torch.Tensor:
-        """Reads `context` from the positions of `x`.
+    def project_query(self, x: torch.Tensor) -> torch.Tensor:
+        """Returns queries of shape `(rows, heads, n, head_dim)`."""
+        rows, n, dim = x.shape
+        q = self.query(x).view(rows, n, self.heads, dim // self.heads)
+        return q.transpose(1, 2)
+
+    def project_key_value(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Returns keys and values, each `(rows, heads, n, head_dim)`."""
+        rows, n, dim = x.shape
+        kv = self.key_value(x).view(rows, n, 2, self.heads, dim // self.heads)
+        k, v = kv.permute(2, 0, 3, 1, 4)
+        return k, v
+
+    def attend(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        mask: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Attends and projects back to the model width.
 
         Args:
-          x: Queries of shape `(batch, seq, dim)`.
-          context: Keys and values of shape `(batch, n, dim)`.
+          q: Queries `(rows, heads, n, head_dim)`.
+          k: Keys `(rows, heads, m, head_dim)`.
+          v: Values `(rows, heads, m, head_dim)`.
+          mask: Boolean `(rows, 1, n, m)` (True = may attend) or None.
 
         Returns:
-          Output of shape `(batch, seq, dim)`.
+          Output of shape `(rows, n, dim)`.
         """
-        b, t, d = x.shape
-        head_dim = d // self.heads
-        q = self.query(x).view(b, t, self.heads, head_dim).transpose(1, 2)
-        kv = self.key_value(context).view(
-            b, context.shape[1], 2, self.heads, head_dim
+        out = functional.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+        rows, _, n, _ = out.shape
+        return self.out(out.transpose(1, 2).reshape(rows, n, -1))
+
+    def forward(self, x: torch.Tensor, context: torch.Tensor) -> torch.Tensor:
+        """Lets `x` attend to every position of `context` (no mask, no RoPE).
+
+        Args:
+          x: Queries `(rows, n, dim)`.
+          context: Source of keys and values `(rows, m, dim)`.
+
+        Returns:
+          Output of shape `(rows, n, dim)`.
+        """
+        k, v = self.project_key_value(context)
+        return self.attend(self.project_query(x), k, v, None)
+
+
+def window_mask(
+    size: int,
+    window: int,
+    n: int,
+    slots: int,
+    first: torch.Tensor,
+) -> torch.Tensor:
+    """Builds the visibility mask of the sliding-window decoder.
+
+    Keys are laid out as `[slots | previous chunk | current chunk]`. A query at
+    chunk position `i` sees every slot, the current tokens `j <= i`, and the
+    previous-chunk tokens that fall within `window` tokens of it; with
+    `window = 0` it sees only the current chunk.
+
+    Args:
+      size: Chunk size.
+      window: Window size in tokens (0 disables the look-back).
+      n: Number of query positions (the current chunk, possibly partial).
+      slots: Number of state slots visible (0 for none).
+      first: Boolean `(rows,)`, True for rows whose previous chunk does not
+        exist.
+
+    Returns:
+      A boolean mask of shape `(rows, 1, n, slots + size + n)`.
+    """
+    device = first.device
+    i = torch.arange(n, device=device)[:, None]
+    current = torch.arange(n, device=device)[None, :]
+    previous = torch.arange(size, device=device)[None, :]
+    reach = window if window > 0 else size
+    cur_ok = (current <= i) & (i - current < reach)
+    prev_ok = (
+        (size + i - previous < window)
+        if window > 0
+        else (torch.zeros(n, size, dtype=torch.bool, device=device))
+    )
+    rows = first.shape[0]
+    prev = prev_ok[None, None] & ~first[:, None, None, None]
+    parts = [prev, cur_ok[None, None].expand(rows, 1, n, n)]
+    if slots:
+        parts.insert(
+            0, torch.ones(rows, 1, n, slots, dtype=torch.bool, device=device)
         )
-        k, v = kv.permute(2, 0, 3, 1, 4)
-        out = functional.scaled_dot_product_attention(q, k, v)
-        return self.out(out.transpose(1, 2).reshape(b, t, d))
+    return torch.cat(parts, dim=-1)
+
+
+def shift_chunks(t: torch.Tensor, chunks: int) -> torch.Tensor:
+    """Moves each chunk's tensor to the next chunk; the first gets zeros.
+
+    Args:
+      t: Tensor `(batch * chunks, ...)` ordered chunk-major within a batch.
+      chunks: Number of chunks per batch element.
+
+    Returns:
+      Tensor of the same shape whose chunk `t` holds the input of `t - 1`.
+    """
+    rows = t.shape[0]
+    grouped = t.view(rows // chunks, chunks, *t.shape[1:])
+    zero = torch.zeros_like(grouped[:, :1])
+    return torch.cat([zero, grouped[:, :-1]], dim=1).reshape(t.shape)
 
 
 class SwiGLU(nn.Module):
@@ -349,25 +419,29 @@ class SwiGLU(nn.Module):
 
 
 class Block(nn.Module):
-    """Self-attention, an optional state read, and a feed-forward layer."""
+    """Attention (windowed in the decoder), then a feed-forward layer."""
 
-    def __init__(self, config: Config, causal: bool, read: bool) -> None:
+    def __init__(self, config: Config, decoder: bool, read: bool) -> None:
         """Initialises the block.
 
         Args:
           config: Model configuration.
-          causal: Whether self-attention is causal.
-          read: Whether the block cross-attends to the state.
+          decoder: True for a causal sliding-window block; False for a
+            bidirectional within-chunk encoder block.
+          read: Whether the block also attends to the state slots.
         """
         super().__init__()
         dim = config.hidden
+        self.decoder = decoder
+        self.read = decoder and read
         self.attn_norm = nn.RMSNorm(dim)
-        self.attn = SelfAttention(dim, config.heads, causal)
-        self.read_norm = nn.RMSNorm(dim) if read else None
-        self.read = CrossAttention(dim, config.heads) if read else None
-        # Zero-initialised scale (ReZero style): the read starts switched off.
-        self.read_scale = (
-            nn.Parameter(torch.zeros(1)) if read and config.read_gate else None
+        self.attn = Attention(dim, config.heads)
+        self.slot_norm = nn.RMSNorm(dim) if self.read else None
+        # Zero-initialised scale (ReZero style): the slots start invisible.
+        self.slot_scale = (
+            nn.Parameter(torch.zeros(1))
+            if self.read and config.read_gate
+            else None
         )
         self.ffn_norm = nn.RMSNorm(dim)
         self.ffn = SwiGLU(dim, config.ffn_dim)
@@ -376,28 +450,75 @@ class Block(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        state: torch.Tensor | None,
+        slots: torch.Tensor | None,
+        mask: torch.Tensor | None,
+        chunks: int,
+        previous: tuple[torch.Tensor, torch.Tensor] | None,
         cos: torch.Tensor,
         sin: torch.Tensor,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         """Runs the block.
 
         Args:
-          x: Tokens of shape `(rows, seq, dim)`.
-          state: State to read of shape `(rows, slots, dim)`, or None.
-          cos: RoPE cosine table.
+          x: Tokens `(rows, n, dim)`.
+          slots: State slots `(rows, m, dim)` for blocks that read, else None.
+          mask: Visibility mask from `window_mask` (decoder blocks only).
+          chunks: Chunks per batch element, used to find each row's previous
+            chunk when `previous` is not given.
+          previous: Keys and values (before RoPE) of the preceding chunk, from
+            a streaming cache; None derives them from `x` by shifting.
+          cos: RoPE cosine table (twice the chunk size).
           sin: RoPE sine table.
 
         Returns:
-          Output of shape `(rows, seq, dim)`.
+          The output and this chunk's keys and values before RoPE, which a
+          streaming caller keeps as the next chunk's `previous`.
         """
-        x = x + self.drop(self.attn(self.attn_norm(x), cos, sin))
-        if self.read is not None and state is not None:
-            read = self.read(self.read_norm(x), state)
-            if self.read_scale is not None:
-                read = self.read_scale * read
-            x = x + self.drop(read)
-        return x + self.drop(self.ffn(self.ffn_norm(x)))
+        size = cos.shape[0] // 2
+        n = x.shape[1]
+        h = self.attn_norm(x)
+        q = self.attn.project_query(h)
+        k, v = self.attn.project_key_value(h)
+        if not self.decoder:  # bidirectional encoder over one chunk
+            c, s = cos[:n], sin[:n]
+            out = self.attn.attend(
+                apply_rope(q, c, s), apply_rope(k, c, s), v, None
+            )
+        else:
+            c, s = cos[size : size + n], sin[size : size + n]
+            if previous is not None:
+                prev_k, prev_v = previous
+            elif n == size:  # whole chunks: the previous chunk is the shift
+                prev_k = shift_chunks(k, chunks)
+                prev_v = shift_chunks(v, chunks)
+            else:  # a partial first chunk has no previous chunk (masked)
+                shape = (*k.shape[:2], size, k.shape[3])
+                prev_k = prev_v = k.new_zeros(shape)
+            keys = [
+                apply_rope(prev_k, cos[:size], sin[:size]),
+                apply_rope(k, c, s),
+            ]
+            values = [prev_v, v]
+            if self.read and slots is not None:
+                slot_k, slot_v = self.attn.project_key_value(
+                    self.slot_norm(slots)
+                )
+                if self.slot_scale is not None:
+                    # Scaling keys and values: at zero every slot logit is a
+                    # constant and every value vanishes, so the state cannot
+                    # influence the output at all.
+                    slot_k = self.slot_scale * slot_k
+                    slot_v = self.slot_scale * slot_v
+                keys.insert(0, slot_k)
+                values.insert(0, slot_v)
+            out = self.attn.attend(
+                apply_rope(q, c, s),
+                torch.cat(keys, dim=2),
+                torch.cat(values, dim=2),
+                mask,
+            )
+        x = x + self.drop(out)
+        return x + self.drop(self.ffn(self.ffn_norm(x))), (k, v)
 
 
 class StateUpdater(nn.Module):
@@ -418,7 +539,8 @@ class StateUpdater(nn.Module):
         dim = config.hidden
         self.top_k = config.write_top_k
         self.read_norm = nn.RMSNorm(dim)
-        self.read = CrossAttention(dim, config.heads)
+        self.context_norm = nn.RMSNorm(dim)
+        self.read = Attention(dim, config.heads)
         self.out_norm = nn.RMSNorm(dim)
         self.gate = nn.Linear(2 * dim, dim)
         bias = dict(config.bank_write_bias)
@@ -450,7 +572,9 @@ class StateUpdater(nn.Module):
         Returns:
           The new state and the mean write gate per slot, `(batch, slots)`.
         """
-        read = self.read(self.read_norm(state), chunk)
+        # The slots read the chunk and each other: attention over [slots|chunk].
+        context = self.context_norm(torch.cat([state, chunk], dim=1))
+        read = self.read(self.read_norm(state), context)
         candidate = self.out_norm(state + read)
         logits = self.gate(torch.cat([state, read], -1)) + self.slot_bias
         if self.surprise_gain is not None and surprise is not None:
@@ -479,11 +603,11 @@ class Model(nn.Module):
         dim = config.hidden
         self.embed = nn.Embedding(config.vocab_size, dim)
         self.encoder = nn.ModuleList(
-            Block(config, causal=False, read=False)
+            Block(config, decoder=False, read=False)
             for _ in range(config.encoder_layers)
         )
         self.blocks = nn.ModuleList(
-            Block(config, causal=True, read=(i % config.read_every == 0))
+            Block(config, decoder=True, read=(i % config.read_every == 0))
             for i in range(config.layers)
         )
         self.final_norm = nn.RMSNorm(dim)
@@ -501,7 +625,7 @@ class Model(nn.Module):
         self.target_summary = copy.deepcopy(self.summary)
         for param in self.target_summary.parameters():
             param.requires_grad_(False)
-        cos, sin = rope_tables(dim // config.heads, config.chunk_size)
+        cos, sin = rope_tables(dim // config.heads, 2 * config.chunk_size)
         self.register_buffer("cos", cos, persistent=False)
         self.register_buffer("sin", sin, persistent=False)
         self.apply(self.__init_weights)
@@ -523,16 +647,55 @@ class Model(nn.Module):
     def __encode(self, x: torch.Tensor) -> torch.Tensor:
         """Summarises chunks for the state; `x` is `(rows, chunk, dim)`."""
         for block in self.encoder:
-            x = block(x, None, self.cos, self.sin)
+            x, _ = block(x, None, None, 1, None, self.cos, self.sin)
         return x
 
     def __decode(
-        self, x: torch.Tensor, state: torch.Tensor | None
-    ) -> torch.Tensor:
-        """Runs the causal decoder over `(rows, chunk, dim)` tokens."""
-        for block in self.blocks:
-            x = block(x, state, self.cos, self.sin)
-        return self.final_norm(x)
+        self,
+        x: torch.Tensor,
+        state: torch.Tensor | None,
+        chunks: int,
+        previous: list[tuple[torch.Tensor, torch.Tensor]] | None = None,
+    ) -> tuple[torch.Tensor, list[tuple[torch.Tensor, torch.Tensor]]]:
+        """Runs the sliding-window decoder over `(rows, n, dim)` tokens.
+
+        Args:
+          x: Embedded tokens.
+          state: Slots to read `(rows, m, dim)`, or None.
+          chunks: Chunks per batch element (parallel decoding).
+          previous: Per-layer keys and values of the preceding chunk from a
+            streaming cache; None means they are derived by shifting `x`, and
+            the first chunk of every sequence has no previous chunk.
+
+        Returns:
+          The final-normed hidden states and this chunk's per-layer keys and
+          values (before RoPE) for use as a streaming cache.
+        """
+        rows, n, _ = x.shape
+        size = self.config.chunk_size
+        if previous is None:
+            first = torch.arange(rows, device=x.device) % chunks == 0
+        else:
+            first = torch.zeros(rows, dtype=torch.bool, device=x.device)
+        slot_count = 0 if state is None else state.shape[1]
+        masks = {
+            m: window_mask(size, self.config.window_tokens, n, m, first)
+            for m in {0, slot_count}
+        }
+        caches = []
+        for index, block in enumerate(self.blocks):
+            reads = block.read and state is not None
+            x, cache = block(
+                x,
+                state if reads else None,
+                masks[slot_count if reads else 0],
+                chunks,
+                None if previous is None else previous[index],
+                self.cos,
+                self.sin,
+            )
+            caches.append(cache)
+        return self.final_norm(x), caches
 
     def __surprise(
         self, state: torch.Tensor, pooled: torch.Tensor
@@ -652,7 +815,8 @@ class Model(nn.Module):
                 .expand(batch, chunks, -1, -1)
                 .reshape(batch * chunks, -1, x.shape[-1])
             )
-        hidden = self.__decode(x, read).view(batch, chunks * size, -1)[:, :seq]
+        decoded, _ = self.__decode(x, read, chunks)
+        hidden = decoded.view(batch, chunks * size, -1)[:, :seq]
         return {
             "hidden": hidden,
             "state": final,
@@ -778,29 +942,36 @@ class Model(nn.Module):
 
     @torch.no_grad()
     def next_logits(
-        self, state: torch.Tensor, current: torch.Tensor
-    ) -> torch.Tensor:
+        self,
+        state: torch.Tensor,
+        current: torch.Tensor,
+        previous: list[tuple[torch.Tensor, torch.Tensor]] | None = None,
+    ) -> tuple[torch.Tensor, list[tuple[torch.Tensor, torch.Tensor]]]:
         """Returns the next-token logits after a partial chunk.
 
         This is the streaming counterpart of `forward`: with the state that
-        precedes the current chunk and the chunk's tokens so far, it gives the
-        logits `forward` would give at the last of those positions.
+        precedes the current chunk, the preceding chunk's cache and the
+        current chunk's tokens so far, it gives the logits `forward` would
+        give at the last of those positions.
 
         Args:
           state: State before the current chunk, `(batch, slots, dim)`.
           current: Tokens of the current chunk so far, `(batch, n)` with
             `1 <= n <= chunk_size`.
+          previous: Cache returned for the preceding chunk (None for the
+            first chunk of a sequence).
 
         Returns:
-          Logits of shape `(batch, vocab)`.
+          Logits `(batch, vocab)` and the cache of the current chunk, which
+          becomes `previous` once the chunk is complete.
         """
         read = (
             state
             if self.config.use_state
             else self.initial_state(current.shape[0])
         )
-        hidden = self.__decode(self.embed(current), read)
-        return hidden[:, -1] @ self.embed.weight.T
+        hidden, cache = self.__decode(self.embed(current), read, 1, previous)
+        return hidden[:, -1] @ self.embed.weight.T, cache
 
     @torch.no_grad()
     def generate(
@@ -810,10 +981,10 @@ class Model(nn.Module):
         temperature: float = 1.0,
         top_k: int = 0,
     ) -> torch.Tensor:
-        """Streams tokens, carrying the state across chunks.
+        """Streams tokens, carrying the state and window cache across chunks.
 
-        Memory is constant in the generated length: only the state and the
-        current partial chunk are kept.
+        Memory is constant in the generated length: only the state, one
+        chunk's cache and the current partial chunk are kept.
 
         Args:
           prompt: Token ids of shape `(batch, prompt_len)`.
@@ -827,12 +998,15 @@ class Model(nn.Module):
         self.eval()
         size = self.config.chunk_size
         state = self.initial_state(prompt.shape[0])
+        previous = None
         current = out = prompt
         for _ in range(max_new_tokens):
             while current.shape[1] > size:
                 head, current = current[:, :size], current[:, size:]
+                _, cache = self.next_logits(state, head, previous)
                 state = self.advance(state, head)
-            logits = self.next_logits(state, current)
+                previous = cache
+            logits, _ = self.next_logits(state, current, previous)
             if temperature <= 0:
                 nxt = logits.argmax(-1, keepdim=True)
             else:
