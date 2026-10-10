@@ -132,9 +132,10 @@ def test_chunk_profile_has_one_entry_per_chunk():
     assert np.isfinite(profile).all()
 
 
-def test_without_state_later_chunks_ignore_earlier_ones():
-    """The control's profile for chunks 1+ cannot depend on chunk 0."""
-    model = small_model(use_state=False)
+def test_without_state_or_window_later_chunks_ignore_earlier_ones():
+    """The chunk-local control's profile for chunks 1+ cannot depend on
+    chunk 0: it has neither the state nor a window into the previous chunk."""
+    model = small_model(use_state=False, window=0)
     a = diagnostics.chunk_profile(model, iter(repeated_batch(0)), 1)
     b = diagnostics.chunk_profile(model, iter(repeated_batch(5)), 1)
     assert not np.allclose(a[0], b[0])  # chunk 0 itself differs
@@ -142,7 +143,7 @@ def test_without_state_later_chunks_ignore_earlier_ones():
 
 
 def test_with_state_later_chunks_do_depend_on_earlier_ones():
-    model = small_model()
+    model = small_model(window=0)
     a = diagnostics.chunk_profile(model, iter(repeated_batch(0)), 1)
     b = diagnostics.chunk_profile(model, iter(repeated_batch(5)), 1)
     assert not np.allclose(a[1:], b[1:], atol=1e-6)
