@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 import torch
 
+from ucsa.training import metrics
 from ucsa.training.metrics import (
     DEFAULT_METRIC_NAMES,
-    MetricsRegistry,
     attention_entropy,
     build_default_registry,
     expert_utilization,
@@ -26,7 +26,7 @@ from ucsa.training.metrics import (
 
 
 class TestMetricsRegistry:
-    """Tests for :class:`MetricsRegistry`."""
+    """Tests for :class:`metrics.Registry`."""
 
     def test_default_names(self) -> None:
         """The default metric set covers the spec plus intent diagnostics."""
@@ -40,14 +40,14 @@ class TestMetricsRegistry:
 
     def test_construction(self) -> None:
         """A registry with custom names initialises correctly."""
-        registry = MetricsRegistry(["a", "b"])
+        registry = metrics.Registry(["a", "b"])
         assert registry.names == ("a", "b")
         assert registry.value("a") == 0.0
         assert registry.value("b") == 0.0
 
     def test_update_running_average(self) -> None:
         """``update`` accumulates a running average."""
-        registry = MetricsRegistry(["loss"])
+        registry = metrics.Registry(["loss"])
         registry.update("loss", 2.0)
         registry.update("loss", 1.0)
         registry.update("loss", 0.5)
@@ -55,20 +55,20 @@ class TestMetricsRegistry:
 
     def test_last_value(self) -> None:
         """``last`` returns the most recent value."""
-        registry = MetricsRegistry(["loss"])
+        registry = metrics.Registry(["loss"])
         registry.update("loss", 5.0)
         registry.update("loss", 2.0)
         assert registry.last("loss") == 2.0
 
     def test_unknown_metric_raises(self) -> None:
         """Updating an unknown metric raises ``KeyError``."""
-        registry = MetricsRegistry(["a"])
+        registry = metrics.Registry(["a"])
         with pytest.raises(KeyError):
             registry.update("nope", 1.0)
 
     def test_reset(self) -> None:
         """``reset`` zeroes the running sums and history."""
-        registry = MetricsRegistry(["a"])
+        registry = metrics.Registry(["a"])
         registry.update("a", 1.0)
         registry.update("a", 2.0)
         registry.reset()
@@ -77,7 +77,7 @@ class TestMetricsRegistry:
 
     def test_snapshot(self) -> None:
         """``snapshot`` returns every metric's average."""
-        registry = MetricsRegistry(["a", "b"])
+        registry = metrics.Registry(["a", "b"])
         registry.update("a", 1.0)
         registry.update("b", 4.0)
         snapshot = registry.snapshot()
@@ -85,7 +85,7 @@ class TestMetricsRegistry:
 
     def test_tensorboard_log(self) -> None:
         """``tensorboard_log`` writes a scalar for every metric."""
-        registry = MetricsRegistry(["a"])
+        registry = metrics.Registry(["a"])
         registry.update("a", 1.0)
 
         class FakeWriter:
