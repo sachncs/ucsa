@@ -12,7 +12,7 @@ update `CHANGELOG.md` `[Unreleased]` and pass `ruff`, `mypy --strict`, and
   `refactor:`, `chore:`).
 - No leading-underscore names except dunder. Internal helpers get bare names
   with `"""internal: ..."""` docstrings.
-- Python 3.11+. Type annotations everywhere. `from __future__ import annotations`
+- Python 3.14+. Type annotations everywhere. `from __future__ import annotations`
   on every module.
 - Google Python style. 4-space indent, 80-column lines.
 
