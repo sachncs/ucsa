@@ -31,6 +31,7 @@ from torch import Tensor, nn
 
 from ucsa.models import cognitive, moe as moe_lib, transition
 from ucsa.models.cognitive import BANK_NAMES, INTENT_BANK
+from ucsa.utils import precision
 
 
 @dataclass(frozen=True)
@@ -157,10 +158,8 @@ class RMSNorm(nn.Module):
         Returns:
             Normalised tensor of the same shape and dtype as ``x``.
         """
-        norm = x.float() * torch.rsqrt(
-            x.float().pow(2).mean(dim=-1, keepdim=True) + self.eps
-        )
-        return (norm.type_as(x)) * self.weight
+        norm = x * torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
+        return norm * self.weight
 
 
 class RotaryEmbedding(nn.Module):
@@ -185,7 +184,7 @@ class RotaryEmbedding(nn.Module):
         self.base = base
         inv_freq = 1.0 / (
             base
-            ** (torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
+            ** (torch.arange(0, head_dim, 2, dtype=precision.DTYPE) / head_dim)
         )
         self.register_buffer("inv_freq", inv_freq, persistent=False)
         self.cos_cache: dict[int, Tensor] = {}
@@ -208,7 +207,7 @@ class RotaryEmbedding(nn.Module):
         cached = self.cos_cache.get(seq_len)
         if cached is not None and cached.device == device:
             return cached, self.sin_cache[seq_len]
-        positions = torch.arange(seq_len, device=device, dtype=torch.float32)
+        positions = torch.arange(seq_len, device=device, dtype=precision.DTYPE)
         freqs = torch.einsum("i,j->ij", positions, self.inv_freq.to(device))
         cos = freqs.cos()
         sin = freqs.sin()
