@@ -439,3 +439,71 @@ class TestState:
         """``.to(device)`` moves banks and metadata together."""
         state.to(torch.device("cpu"))
         assert state.get_bank("working").device.type == "cpu"
+
+
+class TestProperties:
+    """Invariants that must hold for any input, not just chosen examples."""
+
+    def test_retention_is_bounded_and_monotone_over_random_inputs(self) -> None:
+        cfg = cognitive.Config(hidden_size=8)
+        gen = torch.Generator().manual_seed(0)
+        for _ in range(50):
+            imp = torch.rand(32, generator=gen) * 10
+            use = torch.rand(32, generator=gen) * 10
+            age = torch.randint(0, 100, (32,), generator=gen).float()
+            score = cognitive.retention_score(imp, use, age, cfg)
+            assert ((score >= 0) & (score <= 1)).all()
+            more = cognitive.retention_score(imp + 1.0, use, age, cfg)
+            older = cognitive.retention_score(imp, use, age + 5.0, cfg)
+            assert (more >= score - 1e-6).all()  # importance never hurts
+            assert (older <= score + 1e-6).all()  # age never helps
+
+    def test_a_state_survives_a_checkpoint_round_trip_exactly(self) -> None:
+        torch.manual_seed(0)
+        a = cognitive.State(cognitive.Config(hidden_size=8))
+        a.record_usage("long_term", torch.tensor([1, 3]))
+        a.update_retention()
+        b = cognitive.State(cognitive.Config(hidden_size=8))
+        b.load_state_dict(a.state_dict())
+        for key in a.state_dict():
+            assert torch.equal(a.state_dict()[key], b.state_dict()[key]), key
+
+    def test_construction_is_deterministic_for_a_seed(self) -> None:
+        def build() -> torch.Tensor:
+            torch.manual_seed(7)
+            return cognitive.State(
+                cognitive.Config(hidden_size=8)
+            ).get_all_tokens()
+
+        assert torch.equal(build(), build())
+
+    def test_a_rejected_write_leaves_the_bank_untouched(self) -> None:
+        state = cognitive.State(cognitive.Config(hidden_size=8))
+        before = state.get_bank("working").clone()
+        with pytest.raises(ValueError):
+            state.set_bank("working", torch.zeros(3, 8))
+        assert torch.equal(state.get_bank("working"), before)
+
+    def test_recycling_only_used_slots_never_touches_empty_ones(self) -> None:
+        state = cognitive.State(cognitive.Config(hidden_size=8))
+        with torch.no_grad():
+            state.metadata("long_term", "usage")[:3] = 1.0
+        state.update_retention()
+        picked = state.recycle_bottom_k("long_term", 10, used_only=True)
+        assert sorted(picked.tolist()) == [0, 1, 2]
+
+    def test_without_used_only_empty_slots_are_chosen_first(self) -> None:
+        """Documents why `used_only` exists: empty slots score lowest."""
+        state = cognitive.State(cognitive.Config(hidden_size=8))
+        with torch.no_grad():
+            state.metadata("long_term", "usage")[:3] = 1.0
+        state.update_retention()
+        picked = state.recycle_bottom_k("long_term", 3)
+        assert not set(picked.tolist()) & {0, 1, 2}
+
+    def test_every_bank_has_matching_metadata_shapes(self) -> None:
+        state = cognitive.State(cognitive.Config(hidden_size=8))
+        for name in state.bank_order:
+            size = state.bank_size(name)
+            for field in cognitive.METADATA_FIELDS:
+                assert state.metadata(name, field).shape == (size,)
