@@ -28,10 +28,11 @@ def filter_documents(
 ) -> Iterator[list[int]]:
     """Drops short and duplicate documents.
 
-    A document is a duplicate when its first `prefix_len` tokens (and its
-    length class) were already seen. That removes repeated boilerplate and
-    mirrored pages, which otherwise leak between training and validation and
-    inflate the apparent quality of memorisation.
+    A document is a duplicate when its first `prefix_len` tokens were already
+    seen, whatever follows. That removes repeated boilerplate, mirrored pages
+    and templated series, which otherwise leak between training and
+    validation and inflate the apparent quality of memorisation. It also
+    drops a distinct document that happens to share a long common opening.
 
     Args:
       token_lists: Token-id lists, one per document.
