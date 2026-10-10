@@ -35,13 +35,13 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor, nn
 
-from ucsa.models.state import INTENT_BANK, PersistentCognitiveState
-from ucsa.models.transition_operator import StateTransitionOperator
+from ucsa.models import cognitive, transition
+from ucsa.models.cognitive import INTENT_BANK
 
 
 @dataclass(frozen=True)
-class ReasoningLoopConfig:
-    """Configuration for :class:`ReasoningLoop`.
+class Config:
+    """Configuration for :class:`Loop`.
 
     Attributes:
         num_iterations: Number of operator calls per forward pass.
@@ -107,7 +107,7 @@ class ReasoningLoopConfig:
         return self.observation_mix * self.observation_mix_decay**iteration
 
 
-class ReasoningLoop(nn.Module):
+class Loop(nn.Module):
     """Run ``num_iterations`` operator calls per forward pass.
 
     The loop is intentionally thin: it does not mutate the PCS directly
@@ -118,8 +118,8 @@ class ReasoningLoop(nn.Module):
 
     def __init__(
         self,
-        operator: StateTransitionOperator,
-        config: ReasoningLoopConfig | None = None,
+        operator: transition.Operator,
+        config: Config | None = None,
         origination: nn.Module | None = None,
         intent_update: nn.Module | None = None,
     ) -> None:
@@ -138,7 +138,7 @@ class ReasoningLoop(nn.Module):
         """
         super().__init__()
         if config is None:
-            config = ReasoningLoopConfig()
+            config = Config()
         self.config = config
         self.operator = operator
         self.origination = origination
@@ -185,9 +185,9 @@ class ReasoningLoop(nn.Module):
 
     def inject_observation(
         self,
-        cstate: PersistentCognitiveState,
+        cstate: cognitive.State,
         observation: Tensor,
-    ) -> PersistentCognitiveState:
+    ) -> cognitive.State:
         """Write observation tokens into the working memory bank.
 
         Args:
@@ -222,9 +222,9 @@ class ReasoningLoop(nn.Module):
 
     def forward(
         self,
-        cstate: PersistentCognitiveState,
+        cstate: cognitive.State,
         observation: Tensor,
-    ) -> PersistentCognitiveState:
+    ) -> cognitive.State:
         """Run the reasoning loop.
 
         Args:
@@ -266,7 +266,7 @@ class ReasoningLoop(nn.Module):
 
     def next_observation(
         self,
-        cstate: PersistentCognitiveState,
+        cstate: cognitive.State,
         observation: Tensor,
         current: Tensor,
         iteration: int,
@@ -301,7 +301,7 @@ class ReasoningLoop(nn.Module):
 
     def current_intent(
         self,
-        cstate: PersistentCognitiveState,
+        cstate: cognitive.State,
         working: Tensor,
     ) -> Tensor:
         """Return the origination state for this iteration.
@@ -326,7 +326,7 @@ class ReasoningLoop(nn.Module):
         self.last_intent_states.append(self.intent_state)
         return self.intent_state
 
-    def read_bank(self, cstate: PersistentCognitiveState, name: str) -> Tensor:
+    def read_bank(self, cstate: cognitive.State, name: str) -> Tensor:
         """Read a bank for the generator, preferring the differentiable one.
 
         A clone is returned when falling back to the PCS parameter: the
@@ -345,7 +345,7 @@ class ReasoningLoop(nn.Module):
             return bank
         return cstate.get_bank(name).clone()
 
-    def capture_working(self, cstate: PersistentCognitiveState) -> Tensor:
+    def capture_working(self, cstate: cognitive.State) -> Tensor:
         """Snapshot the working bank for the JEPA chain.
 
         Prefers the operator's differentiable pre-write-back tensor so the
@@ -368,4 +368,4 @@ class ReasoningLoop(nn.Module):
         return list(self.last_intermediates)
 
 
-__all__ = ["ReasoningLoop", "ReasoningLoopConfig"]
+__all__ = ["Loop", "Config"]
