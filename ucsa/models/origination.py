@@ -51,6 +51,7 @@ from ucsa.training.metrics import (
     intent_read_share,
     intent_state_variance,
 )
+from ucsa.utils import precision
 
 if TYPE_CHECKING:
     from ucsa.models.architecture import UCSA
@@ -288,7 +289,9 @@ def intent_attribution(
     if gate_weights is None:
         gate_usage: list[float] = []
     else:
-        used = (gate_weights.detach() > 0).float().reshape(-1, bank.shape[0])
+        used = precision.to_dtype(gate_weights.detach() > 0).reshape(
+            -1, bank.shape[0]
+        )
         gate_usage = [float(v) for v in used.mean(dim=0).cpu()]
     model.zero_grad(set_to_none=True)
     pcs_restore(model, snapshot)
