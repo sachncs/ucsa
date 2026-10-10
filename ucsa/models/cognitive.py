@@ -162,8 +162,7 @@ def resolve_bank_sizes(
         for name, size in overrides.items():
             if size <= 0:
                 raise ValueError(
-                    f"Bank '{name}' override size must be positive, "
-                    f"got {size}."
+                    f"Bank '{name}' override size must be positive, got {size}."
                 )
             resolved[name] = size
     return resolved
