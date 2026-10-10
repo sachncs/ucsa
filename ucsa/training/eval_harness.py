@@ -1,323 +1,389 @@
-"""Standard LM benchmark evaluation harness.
+"""Zero-shot multiple-choice benchmarks, following lm-evaluation-harness.
 
-Supports the four canonical small-LM zero-shot tasks via
-multiple-choice / continuation rank classification:
+Tasks: HellaSwag, ARC-Easy, ARC-Challenge, PIQA and WinoGrande. Prompts and
+metrics follow EleutherAI's lm-evaluation-harness so results can be compared
+with published numbers: each choice is scored by its log-likelihood given the
+context, `acc` ranks by total log-likelihood and `acc_norm` by
+log-likelihood per character of the choice. HellaSwag and ARC-Challenge
+report `acc_norm`; the other tasks report `acc`.
 
-- HellaSwag: commonsense completion (4 endings).
-- ARC-easy / ARC-challenge: grade-school science multiple choice.
-- PIQA: physical interaction reasoning (2 endings).
-- WinoGrande: pronoun resolution commonsense (multiple options).
-
-Scoring convention (EleutherAI/lm-eval-harness style): each choice's
-text is concatenated to a context; we compute the **conditional
-log-likelihood** ``log P(choice | context)`` under the model; the
-choice with the highest log-likelihood wins.
-
-This module exposes ``evaluate_task(name, model, tokenizer, ...)``
-which returns an ``EvalResult`` with the per-task accuracy plus
-metadata needed by the paper-writing tools.
-
-Reproducibility
----------------
-
-Each task loader streams from HuggingFace ``datasets`` and is paired
-with a fixed-seed shuffle buffer so the ``max_examples`` cap selects a
-deterministic prefix. Two consecutive runs of ``scripts/eval.py``
-against the same checkpoint therefore report the same accuracy to four
-decimal places. The seed is recorded on every :class:`EvalResult` in
-:attr:`EvalResult.extras` for downstream paper-writing tools.
+Loaders stream from Hugging Face `datasets` through a fixed-seed shuffle, so
+a `max_examples` cap selects the same examples on every run; with no cap the
+full split is evaluated. The seed is recorded on every result.
 """
 
-from __future__ import annotations
-
+import dataclasses
+import math
+import random
+import re
 from collections.abc import Callable, Iterable
-from dataclasses import asdict, dataclass, field
 from typing import Any
 
+import datasets
 import torch
-from datasets import load_dataset
-from torch import Tensor
-from transformers import PreTrainedTokenizerBase
+import transformers
 
-from ucsa.models.ucsa import UCSA
+from ucsa.models import ucsa
+from ucsa.training import prefix
 
-# Default seed used when callers do not pass one. The same seed is
-# passed to every task loader so a ``max_examples`` cap on a streaming
-# source yields the same prefix on every run.
-DEFAULT_EVAL_SEED: int = 1234
+# Seed shared by every task loader, so a `max_examples` cap picks the same
+# subset on every run and for every model.
+DEFAULT_EVAL_SEED = 1234
+
+Example = dict[str, Any]
 
 
-@dataclass
+@dataclasses.dataclass
 class TaskSpec:
-    """One LM benchmark task.
+    """One benchmark task.
 
     Attributes:
-        name: Display name (must match keys in :func:`TASK_REGISTRY`).
-        loader: Callable returning an iterable of dicts with the keys
-            the score function expects. Loaders that take a seed must
-            accept it as the first positional argument.
-        max_examples: Optional cap to keep the harness fast on small
-            machines. ``None`` runs the full split. When the loader
-            streams from HuggingFace ``datasets``, the cap selects a
-            deterministic prefix given a fixed seed.
-        seed: Seed used by streaming loaders for deterministic
-            ``max_examples`` selection. Defaults to
-            :data:`DEFAULT_EVAL_SEED`.
+      name: Key in `TASK_REGISTRY`.
+      loader: Called with the seed; yields examples with `context`,
+        `choices`, `label` and optionally `contexts` (one per choice, for
+        tasks whose context depends on the choice).
+      max_examples: Cap on examples; None evaluates the full split.
+      seed: Seed for the loader's shuffle.
+      metric: Headline metric, `acc` or `acc_norm`. Both are always
+        recorded in `EvalResult.extras`.
     """
 
     name: str
-    loader: Callable[..., Iterable[dict[str, Any]]]
+    loader: Callable[..., Iterable[Example]]
     max_examples: int | None = None
     seed: int = DEFAULT_EVAL_SEED
+    metric: str = "acc"
 
 
-@dataclass
+@dataclasses.dataclass
 class EvalResult:
-    """Result of one task evaluation."""
+    """Result of one task evaluation.
+
+    Attributes:
+      name: Task name.
+      n: Examples scored.
+      correct: Correct predictions under the headline metric.
+      accuracy: Headline accuracy in `[0, 1]`.
+      log_likelihood_mean: Mean per-token log-likelihood of the chosen
+        answer.
+      extras: Seed, cap, metric name, both accuracies and the binomial
+        standard error of the headline metric.
+    """
 
     name: str
     n: int
     correct: int
     accuracy: float
     log_likelihood_mean: float = 0.0
-    extras: dict[str, Any] = field(default_factory=dict)
+    extras: dict[str, Any] = dataclasses.field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        """Returns the result as a plain dict."""
+        return dataclasses.asdict(self)
 
 
-# ---------------------------------------------------------------------------
-# Task datasets
-# ---------------------------------------------------------------------------
-
-
-def _shuffled_stream(
-    ds: Iterable[dict[str, Any]], seed: int, buffer_size: int = 2000
-) -> Iterable[dict[str, Any]]:
-    """Yield a deterministic-shuffled stream from ``ds``.
+def shuffled_stream(
+    ds: Iterable[Example], seed: int, buffer_size: int = 2000
+) -> Iterable[Example]:
+    """Yields `ds` in a deterministic shuffled order.
 
     Args:
-        ds: A streaming HuggingFace dataset (exposes ``.shuffle``) or
-            any plain iterable of records (e.g. a list).
-        seed: Seed for the deterministic shuffle.
-        buffer_size: Shuffle buffer size for streaming datasets. Ignored
-            for plain iterables.
+      ds: A streaming Hugging Face dataset (has `.shuffle`) or any iterable.
+      seed: Shuffle seed.
+      buffer_size: Shuffle buffer for streaming datasets.
 
     Yields:
-        Records from ``ds`` in a deterministic order.
+      The records of `ds`.
     """
     if hasattr(ds, "shuffle"):
-        shuffled = ds.shuffle(seed=seed, buffer_size=buffer_size)
-        yield from shuffled
+        yield from ds.shuffle(seed=seed, buffer_size=buffer_size)
         return
-    import random
-
-    rng = random.Random(seed)
     rows = list(ds)
-    rng.shuffle(rows)
+    random.Random(seed).shuffle(rows)
     yield from rows
 
 
-def _load_hellaswag(seed: int = DEFAULT_EVAL_SEED) -> Iterable[dict[str, Any]]:
-    ds = load_dataset("Rowan/hellaswag", split="validation", streaming=True)
-    for ex in _shuffled_stream(ds, seed):
+def clean_hellaswag(text: str) -> str:
+    """Removes WikiHow markup the way lm-evaluation-harness does."""
+    text = text.strip().replace(" [title]", ". ")
+    text = re.sub(r"\[.*?\]", "", text)
+    return text.replace("  ", " ")
+
+
+def load_hellaswag(seed: int = DEFAULT_EVAL_SEED) -> Iterable[Example]:
+    """Yields HellaSwag validation examples in harness format."""
+    ds = datasets.load_dataset(
+        "Rowan/hellaswag", split="validation", streaming=True
+    )
+    for ex in shuffled_stream(ds, seed):
+        context = ex["ctx_a"] + " " + ex["ctx_b"].capitalize()
         yield {
-            "context": ex["ctx"],
-            "choices": ex["endings"],
+            "context": clean_hellaswag(ex["activity_label"] + ": " + context),
+            "choices": [clean_hellaswag(e) for e in ex["endings"]],
             "label": int(ex["label"]),
         }
 
 
-def _load_arc(
-    name: str, seed: int = DEFAULT_EVAL_SEED
-) -> Iterable[dict[str, Any]]:
-    ds = load_dataset("allenai/ai2_arc", name, split="test", streaming=True)
-    for ex in _shuffled_stream(ds, seed):
+def load_arc(name: str, seed: int = DEFAULT_EVAL_SEED) -> Iterable[Example]:
+    """Yields ARC test examples in harness format.
+
+    Args:
+      name: `ARC-Easy` or `ARC-Challenge`.
+      seed: Shuffle seed.
+
+    Yields:
+      Examples with a `Question: ... Answer:` context.
+    """
+    ds = datasets.load_dataset(
+        "allenai/ai2_arc", name, split="test", streaming=True
+    )
+    for ex in shuffled_stream(ds, seed):
         yield {
-            "context": ex["question"],
+            "context": "Question: " + ex["question"] + "\nAnswer:",
             "choices": ex["choices"]["text"],
             "label": ex["choices"]["label"].index(ex["answerKey"]),
-            "labels_str": ex["choices"]["label"],
-            "answer_str": ex["answerKey"],
         }
 
 
-def _load_piqa(seed: int = DEFAULT_EVAL_SEED) -> Iterable[dict[str, Any]]:
-    # Upstream ``ybisk/piqa`` is loading-script only and is no longer
-    # supported by the current ``datasets`` versions we run with. Use
-    # ``gimmaru/piqa`` which mirrors the same schema (goal/sol1/sol2).
-    ds = load_dataset("gimmaru/piqa", split="validation", streaming=True)
-    for ex in _shuffled_stream(ds, seed):
+def load_piqa(seed: int = DEFAULT_EVAL_SEED) -> Iterable[Example]:
+    """Yields PIQA validation examples in harness format.
+
+    The upstream `ybisk/piqa` is a loading script that current `datasets`
+    versions no longer run; `gimmaru/piqa` mirrors the same schema.
+    """
+    ds = datasets.load_dataset(
+        "gimmaru/piqa", split="validation", streaming=True
+    )
+    for ex in shuffled_stream(ds, seed):
         yield {
-            "context": ex["goal"],
+            "context": "Question: " + ex["goal"] + "\nAnswer:",
             "choices": [ex["sol1"], ex["sol2"]],
             "label": int(ex["label"]),
         }
 
 
-def _load_winogrande(seed: int = DEFAULT_EVAL_SEED) -> Iterable[dict[str, Any]]:
-    ds = load_dataset(
+def load_winogrande(seed: int = DEFAULT_EVAL_SEED) -> Iterable[Example]:
+    """Yields WinoGrande validation examples with partial scoring.
+
+    As in lm-evaluation-harness, each option is substituted for the blank in
+    the *context*, and the text after the blank is the continuation that is
+    scored. The continuation is the same for both options, so the model is
+    asked which prefix makes the rest of the sentence more likely.
+    """
+    ds = datasets.load_dataset(
         "allenai/winogrande",
-        "winogrande_l",
+        "winogrande_xl",
         split="validation",
         streaming=True,
     )
-    for ex in _shuffled_stream(ds, seed):
-        ctx = ex["sentence"]
-        # The dataset exposes ``option1``/``option2``, not an ``options``
-        # list, and ``answer`` is 1-based over those two in order.
-        # Building the choices in the reverse order while keeping
-        # ``answer - 1`` as the label inverted every example.
-        choices = [
-            ctx.replace("_", ex["option1"]),
-            ctx.replace("_", ex["option2"]),
-        ]
+    for ex in shuffled_stream(ds, seed):
+        head, _, tail = ex["sentence"].partition("_")
         yield {
             "context": "",
-            "choices": choices,
+            "contexts": [head + ex["option1"], head + ex["option2"]],
+            "choices": [tail.strip(), tail.strip()],
             "label": int(ex["answer"]) - 1,
         }
 
 
 TASK_REGISTRY: dict[str, TaskSpec] = {
-    "hellaswag": TaskSpec(
-        name="hellaswag", loader=_load_hellaswag, max_examples=200
-    ),
+    "hellaswag": TaskSpec("hellaswag", load_hellaswag, metric="acc_norm"),
     "arc_easy": TaskSpec(
-        name="arc_easy",
-        loader=lambda seed=DEFAULT_EVAL_SEED: _load_arc("ARC-Easy", seed),
-        max_examples=200,
+        "arc_easy", lambda seed=DEFAULT_EVAL_SEED: load_arc("ARC-Easy", seed)
     ),
     "arc_challenge": TaskSpec(
-        name="arc_challenge",
-        loader=lambda seed=DEFAULT_EVAL_SEED: _load_arc("ARC-Challenge", seed),
-        max_examples=200,
+        "arc_challenge",
+        lambda seed=DEFAULT_EVAL_SEED: load_arc("ARC-Challenge", seed),
+        metric="acc_norm",
     ),
-    "piqa": TaskSpec(name="piqa", loader=_load_piqa, max_examples=200),
-    "winogrande": TaskSpec(
-        name="winogrande", loader=_load_winogrande, max_examples=200
-    ),
+    "piqa": TaskSpec("piqa", load_piqa),
+    "winogrande": TaskSpec("winogrande", load_winogrande),
 }
 
 
-# ---------------------------------------------------------------------------
-# Scoring
-# ---------------------------------------------------------------------------
+def encode(tokenizer: Any, text: str) -> list[int]:
+    """Returns token ids as a plain list.
+
+    Args:
+      tokenizer: A Hugging Face tokenizer or a wrapper exposing one as
+        `.tokenizer`.
+      text: Text to encode.
+
+    Returns:
+      Token ids without special tokens when the tokenizer supports that.
+    """
+    raw = getattr(tokenizer, "tokenizer", tokenizer)
+    try:
+        ids = raw.encode(text, add_special_tokens=False)
+    except TypeError:
+        ids = raw.encode(text)
+    return [int(i) for i in ids]
 
 
-def _normalize_scores(scores: list[float]) -> list[float]:
-    """Length-normalise per-token log-likelihoods so HellaSwag/PIQA-style
-    comparisons aren't dominated by choice length."""
-    return scores
+def choice_loglik(
+    model: Any,
+    tokenizer: transformers.PreTrainedTokenizerBase,
+    context: str,
+    choice: str,
+    device: torch.device,
+    max_len: int = 1024,
+) -> tuple[float, int]:
+    """Scores `choice` given `context`.
+
+    A slot model (`ucsa.UCSA`) reads only the context and its slot `j`
+    predicts choice token `j`, so the choice is never in its input. A causal
+    model reads context plus choice and is scored on the same tokens. At most
+    `prefix.DEFAULT_NUM_TARGETS` choice tokens are scored in both cases.
+
+    Args:
+      model: Slot model or causal model.
+      tokenizer: Tokenizer for the model.
+      context: Conditioning text; may be empty.
+      choice: Continuation to score.
+      device: Device holding the model.
+      max_len: Maximum input length; the start of the context is dropped.
+
+    Returns:
+      `(sum_log_prob, n_scored_tokens)`.
+    """
+    cont_ids = encode(tokenizer, " " + choice if context else choice)
+    cont_ids = cont_ids[: prefix.DEFAULT_NUM_TARGETS]
+    if not cont_ids:
+        return 0.0, 0
+    ctx_ids = encode(tokenizer, context) if context else []
+    if not ctx_ids:
+        ctx_ids = [getattr(tokenizer, "eos_token_id", None) or 0]
+    cont = torch.tensor([cont_ids], dtype=torch.long, device=device)
+    ctx = ctx_ids[-(max_len - len(cont_ids)) :]
+    ctx_t = torch.tensor([ctx], dtype=torch.long, device=device)
+    with torch.no_grad():
+        if isinstance(model, ucsa.UCSA):
+            out = model(ctx_t)
+            logits = out.get("language", out.get("logits"))
+            if logits is None:
+                return 0.0, 0
+            logprobs = prefix.slot_continuation_logprobs(logits, cont)
+        else:
+            full = torch.cat([ctx_t, cont], dim=1)
+            out = model(full)
+            if isinstance(out, dict):
+                logits = out["logits"]
+            else:
+                logits = out[0] if isinstance(out, tuple) else out
+            logprobs = prefix.causal_continuation_logprobs(
+                logits, full, cont.shape[1]
+            )
+    return float(logprobs.sum().item()), int(logprobs.numel())
 
 
-@torch.no_grad()
-def _conditional_loglik(
-    model: UCSA,
-    tokenizer: PreTrainedTokenizerBase,
+def conditional_loglik(
+    model: Any,
+    tokenizer: transformers.PreTrainedTokenizerBase,
     context: str,
     choice: str,
     device: torch.device,
     max_len: int = 1024,
 ) -> float:
-    """Compute ``log P(choice | context)`` under the model.
+    """Returns the mean per-token log-likelihood of `choice` given `context`.
 
-    Ponytail: this is the canonical 'rank by log-likelihood' protocol
-    used in lm-evaluation-harness and the original GPT-2 paper.
+    Args:
+      model: Slot model or causal model.
+      tokenizer: Tokenizer for the model.
+      context: Conditioning text.
+      choice: Continuation to score.
+      device: Device holding the model.
+      max_len: Maximum input length.
+
+    Returns:
+      The mean log-probability per scored token, or 0 if none was scored.
     """
-    full = context + " " + choice if context else choice
-    full_ids = tokenizer.encode(full)
-    context_ids = tokenizer.encode(context) if context else []
-    if len(full_ids) <= len(context_ids):
-        return 0.0
-    # Truncate from the left of the prompt if too long.
-    if len(full_ids) > max_len:
-        keep = max_len - (len(full_ids) - len(context_ids))
-        start = max(0, len(context_ids) - keep)
-        full_ids = full_ids[start:]
-        context_ids = full_ids[: len(context_ids) - start]
-        if len(context_ids) >= len(full_ids):
-            return 0.0
-    ids = torch.tensor([full_ids], dtype=torch.long, device=device)
-    targets = torch.tensor([full_ids], dtype=torch.long, device=device)
-    # Build a per-token loss mask so we only score choice tokens.
-    ctx_len = len(context_ids)
-    ignore = torch.full_like(targets, -100)
-    ignore[:, :ctx_len] = targets[:, :ctx_len]
-    out = model(ids)
-    if isinstance(out, dict):
-        maybe_logits = out.get("language", out.get("logits"))
-    else:
-        maybe_logits = out
-    if maybe_logits is None:
-        return 0.0
-    logits: Tensor = maybe_logits
-    # Align lengths the same way compute_loss does (target the
-    # dataset's last logit -> next-token prediction).
-    seq = min(logits.shape[1], targets.shape[1])
-    if seq == 0:
-        return 0.0
-    logits = logits[:, :seq, :]
-    targets = targets[:, :seq]
-    loss = torch.nn.functional.cross_entropy(
-        logits.reshape(-1, logits.shape[-1]),
-        targets.reshape(-1),
-        reduction="none",
-    ).view(targets.shape)
-    mask = (targets != ignore[:, :seq]).float()
-    if mask.sum() == 0:
-        return 0.0
-    return float(-loss.sum().item() / mask.sum().item())
+    total, count = choice_loglik(
+        model, tokenizer, context, choice, device, max_len
+    )
+    return total / count if count else 0.0
 
 
 def evaluate_task(
     spec: TaskSpec,
-    model: UCSA,
-    tokenizer: PreTrainedTokenizerBase,
+    model: Any,
+    tokenizer: transformers.PreTrainedTokenizerBase,
     device: torch.device,
 ) -> EvalResult:
-    """Run one task, return its ``EvalResult``."""
+    """Runs one task.
+
+    Args:
+      spec: Task to run.
+      model: Slot model or causal model.
+      tokenizer: Tokenizer for the model.
+      device: Device holding the model.
+
+    Returns:
+      The task's `EvalResult`.
+    """
     if hasattr(model, "eval"):
         model.eval()
-    correct = 0
+    correct = {"acc": 0, "acc_norm": 0}
     total = 0
     ll_sum = 0.0
     for i, ex in enumerate(spec.loader(spec.seed)):
         if spec.max_examples is not None and i >= spec.max_examples:
             break
-        ctx = ex["context"]
-        choices = ex["choices"]
-        label = ex["label"]
-        scores = [
-            _conditional_loglik(model, tokenizer, ctx, c, device)
-            for c in choices
+        choices, label = ex["choices"], ex["label"]
+        contexts = ex.get("contexts", [ex["context"]] * len(choices))
+        scored = [
+            choice_loglik(model, tokenizer, ctx, choice, device)
+            for ctx, choice in zip(contexts, choices, strict=True)
         ]
-        pred = scores.index(max(scores))
-        ll_sum += max(scores)
-        if pred == label:
-            correct += 1
+        sums = [s for s, _ in scored]
+        # acc ranks by total log-likelihood, acc_norm by log-likelihood per
+        # character of the choice (the harness convention).
+        norm = [s / max(1, len(c)) for s, c in zip(sums, choices, strict=True)]
+        correct["acc"] += int(sums.index(max(sums)) == label)
+        correct["acc_norm"] += int(norm.index(max(norm)) == label)
+        best_sum, best_n = scored[sums.index(max(sums))]
+        ll_sum += best_sum / best_n if best_n else 0.0
         total += 1
     if hasattr(model, "train"):
         model.train()
+    n = max(1, total)
+    acc, acc_norm = correct["acc"] / n, correct["acc_norm"] / n
+    head = acc_norm if spec.metric == "acc_norm" else acc
     return EvalResult(
         name=spec.name,
         n=total,
-        correct=correct,
-        accuracy=correct / max(1, total),
-        log_likelihood_mean=ll_sum / max(1, total),
-        extras={"seed": spec.seed, "max_examples": spec.max_examples},
+        correct=correct[spec.metric],
+        accuracy=head,
+        log_likelihood_mean=ll_sum / n,
+        extras={
+            "seed": spec.seed,
+            "max_examples": spec.max_examples,
+            "metric": spec.metric,
+            "acc": acc,
+            "acc_norm": acc_norm,
+            "stderr": math.sqrt(head * (1.0 - head) / n),
+        },
     )
 
 
 def evaluate_all(
     names: list[str] | None,
-    model: UCSA,
-    tokenizer: PreTrainedTokenizerBase,
+    model: Any,
+    tokenizer: transformers.PreTrainedTokenizerBase,
     device: torch.device,
 ) -> list[EvalResult]:
-    """Evaluate a list of tasks (or all registered)."""
-    if names is None or len(names) == 0:
-        names = list(TASK_REGISTRY.keys())
+    """Runs several tasks.
+
+    Args:
+      names: Task names; None or empty runs every registered task. Unknown
+        names are skipped with a message.
+      model: Slot model or causal model.
+      tokenizer: Tokenizer for the model.
+      device: Device holding the model.
+
+    Returns:
+      One result per task that ran.
+    """
+    names = names or list(TASK_REGISTRY)
     results = []
     for name in names:
         if name not in TASK_REGISTRY:
@@ -325,20 +391,11 @@ def evaluate_all(
             continue
         spec = TASK_REGISTRY[name]
         print(f"  eval {spec.name} ...", flush=True)
-        r = evaluate_task(spec, model, tokenizer, device)
-        results.append(r)
+        result = evaluate_task(spec, model, tokenizer, device)
+        results.append(result)
         print(
-            f"    {r.name}: {r.correct}/{r.n} acc={r.accuracy:.4f}",
+            f"    {result.name}: {result.correct}/{result.n} "
+            f"acc={result.accuracy:.4f}",
             flush=True,
         )
     return results
-
-
-__all__ = [
-    "DEFAULT_EVAL_SEED",
-    "EvalResult",
-    "TaskSpec",
-    "TASK_REGISTRY",
-    "evaluate_all",
-    "evaluate_task",
-]
