@@ -58,7 +58,7 @@ def build_dataset(cfg: Any) -> TextDataset:
     """Construct the training dataset from the config."""
     from ucsa.models.perception import TokenizerWrapper
 
-    cfg_dict = _config_to_dict(cfg)
+    cfg_dict = config_to_dict(cfg)
     tokenizer = TokenizerWrapper(
         tokenizer_name=cfg_dict["tokenizer"]["name"],
         max_seq_len=cfg_dict["dataset"]["sequence_length"],
@@ -73,7 +73,7 @@ def build_dataset(cfg: Any) -> TextDataset:
     return TextDataset(tokenizer, dataset_config)
 
 
-def _config_to_dict(cfg: Any) -> dict[str, Any]:
+def config_to_dict(cfg: Any) -> dict[str, Any]:
     """internal: convert a Hydra/OmegaConf config to a plain dict."""
     try:
         from omegaconf import DictConfig, OmegaConf
@@ -90,7 +90,7 @@ def _config_to_dict(cfg: Any) -> dict[str, Any]:
 
 def build_optimizer(model: torch.nn.Module, cfg: Any) -> torch.optim.Optimizer:
     """Construct the AdamW optimiser."""
-    cfg_dict = _config_to_dict(cfg)
+    cfg_dict = config_to_dict(cfg)
     return torch.optim.AdamW(
         model.parameters(),
         lr=cfg_dict["training"]["learning_rate"],
@@ -104,7 +104,7 @@ def build_trainer(
     cfg: Any,
 ) -> Trainer:
     """Construct the trainer from the config."""
-    cfg_dict = _config_to_dict(cfg)
+    cfg_dict = config_to_dict(cfg)
     # Pull JEPA-loss config out of the model section if present.
     # Defaults preserve the original I-JEPA-style loss.
     model_section = cfg_dict.get("model", {})
@@ -126,7 +126,7 @@ def build_trainer(
         grad_clip_norm=training["grad_clip_norm"],
         warmup_steps=training["warmup_steps"],
         max_steps=training["max_steps"],
-        amp_dtype=_resolve_dtype(training["amp_dtype"]),
+        amp_dtype=resolve_dtype(training["amp_dtype"]),
         log_every_n_steps=training["log_every_n_steps"],
         checkpoint_every_n_steps=training["checkpoint_every_n_steps"],
         gradient_checkpointing=training["gradient_checkpointing"],
@@ -153,7 +153,7 @@ def build_trainer(
     )
 
 
-def _resolve_dtype(name: str) -> torch.dtype:
+def resolve_dtype(name: str) -> torch.dtype:
     """Resolve a dtype name string to a :class:`torch.dtype`."""
     mapping: dict[str, torch.dtype] = {
         "float32": torch.float32,
@@ -174,7 +174,7 @@ def run_training(cfg: Any) -> dict[str, Any]:
     Returns:
         The final metrics snapshot.
     """
-    cfg_dict = _config_to_dict(cfg)
+    cfg_dict = config_to_dict(cfg)
     set_seed(int(cfg_dict["seed"]))
     model = build_model(cfg)
     dataset = build_dataset(cfg)
@@ -184,7 +184,7 @@ def run_training(cfg: Any) -> dict[str, Any]:
         cfg_dict["training"]["max_steps"],
     )
 
-    dataloader = _make_dataloader(dataset, cfg)
+    dataloader = make_dataloader(dataset, cfg)
     history = trainer.train(
         dataloader, num_steps=int(cfg_dict["training"]["max_steps"])
     )
@@ -193,11 +193,11 @@ def run_training(cfg: Any) -> dict[str, Any]:
     return final_snapshot
 
 
-def _make_dataloader(dataset: TextDataset, cfg: Any) -> Any:
+def make_dataloader(dataset: TextDataset, cfg: Any) -> Any:
     """Wrap the dataset in a lightweight DataLoader."""
     from torch.utils.data import DataLoader
 
-    cfg_dict = _config_to_dict(cfg)
+    cfg_dict = config_to_dict(cfg)
     batch_size = int(cfg_dict["training"]["batch_size"])
 
     class IterableDatasetAdapter(
