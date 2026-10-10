@@ -10,7 +10,7 @@ from ucsa.training import shards
 def make_shard(tmp_path, n_tokens=1000):
     path = str(tmp_path / "s.bin")
     shards.write_shard([list(range(n_tokens - 1))], path)
-    return shards.TokenShard(path)
+    return shards.Shard(path)
 
 
 def take_inputs(batches, count):
@@ -62,7 +62,7 @@ def test_an_epoch_visits_every_window_once(tmp_path):
 
 def test_missing_or_short_shards_fail_loudly(tmp_path):
     with pytest.raises(FileNotFoundError, match="prepare_data"):
-        shards.TokenShard(str(tmp_path / "nope.bin"))
+        shards.Shard(str(tmp_path / "nope.bin"))
     shard = make_shard(tmp_path, n_tokens=8)
     with pytest.raises(ValueError):
         next(shard.batches(1, 16))
