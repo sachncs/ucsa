@@ -66,3 +66,22 @@ def test_missing_or_short_shards_fail_loudly(tmp_path):
     shard = make_shard(tmp_path, n_tokens=8)
     with pytest.raises(ValueError):
         next(shard.batches(1, 16))
+
+
+def test_filter_drops_short_and_duplicate_documents_and_counts_them():
+    docs = [
+        list(range(100)),
+        list(range(100)) + [7],  # same first 128 tokens' prefix: duplicate
+        [1, 2, 3],  # too short
+        list(range(500, 700)),
+    ]
+    stats = {}
+    kept = list(shards.filter_documents(docs, min_tokens=10, stats=stats))
+    assert kept == [docs[0], docs[3]]
+    assert stats == {"seen": 4, "kept": 2, "short": 1, "duplicate": 1}
+
+
+def test_filter_keeps_documents_that_only_share_a_short_start():
+    a = [9] * 5 + list(range(100))
+    b = [9] * 5 + list(range(200, 300))
+    assert len(list(shards.filter_documents([a, b], min_tokens=10))) == 2
