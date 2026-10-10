@@ -15,7 +15,6 @@ import os
 import tempfile
 
 import torch
-import yaml
 
 from ucsa.models import recurrent
 from ucsa.training import engine, presets, tuning
@@ -31,7 +30,7 @@ def main() -> None:
     )
     parser.add_argument("--keep", type=float, default=1 / 3)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--space", default=None, help="YAML {key: [values]}")
+    parser.add_argument("--space", default=None, help="JSON {key: [values]}")
     parser.add_argument("--data", default="data")
     parser.add_argument("--out", default="runs/tune.json")
     args = parser.parse_args()
@@ -40,7 +39,7 @@ def main() -> None:
     space = tuning.DEFAULT_SPACE
     if args.space:
         with open(args.space) as f:
-            space = yaml.safe_load(f)
+            space = json.load(f)
 
     def score(candidate: dict, steps: int) -> float:
         raw = {"model": dict(preset["model"]), "train": dict(preset["train"])}
