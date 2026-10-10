@@ -179,3 +179,79 @@ def test_evaluate_reports_bits_per_byte_consistent_with_perplexity():
 def test_evaluate_omits_bits_per_byte_without_byte_lengths():
     r = evaluate(tiny_model().eval(), batches(), 1)
     assert "bpb_all" not in r
+
+
+# ---------------------------------------------- findings from the code review
+
+
+def test_retention_biases_and_gates_are_never_weight_decayed():
+    """Regression: `slot_bias` and `surprise_gain` are 2-D (slots, 1), so a
+    rule based on ndim alone decayed the per-bank retention biases."""
+    model = tiny_model()
+    model.updater.surprise_gain = torch.nn.Parameter(torch.zeros(4, 1))
+    optimizer = engine.build_optimizer(model, engine.Config())
+    decayed = {
+        id(p)
+        for g in optimizer.param_groups
+        if g["weight_decay"] > 0
+        for p in g["params"]
+    }
+    for name, p in model.named_parameters():
+        if any(k in name for k in ("bias", "gain", "scale", "state0", "embed")):
+            assert id(p) not in decayed, name
+    matrices = [
+        p
+        for n, p in model.named_parameters()
+        if p.requires_grad
+        and p.ndim >= 2
+        and "embed" not in n
+        and "state0" not in n
+        and "bias" not in n
+        and "gain" not in n
+    ]
+    assert all(id(p) in decayed for p in matrices)
+
+
+def test_resuming_with_ema_from_a_checkpoint_saved_without_it(tmp_path):
+    fit(tiny_model(), cfg(tmp_path, steps=3), batches, None, log=lambda s: None)
+    rec = fit(
+        tiny_model(),
+        cfg(tmp_path, steps=5, weight_ema=0.9),
+        batches,
+        None,
+        resume=True,
+        log=lambda s: None,
+    )
+    assert rec["params"] > 0  # did not crash on the missing EMA state
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"seq_len": 0},
+        {"lr": 0.0},
+        {"lr": -1.0},
+        {"warmup_steps": -1},
+        {"log_every": 0},
+        {"eval_every": -1},
+        {"ckpt_every": -5},
+        {"grad_clip": 0.0},
+        {"weight_decay": -0.1},
+        {"beta1": 1.0},
+        {"beta2": -0.1},
+        {"eval_batches": 0},
+        {"keep_ckpts": -1},
+    ],
+)
+def test_every_numeric_setting_is_validated(bad):
+    with pytest.raises(ValueError):
+        engine.Config(**bad)
+
+
+def test_evaluate_restores_the_mode_it_was_called_in():
+    model = tiny_model().eval()
+    evaluate(model, batches(), 1)
+    assert not model.training
+    model.train()
+    evaluate(model, batches(), 1)
+    assert model.training
