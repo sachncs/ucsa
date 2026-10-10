@@ -178,14 +178,12 @@ ucsa/
 ├── infer.py         inference entrypoint
 └── paper/           paper draft (PAPER.md, TABLES.md)
 scripts/
-├── train.py         UCSA training + SOTA stack + benchmark comparison
-├── train_baseline.py matched-compute vanilla-Transformer baseline
+├── train.py         UCSA training + SOTA stack
 ├── eval.py          HellaSwag / ARC / PIQA / WinoGrande evaluation
 ├── probe_banks.py   PCS bank probe (top tokens per bank, centroid sim)
 ├── probe_origination.py intent-bank localisation, collapse, and descent probes
 ├── run_ablations.py ablation matrix driver
 ├── build_paper_tables.py reads runs/*.json, writes paper/TABLES.md
-└── benchmark.py     one-file showcase against modern-LM baselines
 docs/
 ├── index.md         Jekyll landing page
 ├── getting-started.md install, configure, smoke-test
