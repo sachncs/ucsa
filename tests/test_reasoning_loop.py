@@ -1,4 +1,4 @@
-"""Tests for :mod:`ucsa.models.reasoning_loop`."""
+"""Tests for :mod:`ucsa.models.reasoning`."""
 
 from __future__ import annotations
 
@@ -6,20 +6,19 @@ import pytest
 import torch
 from torch import Tensor
 
-from ucsa.models.projection_heads import OriginationHead
-from ucsa.models.reasoning_loop import ReasoningLoop, ReasoningLoopConfig
-from ucsa.models.state import PCSConfig, PersistentCognitiveState
-from ucsa.models.transformer_operator import (
-    TransformerOperator,
-    TransformerOperatorConfig,
+from ucsa.models import (
+    cognitive,
+    projection,
+    reasoning,
+    transformer,
+    transition,
 )
-from ucsa.models.transition_operator import StateTransitionOperator
 
 
-def tiny_operator() -> TransformerOperator:
+def tiny_operator() -> transformer.Operator:
     """Return a tiny transformer operator for tests."""
-    return TransformerOperator(
-        TransformerOperatorConfig(
+    return transformer.Operator(
+        transformer.Config(
             hidden_size=32,
             num_layers=2,
             num_q_heads=4,
@@ -31,45 +30,45 @@ def tiny_operator() -> TransformerOperator:
     )
 
 
-def tiny_pcs() -> PersistentCognitiveState:
+def tiny_pcs() -> cognitive.State:
     """Return a fresh PCS sized for tests."""
-    return PersistentCognitiveState(PCSConfig(hidden_size=32))
+    return cognitive.State(cognitive.Config(hidden_size=32))
 
 
 class TestReasoningLoopConfig:
-    """Tests for :class:`ReasoningLoopConfig`."""
+    """Tests for :class:`reasoning.Config`."""
 
     def test_default_config_valid(self) -> None:
         """Defaults construct without error."""
-        config = ReasoningLoopConfig()
+        config = reasoning.Config()
         assert config.num_iterations == 4
         assert config.capture_intermediates is False
 
     def test_zero_iterations_rejected(self) -> None:
         """``num_iterations`` of zero or less raises."""
         with pytest.raises(ValueError):
-            ReasoningLoopConfig(num_iterations=0)
+            reasoning.Config(num_iterations=0)
 
     def test_invalid_fraction_rejected(self) -> None:
         """``working_token_fraction`` outside (0, 1] raises."""
         with pytest.raises(ValueError):
-            ReasoningLoopConfig(working_token_fraction=0.0)
+            reasoning.Config(working_token_fraction=0.0)
         with pytest.raises(ValueError):
-            ReasoningLoopConfig(working_token_fraction=1.5)
+            reasoning.Config(working_token_fraction=1.5)
 
 
 class TestReasoningLoop:
-    """Tests for :class:`ReasoningLoop`."""
+    """Tests for :class:`reasoning.Loop`."""
 
     def test_default_iteration_count_is_four(self) -> None:
         """Default loop runs 4 iterations per forward pass."""
-        loop = ReasoningLoop(tiny_operator())
+        loop = reasoning.Loop(tiny_operator())
         assert loop.config.num_iterations == 4
 
     def test_forward_runs_configured_iterations(self) -> None:
         """``iteration_count`` matches ``num_iterations`` after forward."""
-        loop = ReasoningLoop(
-            tiny_operator(), ReasoningLoopConfig(num_iterations=3)
+        loop = reasoning.Loop(
+            tiny_operator(), reasoning.Config(num_iterations=3)
         )
         pcs = tiny_pcs()
         obs = torch.randn(1, 4, 32)
@@ -78,13 +77,13 @@ class TestReasoningLoop:
 
     def test_forward_observation_shape_validation(self) -> None:
         """Non-3D observation raises ``ValueError``."""
-        loop = ReasoningLoop(tiny_operator())
+        loop = reasoning.Loop(tiny_operator())
         with pytest.raises(ValueError):
             loop(tiny_pcs(), torch.randn(4, 32))
 
     def test_inject_observation_writes_to_working(self) -> None:
         """``inject_observation`` overwrites the working bank."""
-        loop = ReasoningLoop(tiny_operator())
+        loop = reasoning.Loop(tiny_operator())
         pcs = tiny_pcs()
         before = pcs.get_bank("working").clone()
         obs = torch.zeros(1, 6, 32)
@@ -99,9 +98,9 @@ class TestReasoningLoop:
 
     def test_inject_with_partial_fraction(self) -> None:
         """Partial fraction truncates the observation."""
-        loop = ReasoningLoop(
+        loop = reasoning.Loop(
             tiny_operator(),
-            ReasoningLoopConfig(num_iterations=1, working_token_fraction=0.5),
+            reasoning.Config(num_iterations=1, working_token_fraction=0.5),
         )
         pcs = tiny_pcs()
         obs = torch.ones(1, 10, 32)
@@ -114,7 +113,7 @@ class TestReasoningLoop:
 
     def test_inject_with_more_tokens_than_working(self) -> None:
         """An observation longer than the working bank is truncated."""
-        loop = ReasoningLoop(tiny_operator())
+        loop = reasoning.Loop(tiny_operator())
         pcs = tiny_pcs()
         obs = torch.ones(1, 100, 32)
         loop.inject_observation(pcs, obs)
@@ -123,9 +122,9 @@ class TestReasoningLoop:
 
     def test_intermediates_captured_when_enabled(self) -> None:
         """With ``capture_intermediates=True``, per-iteration snapshots exist."""
-        loop = ReasoningLoop(
+        loop = reasoning.Loop(
             tiny_operator(),
-            ReasoningLoopConfig(num_iterations=3, capture_intermediates=True),
+            reasoning.Config(num_iterations=3, capture_intermediates=True),
         )
         loop(tiny_pcs(), torch.randn(1, 4, 32))
         assert len(loop.last_intermediates) == 3
@@ -134,17 +133,17 @@ class TestReasoningLoop:
 
     def test_intermediates_empty_when_disabled(self) -> None:
         """With ``capture_intermediates=False``, no snapshots are stored."""
-        loop = ReasoningLoop(
-            tiny_operator(), ReasoningLoopConfig(num_iterations=2)
+        loop = reasoning.Loop(
+            tiny_operator(), reasoning.Config(num_iterations=2)
         )
         loop(tiny_pcs(), torch.randn(1, 4, 32))
         assert loop.last_intermediates == []
 
     def test_reset_clears_state(self) -> None:
         """``reset`` clears iteration count and intermediates."""
-        loop = ReasoningLoop(
+        loop = reasoning.Loop(
             tiny_operator(),
-            ReasoningLoopConfig(num_iterations=2, capture_intermediates=True),
+            reasoning.Config(num_iterations=2, capture_intermediates=True),
         )
         loop(tiny_pcs(), torch.randn(1, 4, 32))
         loop.reset()
@@ -154,7 +153,7 @@ class TestReasoningLoop:
     def test_reset_clears_operator_kv_cache(self) -> None:
         """``reset`` clears the operator's KV cache."""
         op = tiny_operator()
-        loop = ReasoningLoop(op, ReasoningLoopConfig(num_iterations=1))
+        loop = reasoning.Loop(op, reasoning.Config(num_iterations=1))
         loop(tiny_pcs(), torch.randn(1, 4, 32))
         loop.reset()
         for block in op.blocks:
@@ -162,9 +161,9 @@ class TestReasoningLoop:
 
     def test_state_isolation_between_calls(self) -> None:
         """PCS state from one call is not leaked into the next call's inputs."""
-        loop = ReasoningLoop(
+        loop = reasoning.Loop(
             tiny_operator(),
-            ReasoningLoopConfig(num_iterations=1, capture_intermediates=True),
+            reasoning.Config(num_iterations=1, capture_intermediates=True),
         )
         pcs = tiny_pcs()
         # Run two calls with different observations.
@@ -176,17 +175,17 @@ class TestReasoningLoop:
         assert not torch.allclose(first_intermediate, second_intermediate)
 
     def test_forward_returns_pcs(self) -> None:
-        """The forward pass returns a :class:`PersistentCognitiveState`."""
-        loop = ReasoningLoop(
-            tiny_operator(), ReasoningLoopConfig(num_iterations=1)
+        """The forward pass returns a :class:`cognitive.State`."""
+        loop = reasoning.Loop(
+            tiny_operator(), reasoning.Config(num_iterations=1)
         )
         out = loop(tiny_pcs(), torch.randn(1, 4, 32))
-        assert isinstance(out, PersistentCognitiveState)
+        assert isinstance(out, cognitive.State)
 
     def test_forward_preserves_pcs_structure(self) -> None:
         """After a forward pass the PCS still has all of its banks."""
-        loop = ReasoningLoop(
-            tiny_operator(), ReasoningLoopConfig(num_iterations=1)
+        loop = reasoning.Loop(
+            tiny_operator(), reasoning.Config(num_iterations=1)
         )
         out = loop(tiny_pcs(), torch.randn(1, 4, 32))
         for name in (
@@ -202,9 +201,9 @@ class TestReasoningLoop:
 
     def test_get_intermediates_returns_copy(self) -> None:
         """``get_intermediates`` returns a fresh list each call."""
-        loop = ReasoningLoop(
+        loop = reasoning.Loop(
             tiny_operator(),
-            ReasoningLoopConfig(num_iterations=2, capture_intermediates=True),
+            reasoning.Config(num_iterations=2, capture_intermediates=True),
         )
         loop(tiny_pcs(), torch.randn(1, 4, 32))
         copy1 = loop.get_intermediates()
@@ -218,14 +217,14 @@ class TestObservationMixConfig:
 
     def test_defaults_keep_the_real_observation(self) -> None:
         """Defaults hold ``alpha_k`` at 1.0 for every iteration."""
-        config = ReasoningLoopConfig(num_iterations=4)
+        config = reasoning.Config(num_iterations=4)
         assert config.observation_mix == 1.0
         assert config.observation_mix_decay == 1.0
         assert [config.observation_weight(k) for k in range(4)] == [1.0] * 4
 
     def test_decay_is_geometric(self) -> None:
         """``alpha_k = observation_mix * decay ** k``."""
-        config = ReasoningLoopConfig(
+        config = reasoning.Config(
             observation_mix=0.8, observation_mix_decay=0.5
         )
         weights = [config.observation_weight(k) for k in range(4)]
@@ -235,18 +234,18 @@ class TestObservationMixConfig:
     def test_invalid_mix_rejected(self, mix: float) -> None:
         """``observation_mix`` outside [0, 1] raises."""
         with pytest.raises(ValueError):
-            ReasoningLoopConfig(observation_mix=mix)
+            reasoning.Config(observation_mix=mix)
 
     @pytest.mark.parametrize("decay", [-0.1, 1.1])
     def test_invalid_decay_rejected(self, decay: float) -> None:
         """``observation_mix_decay`` outside [0, 1] raises."""
         with pytest.raises(ValueError):
-            ReasoningLoopConfig(observation_mix_decay=decay)
+            reasoning.Config(observation_mix_decay=decay)
 
     def test_negative_iteration_rejected(self) -> None:
         """``observation_weight`` rejects a negative iteration index."""
         with pytest.raises(ValueError):
-            ReasoningLoopConfig().observation_weight(-1)
+            reasoning.Config().observation_weight(-1)
 
 
 class TestEndogenousOrigination:
@@ -254,12 +253,12 @@ class TestEndogenousOrigination:
 
     def loop_with_generator(
         self, **config_kwargs: object
-    ) -> tuple[ReasoningLoop, OriginationHead]:
+    ) -> tuple[reasoning.Loop, projection.Origination]:
         """internal: a loop wired to a real origination generator."""
-        generator = OriginationHead(32)
-        loop = ReasoningLoop(
+        generator = projection.Origination(32)
+        loop = reasoning.Loop(
             tiny_operator(),
-            ReasoningLoopConfig(**config_kwargs),  # type: ignore[arg-type]
+            reasoning.Config(**config_kwargs),  # type: ignore[arg-type]
             origination=generator,
         )
         return loop, generator
@@ -279,9 +278,11 @@ class TestEndogenousOrigination:
         """``alpha=1`` gives the same state as attaching no generator."""
         torch.manual_seed(0)
         operator = tiny_operator()
-        config = ReasoningLoopConfig(num_iterations=3)
-        plain = ReasoningLoop(operator, config)
-        wired = ReasoningLoop(operator, config, origination=OriginationHead(32))
+        config = reasoning.Config(num_iterations=3)
+        plain = reasoning.Loop(operator, config)
+        wired = reasoning.Loop(
+            operator, config, origination=projection.Origination(32)
+        )
         observation = torch.randn(1, 4, 32)
         torch.manual_seed(1)
         plain_out = plain(tiny_pcs(), observation).get_bank("working").clone()
@@ -319,10 +320,10 @@ class TestEndogenousOrigination:
 
     def test_mix_is_against_the_original_observation(self) -> None:
         """The blend uses ``O_0``, not the previous generated stream."""
-        generator = OriginationHead(32)
-        loop = ReasoningLoop(
+        generator = projection.Origination(32)
+        loop = reasoning.Loop(
             tiny_operator(),
-            ReasoningLoopConfig(num_iterations=2, observation_mix=0.25),
+            reasoning.Config(num_iterations=2, observation_mix=0.25),
             origination=generator,
         )
         pcs = tiny_pcs()
@@ -338,11 +339,11 @@ class TestEndogenousOrigination:
 
     def test_generator_gradient_reaches_the_intent_bank(self) -> None:
         """A loss after the loop trains the origination generator."""
-        generator = OriginationHead(32)
+        generator = projection.Origination(32)
         operator = tiny_operator()
-        loop = ReasoningLoop(
+        loop = reasoning.Loop(
             operator,
-            ReasoningLoopConfig(num_iterations=3, observation_mix=0.5),
+            reasoning.Config(num_iterations=3, observation_mix=0.5),
             origination=generator,
         )
         loop(tiny_pcs(), torch.randn(1, 4, 32))
@@ -353,9 +354,9 @@ class TestEndogenousOrigination:
 
     def test_no_generator_ignores_a_low_mix(self) -> None:
         """Without ``G`` the loop still feeds the real observation."""
-        loop = ReasoningLoop(
+        loop = reasoning.Loop(
             tiny_operator(),
-            ReasoningLoopConfig(num_iterations=3, observation_mix=0.0),
+            reasoning.Config(num_iterations=3, observation_mix=0.0),
         )
         loop(tiny_pcs(), torch.randn(1, 4, 32))
         assert loop.last_generated_inputs == []
@@ -394,13 +395,13 @@ class TestEndogenousOrigination:
         """
         observation = torch.randn(1, 4, 32)
         torch.manual_seed(0)
-        generator = OriginationHead(32)
+        generator = projection.Origination(32)
         operator = tiny_operator()
         distances = []
         for mix in (0.25, 0.75):
-            loop = ReasoningLoop(
+            loop = reasoning.Loop(
                 operator,
-                ReasoningLoopConfig(num_iterations=2, observation_mix=mix),
+                reasoning.Config(num_iterations=2, observation_mix=mix),
                 origination=generator,
             )
             mixed = loop.next_observation(
@@ -419,10 +420,10 @@ class TestEndogenousOrigination:
         the unbraked ``G`` alone.
         """
         torch.manual_seed(0)
-        generator = OriginationHead(32)
-        loop = ReasoningLoop(
+        generator = projection.Origination(32)
+        loop = reasoning.Loop(
             tiny_operator(),
-            ReasoningLoopConfig(num_iterations=2, observation_mix=0.75),
+            reasoning.Config(num_iterations=2, observation_mix=0.75),
             origination=generator,
         )
         observation = torch.randn(1, 4, 32)
@@ -450,7 +451,7 @@ class TestDifferentiableStateCarry:
 
     def test_differentiable_bank_is_none_before_forward(self) -> None:
         """No carried tensors exist before the first forward pass."""
-        loop = ReasoningLoop(tiny_operator())
+        loop = reasoning.Loop(tiny_operator())
         assert loop.differentiable_bank("working") is None
 
     def test_differentiable_bank_has_autograd_history(self) -> None:
@@ -459,8 +460,8 @@ class TestDifferentiableStateCarry:
         Reading the bank off the PCS instead returns a parameter that the
         ``no_grad`` write-back has detached from the transition.
         """
-        loop = ReasoningLoop(
-            tiny_operator(), ReasoningLoopConfig(num_iterations=2)
+        loop = reasoning.Loop(
+            tiny_operator(), reasoning.Config(num_iterations=2)
         )
         pcs = loop(tiny_pcs(), torch.randn(1, 4, 32))
         working = loop.differentiable_bank("working")
@@ -471,8 +472,8 @@ class TestDifferentiableStateCarry:
 
     def test_differentiable_bank_covers_every_bank(self) -> None:
         """Every bank is carried, not just working memory."""
-        loop = ReasoningLoop(
-            tiny_operator(), ReasoningLoopConfig(num_iterations=1)
+        loop = reasoning.Loop(
+            tiny_operator(), reasoning.Config(num_iterations=1)
         )
         loop(tiny_pcs(), torch.randn(1, 4, 32))
         for name in (
@@ -490,7 +491,7 @@ class TestDifferentiableStateCarry:
     def test_loss_on_carried_bank_reaches_operator(self) -> None:
         """A loss on the carried tensor trains the operator weights."""
         op = tiny_operator()
-        loop = ReasoningLoop(op, ReasoningLoopConfig(num_iterations=3))
+        loop = reasoning.Loop(op, reasoning.Config(num_iterations=3))
         loop(tiny_pcs(), torch.randn(1, 4, 32))
         working = loop.differentiable_bank("working")
         assert working is not None
@@ -502,9 +503,9 @@ class TestDifferentiableStateCarry:
 
     def test_intermediates_are_differentiable(self) -> None:
         """Captured JEPA intermediates carry gradients."""
-        loop = ReasoningLoop(
+        loop = reasoning.Loop(
             tiny_operator(),
-            ReasoningLoopConfig(num_iterations=3, capture_intermediates=True),
+            reasoning.Config(num_iterations=3, capture_intermediates=True),
         )
         loop(tiny_pcs(), torch.randn(1, 4, 32))
         assert len(loop.last_intermediates) == 3
@@ -513,8 +514,8 @@ class TestDifferentiableStateCarry:
 
     def test_reset_clears_carried_tensors(self) -> None:
         """``reset`` drops the carried tensors along with the KV cache."""
-        loop = ReasoningLoop(
-            tiny_operator(), ReasoningLoopConfig(num_iterations=1)
+        loop = reasoning.Loop(
+            tiny_operator(), reasoning.Config(num_iterations=1)
         )
         loop(tiny_pcs(), torch.randn(1, 4, 32))
         loop.reset()
@@ -528,7 +529,7 @@ class TestDifferentiableStateCarry:
         alternative operators (Mamba, RWKV) need no changes.
         """
 
-        class BareOperator(StateTransitionOperator):
+        class BareOperator(transition.Operator):
             """internal: an operator that carries no differentiable state."""
 
             @property
@@ -537,9 +538,9 @@ class TestDifferentiableStateCarry:
 
             def forward(
                 self,
-                cstate: PersistentCognitiveState,
+                cstate: cognitive.State,
                 observation: Tensor,
-            ) -> PersistentCognitiveState:
+            ) -> cognitive.State:
                 return cstate
 
             def initialize(self) -> None:
@@ -548,9 +549,9 @@ class TestDifferentiableStateCarry:
             def reset(self) -> None:
                 return None
 
-        loop = ReasoningLoop(
+        loop = reasoning.Loop(
             BareOperator(),
-            ReasoningLoopConfig(num_iterations=2, capture_intermediates=True),
+            reasoning.Config(num_iterations=2, capture_intermediates=True),
         )
         loop(tiny_pcs(), torch.randn(1, 4, 32))
         assert loop.differentiable_bank("working") is None
