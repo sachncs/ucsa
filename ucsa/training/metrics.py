@@ -51,6 +51,8 @@ from typing import Protocol
 import torch
 from torch import Tensor
 
+from ucsa.utils import precision
+
 
 class Writer(Protocol):
     """The one method the metrics registry needs from a TB writer."""
@@ -219,7 +221,7 @@ def intent_state_variance(states: Sequence[Tensor]) -> float:
     """
     if len(states) < 2:
         return 0.0
-    stacked = torch.stack([state.detach().float() for state in states])
+    stacked = torch.stack([state.detach() for state in states])
     return float(stacked.var(dim=0, unbiased=False).mean().item())
 
 
@@ -236,7 +238,7 @@ def intent_gate_usage(gate_weights: Tensor, num_slots: int) -> Tensor:
     """
     if gate_weights.numel() == 0:
         return torch.zeros(num_slots)
-    used = (gate_weights.detach() > 0).float().reshape(-1, num_slots)
+    used = precision.to_dtype(gate_weights.detach() > 0).reshape(-1, num_slots)
     counts = used.sum(dim=0)
     total = counts.sum()
     if float(total) <= 0.0:
@@ -257,7 +259,7 @@ def intent_gate_entropy(usage: Tensor) -> float:
     """
     if usage.numel() == 0:
         return 0.0
-    probabilities = usage.detach().float()
+    probabilities = usage.detach()
     support = probabilities > 0.0
     if not bool(support.any()):
         return 0.0
@@ -283,7 +285,7 @@ def intent_gate_mutual_info(usages: Sequence[Tensor]) -> float:
     """
     if len(usages) < 2:
         return 0.0
-    stacked = torch.stack([usage.detach().float() for usage in usages])
+    stacked = torch.stack([usage.detach() for usage in usages])
     if float(stacked.sum()) <= 0.0:
         return 0.0
     marginal = stacked.mean(dim=0)
@@ -304,8 +306,8 @@ def intent_read_share(intent_read: Tensor, working_read: Tensor) -> float:
         Value in ``[0, 1]``. Near ``0.0`` means the generator is driven by
         working memory and is ignoring the origination bank.
     """
-    intent_norm = float(intent_read.detach().float().norm())
-    working_norm = float(working_read.detach().float().norm())
+    intent_norm = float(intent_read.detach().norm())
+    working_norm = float(working_read.detach().norm())
     total = intent_norm + working_norm
     if total <= 0.0:
         return 0.0
