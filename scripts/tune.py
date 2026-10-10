@@ -38,7 +38,7 @@ def main() -> None:
     args = parser.parse_args()
 
     with open(train_r.CONFIG_PATH) as f:
-        preset = yaml.safe_load(f)["presets"][args.preset]
+        preset = yaml.safe_load(f)["recurrent"]["presets"][args.preset]
     space = tuning.DEFAULT_SPACE
     if args.space:
         with open(args.space) as f:

@@ -21,7 +21,7 @@ from ucsa.models import recurrent
 from ucsa.training import engine, shards
 
 CONFIG_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "ucsa", "configs", "recurrent.yaml"
+    os.path.dirname(__file__), "..", "ucsa", "config.yaml"
 )
 
 
@@ -69,7 +69,7 @@ def build_configs(
       SystemExit: If the preset is unknown.
     """
     with open(CONFIG_PATH) as f:
-        presets = yaml.safe_load(f)["presets"]
+        presets = yaml.safe_load(f)["recurrent"]["presets"]
     if args.preset not in presets:
         raise SystemExit(f"unknown preset {args.preset!r}: {sorted(presets)}")
     preset = json.loads(json.dumps(presets[args.preset]))
