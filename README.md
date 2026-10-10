@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/sachncs/ucsa/actions/workflows/ci.yml/badge.svg)](https://github.com/sachncs/ucsa/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/downloads/)
+[![Python](https://img.shields.io/badge/python-3.14-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-607%20passing-brightgreen.svg)](https://github.com/sachncs/ucsa)
 [![Coverage](https://img.shields.io/badge/coverage-80%25%20enforced-brightgreen.svg)](https://github.com/sachncs/ucsa)
 [![Docs](https://img.shields.io/badge/docs-site-blue.svg)](https://sachncs.github.io/ucsa/)
@@ -55,7 +55,6 @@ pip install -e ".[dev]"
     --max-steps 5 \
     --ckpt-every 0 \
     --eval-every 0 \
-    --skip-baselines \
     --seed 42
 ```
 
