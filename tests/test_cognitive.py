@@ -15,7 +15,7 @@ from ucsa.models.cognitive import (
 )
 
 
-class TestPCSConfig:
+class TestConfig:
     """Tests for :class:`cognitive.Config`."""
 
     def test_default_config_is_valid(self) -> None:
@@ -221,7 +221,7 @@ class TestRetentionScore:
             )
 
 
-class TestPersistentCognitiveState:
+class TestState:
     """Tests for :class:`cognitive.State`."""
 
     @pytest.fixture
