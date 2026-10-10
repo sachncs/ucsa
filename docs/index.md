@@ -102,7 +102,7 @@ permalink: /docs/
         <div class="ucsa-role__links">
           <a class="ucsa-role__link" href="{{ '/docs/architecture/' | relative_url }}">→ Architecture</a>
           <a class="ucsa-role__link" href="{{ '/paper/PAPER/' | relative_url }}">→ Paper draft</a>
-          <a class="ucsa-role__link" href="{{ '/paper/TABLES/' | relative_url }}">→ Paper tables</a>
+          <a class="ucsa-role__link" href="{{ '/paper/RESULTS/' | relative_url }}">→ Results</a>
         </div>
       </article>
 
@@ -115,7 +115,7 @@ permalink: /docs/
         </p>
         <div class="ucsa-role__links">
           <a class="ucsa-role__link" href="{{ '/docs/getting-started/' | relative_url }}">→ Getting started</a>
-          <a class="ucsa-role__link" href="{{ '/paper/TABLES/' | relative_url }}">→ Paper tables</a>
+          <a class="ucsa-role__link" href="{{ '/paper/RESULTS/' | relative_url }}">→ Results</a>
         </div>
       </article>
 
@@ -206,9 +206,9 @@ permalink: /docs/
           section.
         </p>
       </a>
-      <a class="ucsa-doc-tile" href="{{ '/paper/TABLES/' | relative_url }}">
+      <a class="ucsa-doc-tile" href="{{ '/paper/RESULTS/' | relative_url }}">
         <span class="ucsa-doc-tile__eyebrow">results</span>
-        <h4 class="ucsa-doc-tile__title">Paper tables</h4>
+        <h4 class="ucsa-doc-tile__title">Results</h4>
         <p class="ucsa-doc-tile__desc">
           Generated from <code>runs/*.json</code>. The numbers
           the paper claims.

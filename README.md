@@ -128,7 +128,7 @@ scripts/
 ├── profile_r.py     throughput and memory
 └── train.py, run_ablations.py, probe_banks.py, probe_origination.py,
     build_paper_tables.py   original-model tooling
-paper/               PAPER.md, TABLES.md, reference_results.json
+paper/               PAPER.md, RESULTS.md, artifacts/, reference_results.json
 docs/
 ├── index.md         Jekyll landing page (GitHub Pages)
 ├── architecture.md  deep design notes

@@ -176,7 +176,7 @@ ucsa/
 ├── tests/           pytest suite
 ├── train.py         training entrypoint
 ├── infer.py         inference entrypoint
-└── paper/           paper draft (PAPER.md, TABLES.md)
+└── paper/           paper (PAPER.md, generated RESULTS.md, artifacts/)
 scripts/
 ├── train.py         UCSA training + SOTA stack
 ├── eval.py          HellaSwag / ARC / PIQA / WinoGrande evaluation
