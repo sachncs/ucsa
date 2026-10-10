@@ -2,8 +2,8 @@
 
 import torch
 
-from ucsa.training import eval_harness
-from ucsa.training.prefix import PrefixBatches, split_prefix_targets
+from ucsa.training import eval_harness, prefix as prefix_lib
+from ucsa.training.prefix import split_prefix_targets
 
 
 def make_batch(length: int):
@@ -27,7 +27,7 @@ def test_no_target_token_appears_in_the_prefix():
 
 
 def test_prefixmake_batches_wraps_a_source():
-    out = list(PrefixBatches([make_batch(50), make_batch(50)], k=5))
+    out = list(prefix_lib.Batches([make_batch(50), make_batch(50)], k=5))
     assert len(out) == 2
     assert out[0][0].shape[1] == 45
 
@@ -44,7 +44,7 @@ def test_ucsa_scorer_never_feeds_the_choice_to_the_model(monkeypatch):
         def encode(self, text):
             return [ord(c) for c in text]
 
-    monkeypatch.setattr(eval_harness.ucsa, "UCSA", Spy)
+    monkeypatch.setattr(eval_harness.architecture, "UCSA", Spy)
     eval_harness.choice_loglik(Spy(), Tok(), "ab", "cd", torch.device("cpu"))
     assert seen[0].tolist() == [[ord("a"), ord("b")]]
 
