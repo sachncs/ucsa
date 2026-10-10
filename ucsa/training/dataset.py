@@ -21,7 +21,7 @@ from datasets import load_dataset
 from torch import Tensor
 from transformers import PreTrainedTokenizerBase
 
-from ucsa.models.perception import TokenizerWrapper
+from ucsa.models import perception
 
 PRIMARY_DATASET: str = "HuggingFaceFW/fineweb-edu"
 FALLBACK_DATASETS: tuple[tuple[str, str], ...] = (
@@ -31,7 +31,7 @@ FALLBACK_DATASETS: tuple[tuple[str, str], ...] = (
 
 
 @dataclass(frozen=True)
-class DatasetConfig:
+class Config:
     """Configuration for the streaming dataset loader.
 
     Attributes:
@@ -56,13 +56,13 @@ class DatasetConfig:
     pack_sequences: bool = True
 
 
-class TextDataset:
+class Text:
     """Streaming text dataset producing fixed-length token sequences."""
 
     def __init__(
         self,
-        tokenizer: TokenizerWrapper,
-        config: DatasetConfig | None = None,
+        tokenizer: perception.Tokenizer,
+        config: Config | None = None,
     ) -> None:
         """Initialise the dataset.
 
@@ -72,7 +72,7 @@ class TextDataset:
         """
         self.tokenizer = tokenizer
         if config is None:
-            config = DatasetConfig()
+            config = Config()
         self.config = config
         self.dataset = self.initialise_dataset()
         self.text_field = self.detect_text_field()
@@ -190,9 +190,9 @@ class TextDataset:
 
 __all__ = [
     "FALLBACK_DATASETS",
-    "DatasetConfig",
+    "Config",
     "PRIMARY_DATASET",
-    "TextDataset",
+    "Text",
 ]
 
 
@@ -203,24 +203,24 @@ def supported_datasets() -> tuple[str, ...]:
 
 def dataset_tokenizer(  # internal: helper for tests
     tokenizer: PreTrainedTokenizerBase, sequence_length: int = 64
-) -> TextDataset:
-    """internal: build a TextDataset against an in-memory fake dataset.
+) -> Text:
+    """internal: build a Text against an in-memory fake dataset.
 
     Used by unit tests so we never hit the network.
     """
     from datasets import Dataset
 
-    wrapper = TokenizerWrapper.__new__(TokenizerWrapper)
+    wrapper = perception.Tokenizer.__new__(perception.Tokenizer)
     wrapper.tokenizer = tokenizer
     wrapper.max_seq_len = sequence_length
     wrapper.vocab_size = int(tokenizer.vocab_size)
-    config = DatasetConfig(
+    config = Config(
         sequence_length=sequence_length,
         streaming=True,
         pack_sequences=False,
     )
 
-    class FakeDataset(TextDataset):
+    class FakeDataset(Text):
         def initialise_dataset(
             self_inner,
         ) -> Iterable[Mapping[str, Any]]:
