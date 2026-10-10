@@ -1,18 +1,10 @@
-"""UCSA top-level package.
+"""UCSA-R: a causal, windowed language model with a persistent state.
 
-Unified Cognitive State Architecture (UCSA) is a research-grade foundation model
-whose computation revolves around a single persistent differentiable cognitive
-state. Every operator acts on this state; every output is a projection of it.
-
-See :mod:`ucsa.models.architecture` for the top-level model definition.
+Every logit is an exact next-token prediction, so the model is evaluated by
+compression (bits per byte) and doubles as a lossless compressor. See
+`ucsa.models.recurrent` for the model and `ucsa.training.engine` for training.
 """
 
-from __future__ import annotations
+__all__ = ["__version__"]
 
-__all__ = [
-    "__version__",
-    "__author__",
-]
-
-__version__: str = "0.1.0"
-__author__: str = "sachin"
+__version__ = "0.1.0"
