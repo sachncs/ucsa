@@ -143,3 +143,12 @@ def test_compressibility_filter_drops_both_tails_and_counts_them():
         "too_repetitive": 1,
         "too_random": 1,
     }
+
+
+def test_a_shared_seen_set_keeps_a_document_out_of_a_second_shard():
+    docs = [list(range(200)), list(range(300, 500))]
+    seen = set()
+    first = list(shards.filter_documents(docs[:1], seen=seen))
+    second = list(shards.filter_documents(docs, seen=seen))
+    assert first == docs[:1]
+    assert second == docs[1:]  # the repeated document is dropped
