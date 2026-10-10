@@ -1,9 +1,9 @@
-"""UCSA training subpackage.
+"""Training, evaluation and analysis.
 
-Modules in this package implement the trainer, dataset loader, training
-curriculum, metrics, and evaluation loop.
+`engine` trains and evaluates, `shards` and `presets` supply data and
+configuration, `scoring`, `eval_harness`, `compression` and `diagnostics`
+measure a model, and `scaling` and `tuning` choose designs that hold at full
+length.
 """
-
-from __future__ import annotations
 
 __all__: list[str] = []
