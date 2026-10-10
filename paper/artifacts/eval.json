@@ -1,6 +1,6 @@
 {
   "device": "mps",
-  "recurrent_tasks": {
+  "tasks": {
     "hellaswag": {
       "name": "hellaswag",
       "n": 10042,
@@ -77,12 +77,12 @@
       }
     }
   },
-  "recurrent_avg_acc": 0.3711592716460704,
-  "recurrent_ppl": {
+  "avg_acc": 0.3711592716460704,
+  "ppl": {
     "fineweb-edu": 83.22645903610974,
     "wikitext-103": 244.38048927271373
   },
-  "recurrent_params": 19288358,
+  "params": 19288358,
   "reference_comparison": [
     {
       "task": "hellaswag",
