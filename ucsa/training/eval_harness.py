@@ -23,8 +23,8 @@ import datasets
 import torch
 import transformers
 
-from ucsa.models import architecture
-from ucsa.training import prefix
+from ucsa.models import recurrent
+from ucsa.training import scoring
 
 # Seed shared by every task loader, so a `max_examples` cap picks the same
 # subset on every run and for every model.
@@ -201,27 +201,21 @@ TASK_REGISTRY: dict[str, TaskSpec] = {
 }
 
 
-def encode(tokenizer: Any, text: str) -> list[int]:
-    """Returns token ids as a plain list.
+def encode(tokenizer: transformers.PreTrainedTokenizerBase, text: str) -> list[int]:
+    """Returns the token ids of `text` without special tokens.
 
     Args:
-      tokenizer: A Hugging Face tokenizer or a wrapper exposing one as
-        `.tokenizer`.
+      tokenizer: A Hugging Face tokenizer.
       text: Text to encode.
 
     Returns:
-      Token ids without special tokens when the tokenizer supports that.
+      Token ids as a plain list.
     """
-    raw = getattr(tokenizer, "tokenizer", tokenizer)
-    try:
-        ids = raw.encode(text, add_special_tokens=False)
-    except TypeError:
-        ids = raw.encode(text)
-    return [int(i) for i in ids]
+    return [int(i) for i in tokenizer.encode(text, add_special_tokens=False)]
 
 
 def choice_loglik(
-    model: Any,
+    model: recurrent.Model,
     tokenizer: transformers.PreTrainedTokenizerBase,
     context: str,
     choice: str,
@@ -230,13 +224,11 @@ def choice_loglik(
 ) -> tuple[float, int]:
     """Scores `choice` given `context`.
 
-    A slot model (`architecture.UCSA`) reads only the context and its slot `j`
-    predicts choice token `j`, so the choice is never in its input. A causal
-    model reads context plus choice and is scored on the same tokens. At most
-    `prefix.DEFAULT_NUM_TARGETS` choice tokens are scored in both cases.
+    The model reads context plus choice and is scored on the choice tokens
+    only; at most `scoring.DEFAULT_NUM_TARGETS` of them are scored.
 
     Args:
-      model: Slot model or causal model.
+      model: Causal model.
       tokenizer: Tokenizer for the model.
       context: Conditioning text; may be empty.
       choice: Continuation to score.
@@ -247,37 +239,22 @@ def choice_loglik(
       `(sum_log_prob, n_scored_tokens)`.
     """
     cont_ids = encode(tokenizer, " " + choice if context else choice)
-    cont_ids = cont_ids[: prefix.DEFAULT_NUM_TARGETS]
+    cont_ids = cont_ids[: scoring.DEFAULT_NUM_TARGETS]
     if not cont_ids:
         return 0.0, 0
     ctx_ids = encode(tokenizer, context) if context else []
     if not ctx_ids:
-        ctx_ids = [getattr(tokenizer, "eos_token_id", None) or 0]
-    cont = torch.tensor([cont_ids], dtype=torch.long, device=device)
+        ctx_ids = [tokenizer.eos_token_id or 0]
     ctx = ctx_ids[-(max_len - len(cont_ids)) :]
-    ctx_t = torch.tensor([ctx], dtype=torch.long, device=device)
+    ids = torch.tensor([ctx + cont_ids], dtype=torch.long, device=device)
     with torch.no_grad():
-        if isinstance(model, architecture.UCSA):
-            out = model(ctx_t)
-            logits = out.get("language", out.get("logits"))
-            if logits is None:
-                return 0.0, 0
-            logprobs = prefix.slot_continuation_logprobs(logits, cont)
-        else:
-            full = torch.cat([ctx_t, cont], dim=1)
-            out = model(full)
-            if isinstance(out, dict):
-                logits = out["logits"]
-            else:
-                logits = out[0] if isinstance(out, tuple) else out
-            logprobs = prefix.causal_continuation_logprobs(
-                logits, full, cont.shape[1]
-            )
+        logits = model(ids)["logits"]
+    logprobs = scoring.continuation_logprobs(logits, ids, len(cont_ids))
     return float(logprobs.sum().item()), int(logprobs.numel())
 
 
 def conditional_loglik(
-    model: Any,
+    model: recurrent.Model,
     tokenizer: transformers.PreTrainedTokenizerBase,
     context: str,
     choice: str,
@@ -287,7 +264,7 @@ def conditional_loglik(
     """Returns the mean per-token log-likelihood of `choice` given `context`.
 
     Args:
-      model: Slot model or causal model.
+      model: Causal model.
       tokenizer: Tokenizer for the model.
       context: Conditioning text.
       choice: Continuation to score.
@@ -305,7 +282,7 @@ def conditional_loglik(
 
 def evaluate_task(
     spec: TaskSpec,
-    model: Any,
+    model: recurrent.Model,
     tokenizer: transformers.PreTrainedTokenizerBase,
     device: torch.device,
 ) -> EvalResult:
@@ -313,15 +290,14 @@ def evaluate_task(
 
     Args:
       spec: Task to run.
-      model: Slot model or causal model.
+      model: Causal model.
       tokenizer: Tokenizer for the model.
       device: Device holding the model.
 
     Returns:
       The task's `EvalResult`.
     """
-    if hasattr(model, "eval"):
-        model.eval()
+    model.eval()
     correct = {"acc": 0, "acc_norm": 0}
     total = 0
     ll_sum = 0.0
@@ -343,8 +319,7 @@ def evaluate_task(
         best_sum, best_n = scored[sums.index(max(sums))]
         ll_sum += best_sum / best_n if best_n else 0.0
         total += 1
-    if hasattr(model, "train"):
-        model.train()
+    model.train()
     n = max(1, total)
     acc, acc_norm = correct["acc"] / n, correct["acc_norm"] / n
     head = acc_norm if spec.metric == "acc_norm" else acc
@@ -367,29 +342,35 @@ def evaluate_task(
 
 def evaluate_all(
     names: list[str] | None,
-    model: Any,
+    model: recurrent.Model,
     tokenizer: transformers.PreTrainedTokenizerBase,
     device: torch.device,
+    max_examples: int | None = None,
 ) -> list[EvalResult]:
     """Runs several tasks.
 
     Args:
-      names: Task names; None or empty runs every registered task. Unknown
-        names are skipped with a message.
-      model: Slot model or causal model.
+      names: Task names; None or empty runs every registered task.
+      model: Causal model.
       tokenizer: Tokenizer for the model.
       device: Device holding the model.
+      max_examples: Cap per task; None evaluates the full splits.
 
     Returns:
-      One result per task that ran.
+      One result per task.
+
+    Raises:
+      ValueError: If a name is not a registered task.
     """
     names = names or list(TASK_REGISTRY)
+    unknown = [name for name in names if name not in TASK_REGISTRY]
+    if unknown:
+        raise ValueError(f"unknown tasks {unknown}; have {list(TASK_REGISTRY)}")
     results = []
     for name in names:
-        if name not in TASK_REGISTRY:
-            print(f"  unknown task {name}; skipping", flush=True)
-            continue
-        spec = TASK_REGISTRY[name]
+        spec = dataclasses.replace(
+            TASK_REGISTRY[name], max_examples=max_examples
+        )
         print(f"  eval {spec.name} ...", flush=True)
         result = evaluate_task(spec, model, tokenizer, device)
         results.append(result)
