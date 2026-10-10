@@ -195,6 +195,44 @@ def section_file(path: str, how: str) -> str:
         return f.read().strip()
 
 
+def section_control(
+    record: dict[str, Any] | None,
+    control: dict[str, Any] | None,
+    noise_bits: float,
+) -> str:
+    """Compares the full run with its matched no-state control.
+
+    Args:
+      record: The stateful run's `record.json`.
+      control: The no-state run's `record.json`, same data and schedule.
+      noise_bits: Run-to-run noise, in bits per token.
+
+    Returns:
+      A Markdown table and verdict, or a "not run" line.
+    """
+    if record is None or control is None:
+        return missing("control-record.json", "scripts/train_r.py")
+    a, b = record["final"], control["final"]
+    gap = math.log(a["ppl_all"] / b["ppl_all"]) / math.log(2.0)
+    if abs(gap) <= noise_bits:
+        verdict = "within run-to-run noise"
+    else:
+        verdict = "state is better" if gap < 0 else "state is worse"
+    return "\n".join(
+        [
+            "| run | perplexity | bits per byte |",
+            "|---|---|---|",
+            f"| with state | {a['ppl_all']:.2f} | "
+            f"{a.get('bpb_all', math.nan):.4f} |",
+            f"| no state (control) | {b['ppl_all']:.2f} | "
+            f"{b.get('bpb_all', math.nan):.4f} |",
+            "",
+            f"Gap (state minus control): {gap:+.4f} bits/token against a "
+            f"noise floor of {noise_bits}: {verdict}.",
+        ]
+    )
+
+
 def section_probe(report: dict[str, Any] | None) -> str:
     """Renders the state probe: chunk profiles and rate-distortion."""
     if report is None:
@@ -243,6 +281,14 @@ def build(runs: str, ladder_dir: str, ablate: str) -> str:
             "Forecast against outcome",
             section_forecast_check(
                 [ladder_dir, ablate], "lr-2.4e-3", record, 0.0145
+            ),
+        ),
+        (
+            "State against a matched no-state control, full run",
+            section_control(
+                record,
+                load(os.path.join(runs, "control-record.json")),
+                0.0145,
             ),
         ),
         (
