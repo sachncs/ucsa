@@ -222,8 +222,12 @@ def build(runs: str, ladder_dir: str, ablate: str) -> str:
         ("Setup", section_training(record)),
         ("Held-out loss through training", section_curve(record)),
         (
-            "Lossless compression",
+            "Lossless compression, 4,096 tokens",
             section_compression(load(os.path.join(runs, "compress.json"))),
+        ),
+        (
+            "Lossless compression, 16,384 tokens (other text)",
+            section_compression(load(os.path.join(runs, "compress-16k.json"))),
         ),
         (
             "Zero-shot benchmarks against published models",
