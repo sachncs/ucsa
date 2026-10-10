@@ -1,6 +1,6 @@
 """Published reference results and comparison against them.
 
-UCSA is compared with numbers reported in the literature, not with a
+UCSA-R is compared with numbers reported in the literature, not with a
 baseline trained here. The reference file records its source and protocol;
 `compare` lines our per-task accuracy up against each reference model and
 against chance so a result is never read without its floor.
@@ -53,7 +53,7 @@ def compare(
             "task": task,
             "metric": metric,
             "ours": 100.0 * result["accuracy"],
-            "stderr": 100.0 * result.get("extras", {}).get("stderr", 0.0),
+            "stderr": 100.0 * result.get("stderr", 0.0),
             "n": result["n"],
             "chance": ref["chance"][task],
         }
