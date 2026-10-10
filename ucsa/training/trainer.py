@@ -25,9 +25,9 @@ import torch
 from torch import Tensor, nn
 from torch.utils.data import DataLoader
 
+from ucsa.training import metrics as metrics_lib
 from ucsa.training.curriculum import Curriculum
 from ucsa.training.metrics import (
-    MetricsRegistry,
     build_default_registry,
     intent_gate_entropy,
     intent_gate_mutual_info,
@@ -39,7 +39,7 @@ from ucsa.training.metrics import (
 
 
 @dataclass(frozen=True)
-class TrainerConfig:
+class Config:
     """Configuration for :class:`Trainer`.
 
     Attributes:
@@ -85,7 +85,7 @@ class TrainerConfig:
 
 
 @dataclass
-class TrainerState:
+class State:
     """internal: mutable training state."""
 
     global_step: int = 0
@@ -155,9 +155,9 @@ class Trainer:
         model: nn.Module,
         loss_fn: nn.Module,
         optimizer: torch.optim.Optimizer,
-        config: TrainerConfig | None = None,
+        config: Config | None = None,
         curriculum: Curriculum | None = None,
-        metrics: MetricsRegistry | None = None,
+        metrics: metrics_lib.Registry | None = None,
         device: torch.device | None = None,
     ) -> None:
         """Initialise the trainer.
@@ -172,7 +172,7 @@ class Trainer:
             device: Optional device override.
         """
         if config is None:
-            config = TrainerConfig()
+            config = Config()
         self.config = config
         self.model = model
         self.loss_fn = loss_fn
@@ -207,7 +207,7 @@ class Trainer:
             warmup_steps=config.warmup_steps,
             max_steps=config.max_steps,
         )
-        self.state = TrainerState()
+        self.state = State()
         self.amp_enabled = self.device.type in (
             "cuda",
             "mps",
@@ -221,9 +221,9 @@ class Trainer:
         # of the previous-iteration working memory.
         self.target_encoder: nn.Module | None = None
         if config.ema_momentum > 0.0 and isinstance(self.model, nn.Module):
-            from ucsa.training.ema import EMATargetEncoder
+            from ucsa.training import ema
 
-            self.target_encoder = EMATargetEncoder(
+            self.target_encoder = ema.TargetEncoder(
                 self.model, momentum=config.ema_momentum
             )
             self.target_encoder.to(self.device)
@@ -430,7 +430,7 @@ class Trainer:
         self.state.last_components = components
         self.curriculum.step()
         # Refresh the memory baseline every 50 steps so the
-        # MemoryStabilityLoss has a moving reference instead of being a
+        # losses.MemoryStability has a moving reference instead of being a
         # no-op (MSE against a frozen mean trivially reaches zero).
         if (
             isinstance(self.model, nn.Module)
@@ -569,6 +569,6 @@ class Trainer:
 __all__ = [
     "CosineWarmupScheduler",
     "Trainer",
-    "TrainerConfig",
-    "TrainerState",
+    "Config",
+    "State",
 ]
