@@ -67,6 +67,9 @@ class Config:
       importance, so memory can be shrunk at inference with graceful
       degradation. 0 disables it.
     min_slots: Smallest prefix sampled by `slot_dropout`.
+    read_gate: Scale each block's state read by a learned scalar that starts
+      at zero, so the model begins identical to the chunk-local control and
+      uses the state only as far as training finds it useful.
     surprise_gate: Write more when the state failed to predict the chunk.
       The JEPA predictor's error for a chunk (its surprise) shifts the write
       gate through a learned per-slot gain that starts at zero, so the model
@@ -104,6 +107,7 @@ class Config:
     use_state: bool = True
     slot_dropout: float = 0.0
     min_slots: int = 4
+    read_gate: bool = False
     surprise_gate: bool = False
     jepa_weight: float = 0.1
     ema_momentum: float = 0.996
@@ -361,6 +365,10 @@ class Block(nn.Module):
         self.attn = SelfAttention(dim, config.heads, causal)
         self.read_norm = nn.RMSNorm(dim) if read else None
         self.read = CrossAttention(dim, config.heads) if read else None
+        # Zero-initialised scale (ReZero style): the read starts switched off.
+        self.read_scale = (
+            nn.Parameter(torch.zeros(1)) if read and config.read_gate else None
+        )
         self.ffn_norm = nn.RMSNorm(dim)
         self.ffn = SwiGLU(dim, config.ffn_dim)
         self.drop = nn.Dropout(config.dropout)
@@ -385,7 +393,10 @@ class Block(nn.Module):
         """
         x = x + self.drop(self.attn(self.attn_norm(x), cos, sin))
         if self.read is not None and state is not None:
-            x = x + self.drop(self.read(self.read_norm(x), state))
+            read = self.read(self.read_norm(x), state)
+            if self.read_scale is not None:
+                read = self.read_scale * read
+            x = x + self.drop(read)
         return x + self.drop(self.ffn(self.ffn_norm(x)))
 
 
