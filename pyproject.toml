@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ucsa"
 version = "0.1.0"
-description = "Unified Cognitive State Architecture: a research-grade foundation model whose computation revolves around a single persistent differentiable cognitive state."
+description = "UCSA-R: a causal, windowed language model with a persistent state, evaluated by compression."
 readme = "README.md"
 requires-python = ">=3.14"
 license = { text = "Apache-2.0" }
 authors = [{ name = "sachin", email = "sachncs@gmail.com" }]
-keywords = ["cognitive-architecture", "pytorch", "research", "foundation-model"]
+keywords = ["language-model", "compression", "pytorch", "research"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -24,30 +24,17 @@ dependencies = [
     "torch>=2.1.0",
     "transformers>=4.40.0",
     "datasets>=2.18.0",
-    "accelerate>=0.27.0",
-    "safetensors>=0.4.0",
-    "hydra-core>=1.3.0",
-    "omegaconf>=2.3.0",
-    "tensorboard>=2.15.0",
-    "wandb>=0.16.0",
     "numpy>=1.24.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
-    "pytest-cov>=4.1.0",
-    "pytest-asyncio>=0.23.0",
     "ruff>=0.3.0",
-    "black>=24.0.0",
     "mypy>=1.8.0",
-    "pre-commit>=3.6.0",
     "types-PyYAML",
 ]
-
-[project.scripts]
-ucsa-train = "ucsa.train:main"
-ucsa-infer = "ucsa.infer:main"
 
 [project.urls]
 Homepage = "https://sachncs.github.io/ucsa/"
@@ -88,8 +75,7 @@ select = [
     "PT",  # flake8-pytest-style
 ]
 ignore = [
-    "E501", # line length handled by black
-    "B008", # function call in default argument (Hydra/OmegaConf)
+    "E501", # line length is enforced by `ruff format`
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -99,10 +85,6 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["ucsa"]
 combine-as-imports = true
-
-[tool.black]
-line-length = 80
-target-version = ["py314"]
 
 [tool.mypy]
 python_version = "3.14"
@@ -130,11 +112,6 @@ addopts = [
     "--tb=short",
 ]
 testpaths = ["tests"]
-asyncio_mode = "auto"
-markers = [
-    "slow: marks tests as slow (deselect with -m 'not slow')",
-    "integration: marks tests that require network or large memory",
-]
 
 [tool.coverage.run]
 branch = true
