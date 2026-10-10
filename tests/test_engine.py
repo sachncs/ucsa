@@ -4,7 +4,14 @@ import pytest
 import torch
 
 from ucsa.models.recurrent import RecurrentConfig, RecurrentUCSA
-from ucsa.training.engine import TrainConfig, evaluate, fit, load_model, lr_at
+from ucsa.training.engine import (
+    TrainConfig,
+    WeightEma,
+    evaluate,
+    fit,
+    load_model,
+    lr_at,
+)
 
 
 def tiny_model():
@@ -125,3 +132,54 @@ def test_config_rejects_bad_values():
         TrainConfig(prefetch=0)
     with pytest.raises(ValueError):
         TrainConfig.from_dict({"stepz": 1})
+
+
+def test_weight_ema_swap_round_trips_and_tracks_the_average(tmp_path):
+    model = tiny_model()
+    ema = WeightEma(model, decay=0.5, every=1)
+    live = {n: p.detach().clone() for n, p in model.named_parameters()}
+    with torch.no_grad():
+        for p in model.parameters():
+            p.add_(1.0)
+    ema.update(model, step=1)
+    shifted = {n: p.detach().clone() for n, p in model.named_parameters()}
+    ema.swap(model)  # now holds the average: halfway between old and new
+    for name, p in model.named_parameters():
+        if name in live and p.requires_grad:
+            expected = 0.5 * live[name] + 0.5 * shifted[name]
+            assert torch.allclose(p, expected, atol=1e-5), name
+    ema.swap(model)  # restores the live weights exactly
+    for name, p in model.named_parameters():
+        assert torch.equal(p, shifted[name]), name
+
+
+def test_ema_is_skipped_between_update_steps():
+    model = tiny_model()
+    ema = WeightEma(model, decay=0.9, every=4)
+    before = {k: v.clone() for k, v in ema.shadow.items()}
+    with torch.no_grad():
+        for p in model.parameters():
+            p.add_(1.0)
+    ema.update(model, step=1)  # not a multiple of 4: no change
+    assert all(torch.equal(before[k], ema.shadow[k]) for k in before)
+    ema.update(model, step=4)
+    assert any(not torch.equal(before[k], ema.shadow[k]) for k in before)
+
+
+@pytest.mark.parametrize("precision", ["bf16", "fp16"])
+def test_sixteen_bit_training_is_finite(tmp_path, precision):
+    rec = fit(
+        tiny_model(),
+        cfg(tmp_path, precision=precision, weight_ema=0.9, steps=4),
+        batches,
+        batches,
+        log=lambda s: None,
+    )
+    assert math.isfinite(rec["final"]["ppl_last64"])
+
+
+def test_precision_and_ema_settings_are_validated():
+    with pytest.raises(ValueError):
+        TrainConfig(precision="fp8")
+    with pytest.raises(ValueError):
+        TrainConfig(weight_ema=1.0)
