@@ -115,7 +115,6 @@ def train_model(observation_mix: float, balance: bool = False) -> UCSA:
             learning_rate=1e-3,
             max_steps=STEPS,
             warmup_steps=20,
-            amp_dtype=torch.float32,
         ),
         curriculum=Curriculum(curriculum.Schedule(1, 2, 3)),
         metrics=build_default_registry(),

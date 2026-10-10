@@ -56,7 +56,6 @@ def tiny_config_dict() -> dict:
             "checkpoint_every_n_steps": 0,
             "gradient_checkpointing": False,
             "compile_model": False,
-            "amp_dtype": "float32",
         },
         "curriculum": {
             "stage_1_end": 2,
@@ -108,14 +107,6 @@ class TestBuildHelpers:
         trainer = train.build_trainer(model, tiny_config_dict())
         assert isinstance(trainer, Trainer)
         assert trainer.config.max_steps == 3
-
-    def test_resolve_dtype(self) -> None:
-        """``resolve_dtype`` maps strings to torch dtypes."""
-        assert train.resolve_dtype("float32") is torch.float32
-        assert train.resolve_dtype("float16") is torch.float16
-        assert train.resolve_dtype("bfloat16") is torch.bfloat16
-        with pytest.raises(ValueError):
-            train.resolve_dtype("bogus")
 
 
 class TestConfigConversion:
