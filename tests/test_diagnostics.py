@@ -68,8 +68,8 @@ def test_bits_gap_converts_nats_to_bits():
 
 def test_window_nll_is_per_window_and_deterministic():
     torch.manual_seed(0)
-    model = recurrent.RecurrentUCSA(
-        recurrent.RecurrentConfig(
+    model = recurrent.Model(
+        recurrent.Config(
             vocab_size=32,
             hidden=32,
             layers=1,
