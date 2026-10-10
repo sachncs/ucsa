@@ -183,3 +183,19 @@ def test_precision_and_ema_settings_are_validated():
         TrainConfig(precision="fp8")
     with pytest.raises(ValueError):
         TrainConfig(weight_ema=1.0)
+
+
+def test_evaluate_reports_bits_per_byte_consistent_with_perplexity():
+    model = tiny_model().eval()
+    lengths = torch.full((32,), 2, dtype=torch.long)  # every token = 2 bytes
+    r = evaluate(model, batches(), 2, lengths)
+    # bpb = log2(ppl) / bytes_per_token when every token has 2 bytes.
+    assert r["bpb_all"] == pytest.approx(math.log2(r["ppl_all"]) / 2, rel=1e-5)
+    assert r["bpb_last64"] == pytest.approx(
+        math.log2(r["ppl_last64"]) / 2, rel=1e-5
+    )
+
+
+def test_evaluate_omits_bits_per_byte_without_byte_lengths():
+    r = evaluate(tiny_model().eval(), batches(), 1)
+    assert "bpb_all" not in r
