@@ -35,10 +35,9 @@ import yaml
 from small_config import apply_small_overrides
 from torch.utils.data import DataLoader
 
-from ucsa.models.perception import TokenizerWrapper
+from ucsa.models import perception
 from ucsa.train import build_model, build_trainer
-from ucsa.training.dataset import DatasetConfig, TextDataset
-from ucsa.training.prefix import PrefixBatches
+from ucsa.training import dataset, prefix
 from ucsa.utils.seed import set_seed
 
 
@@ -131,9 +130,9 @@ def parse_args() -> argparse.Namespace:
 
 
 class IterableOver(torch.utils.data.IterableDataset):
-    """Adapts a `TextDataset` to a torch `IterableDataset`."""
+    """Adapts a `dataset.Text` to a torch `IterableDataset`."""
 
-    def __init__(self, ds: TextDataset) -> None:
+    def __init__(self, ds: dataset.Text) -> None:
         """Wraps `ds`."""
         self.ds = ds
 
@@ -237,25 +236,25 @@ def main() -> None:
         cfg["curriculum"]["stage_2_end"] = 2
         cfg["curriculum"]["stage_3_end"] = 3
 
-    ucsa_tokenizer = TokenizerWrapper(
+    ucsa_tokenizer = perception.Tokenizer(
         tokenizer_name=cfg["tokenizer"]["name"],
         max_seq_len=cfg["dataset"]["sequence_length"],
     )
-    ds_cfg = DatasetConfig(
+    ds_cfg = dataset.Config(
         sequence_length=cfg["dataset"]["sequence_length"],
         primary_dataset=cfg["dataset"]["primary_dataset"],
         primary_split=cfg["dataset"]["primary_split"],
         streaming=True,
         pack_sequences=True,
     )
-    train_ds = TextDataset(ucsa_tokenizer, ds_cfg)
-    val_ds = TextDataset(ucsa_tokenizer, ds_cfg)
+    train_ds = dataset.Text(ucsa_tokenizer, ds_cfg)
+    val_ds = dataset.Text(ucsa_tokenizer, ds_cfg)
     val_ds.dataset = val_ds.dataset.skip(args.val_skip)
     train_loader = DataLoader(
-        IterableOver(PrefixBatches(train_ds)), batch_size=None
+        IterableOver(prefix.Batches(train_ds)), batch_size=None
     )
     val_loader = DataLoader(
-        IterableOver(PrefixBatches(val_ds)), batch_size=None
+        IterableOver(prefix.Batches(val_ds)), batch_size=None
     )
 
     model = build_model(cfg)
@@ -295,9 +294,9 @@ def main() -> None:
     # Ablation toggles flow into the combined loss via a zero-weight
     # substitution. The forward path stays unchanged.
     if not args.recon or not args.origination_balance:
-        from ucsa.models.losses import LossWeights
+        from ucsa.models import losses as losses_lib
 
-        trainer.loss_fn.weights = LossWeights(
+        trainer.loss_fn.weights = losses_lib.Weights(
             jepa=trainer.loss_fn.weights.jepa,
             memory=trainer.loss_fn.weights.memory,
             router=trainer.loss_fn.weights.router,
