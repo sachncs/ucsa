@@ -33,7 +33,7 @@ def main() -> None:
 
     tokenizer = transformers.AutoTokenizer.from_pretrained("gpt2")
     model = engine.load_model(args.ckpt, engine.pick_device()).cpu()
-    shard = shards.TokenShard(os.path.join(args.data, args.shard))
+    shard = shards.Shard(os.path.join(args.data, args.shard))
     tokens = [
         int(t)
         for t in np.asarray(
