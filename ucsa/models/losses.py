@@ -159,7 +159,7 @@ class JEPALoss(nn.Module):
         self.mode = mode
         self.gaussian_reg_weight = gaussian_reg_weight
 
-    def _gaussian_kl(
+    def __gaussian_kl(
         self, predicted: Tensor, latent_for_reg: Tensor | None
     ) -> Tensor:
         """KL( predicted_latent_distribution || N(0, I) ).
@@ -172,7 +172,7 @@ class JEPALoss(nn.Module):
         var = target.var(dim=(0, 1), unbiased=False) + 1e-6
         return 0.5 * (var + mu.pow(2) - 1.0 - var.log()).mean()
 
-    def _single_pair_loss(
+    def __single_pair_loss(
         self,
         predicted: Tensor,
         target: Tensor,
@@ -188,7 +188,7 @@ class JEPALoss(nn.Module):
             return self.alpha * cosine_term + (1.0 - self.alpha) * l1_term
         # LeWM mode
         pred_loss = torch.nn.functional.smooth_l1_loss(predicted, target)
-        reg = self._gaussian_kl(predicted, for_reg)
+        reg = self.__gaussian_kl(predicted, for_reg)
         return pred_loss + self.gaussian_reg_weight * reg
 
     def forward(
@@ -215,7 +215,7 @@ class JEPALoss(nn.Module):
         """
         if multi_step_pairs is not None and len(multi_step_pairs) > 0:
             per_step = [
-                self._single_pair_loss(p, t, for_reg=p)
+                self.__single_pair_loss(p, t, for_reg=p)
                 for p, t in multi_step_pairs
             ]
             stack = torch.stack(per_step)
@@ -224,7 +224,7 @@ class JEPALoss(nn.Module):
                 return loss, {
                     "jepa_pred": float(stack.mean().item()),
                     "jepa_gaussian_reg": float(
-                        self._gaussian_kl(
+                        self.__gaussian_kl(
                             torch.cat([p for p, _ in multi_step_pairs], dim=0),
                             None,
                         ).item()
@@ -241,20 +241,22 @@ class JEPALoss(nn.Module):
                 f"predicted and target must share shape; got "
                 f"{tuple(predicted.shape)} and {tuple(target.shape)}."
             )
-        loss = self._single_pair_loss(predicted, target, for_reg=latent_for_reg)
+        loss = self.__single_pair_loss(
+            predicted, target, for_reg=latent_for_reg
+        )
         if self.mode == "lewm":
             return loss, {
                 "jepa_pred": (
                     float(loss.item())
                     if self.gaussian_reg_weight == 0
                     else float(
-                        self._single_pair_loss(
+                        self.__single_pair_loss(
                             predicted, target, for_reg=None
                         ).item()
                     )
                 ),
                 "jepa_gaussian_reg": float(
-                    self._gaussian_kl(predicted, latent_for_reg).item()
+                    self.__gaussian_kl(predicted, latent_for_reg).item()
                 ),
             }
         return loss
