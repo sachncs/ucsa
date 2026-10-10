@@ -1,130 +1,173 @@
-"""Standard-LM eval harness runner.
+"""Evaluates a trained checkpoint against published reference results.
 
-Loads a trained UCSA checkpoint (or runs a baseline zero-shot) and
-reports accuracy on HellaSwag, ARC-e, ARC-c, PIQA, and WinoGrande.
-Writes a JSON report next to ``--out-json`` for downstream
-paper-writing tools.
+Reports zero-shot accuracy on HellaSwag, ARC-Easy, ARC-Challenge, PIQA and
+WinoGrande over the full evaluation splits, held-out perplexity on the
+last 64 positions of fixed windows, and a comparison with the numbers in
+`paper/reference_results.json`.
 
-Usage:
-    .venv/bin/python scripts/eval.py \
-        --ucsa-ckpt ckpts/ucsa-final.safetensors \
-        --baseline-results runs/baseline.json \
-        --out-json runs/eval-ucsa-small.json \
-        [--tasks hellaswag arc_easy piqa]
+    python scripts/eval.py --recurrent-ckpt ckpts/r-small/final.pt \
+        --out-json runs/eval-r-small.json
 """
-
-from __future__ import annotations
 
 import argparse
 import json
 import os
 
+import small_config
 import torch
 import yaml
+from safetensors import torch as safetensors_torch
 
-from ucsa.models.perception import TokenizerWrapper
-from ucsa.train import build_model
-from ucsa.training.eval_harness import (
-    TASK_REGISTRY,
-    evaluate_all,
-)
+from ucsa import train as ucsa_train
+from ucsa.models import perception
+from ucsa.training import engine, eval_harness, prefix, reference, shards
+from ucsa.utils import checkpoint
 
-
-def parse_args():
-    p = argparse.ArgumentParser()
-    p.add_argument(
-        "--ucsa-ckpt",
-        default=None,
-        help="Path to a safetensors UCSA checkpoint. None = skip UCSA.",
-    )
-    p.add_argument(
-        "--ucsa-config",
-        default="ucsa/configs/default.yaml",
-        help="Config used to build the UCSA model.",
-    )
-    p.add_argument(
-        "--baseline-results",
-        default=None,
-        help="Path to a JSON file with a vanilla baseline's val_ppl.",
-    )
-    p.add_argument(
-        "--tasks",
-        nargs="*",
-        default=list(TASK_REGISTRY.keys()),
-        help="Subset of tasks to run.",
-    )
-    p.add_argument("--max-seq-len", type=int, default=1024)
-    p.add_argument("--seed", type=int, default=42)
-    p.add_argument(
-        "--out-json",
-        default="runs/eval.json",
-        help="Output JSON file.",
-    )
-    return p.parse_args()
+PPL_SETS = {"fineweb-edu": "val.bin", "wikitext-103": "wikitext_test.bin"}
 
 
-def main():
-    args = parse_args()
+@torch.no_grad()
+def heldout_ppl(
+    model: torch.nn.Module,
+    kind: str,
+    shard: shards.TokenShard,
+    device: torch.device,
+    batches: int,
+    seq_len: int = 1024,
+) -> float:
+    """Measures perplexity of the last 64 positions of fixed windows.
+
+    Args:
+      model: A `RecurrentUCSA` (`kind="recurrent"`) or the original slot
+        `UCSA` (`kind="ucsa"`, which sees only the prefix).
+      kind: Model family.
+      shard: Held-out tokens.
+      device: Device holding the model.
+      batches: Maximum number of windows to score.
+      seq_len: Window length.
+
+    Returns:
+      Perplexity over the scored positions.
+    """
+    k = prefix.DEFAULT_NUM_TARGETS
+    model.eval()
+    nll, count = 0.0, 0
+    stream = shard.batches(1, seq_len, seed=None, loop=False)
+    for n, (x, y) in enumerate(stream):
+        if n >= batches:
+            break
+        x, y = x.to(device), y.to(device)
+        if kind == "ucsa":
+            head, target = prefix.split_prefix_targets(x, y, k)
+            logits = model(head)["language"][:, :k, :]
+            loss = torch.nn.functional.cross_entropy(
+                logits.reshape(-1, logits.shape[-1]),
+                target.reshape(-1),
+                reduction="sum",
+            )
+            nll, count = nll + loss.item(), count + target.numel()
+        else:
+            total, tokens = prefix.tail_nll(model(x)["logits"], y, k)
+            nll, count = nll + total, count + tokens
+    return prefix.perplexity(nll, count)
+
+
+def run_model(
+    name: str,
+    model: torch.nn.Module,
+    kind: str,
+    args: argparse.Namespace,
+    device: torch.device,
+    report: dict,
+) -> None:
+    """Runs the benchmarks and perplexities for one model into `report`.
+
+    Args:
+      name: Report key prefix.
+      model: Model to evaluate.
+      kind: `recurrent` or `ucsa`.
+      args: Parsed command-line arguments.
+      device: Device holding the model.
+      report: Dict updated in place.
+    """
+    tokenizer = perception.TokenizerWrapper(
+        tokenizer_name="gpt2", max_seq_len=args.max_seq_len
+    )
+    results = eval_harness.evaluate_all(args.tasks, model, tokenizer, device)
+    report[f"{name}_tasks"] = {r.name: r.to_dict() for r in results}
+    report[f"{name}_avg_acc"] = sum(r.accuracy for r in results) / max(
+        1, len(results)
+    )
+    report[f"{name}_ppl"] = {}
+    for label, filename in PPL_SETS.items():
+        path = os.path.join(args.data, filename)
+        if not os.path.exists(path):
+            continue
+        ppl = heldout_ppl(
+            model,
+            kind,
+            shards.TokenShard(path),
+            device,
+            args.ppl_batches,
+            args.max_seq_len,
+        )
+        report[f"{name}_ppl"][label] = ppl
+        print(f"{name} {label} ppl_last64: {ppl:.1f}", flush=True)
+    report[f"{name}_params"] = sum(p.numel() for p in model.parameters())
+
+
+def main() -> None:
+    """Parses arguments, evaluates, prints the comparison table."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--recurrent-ckpt", default=None, help="UCSA-R .pt")
+    parser.add_argument("--ucsa-ckpt", default=None, help="original UCSA")
+    parser.add_argument("--ucsa-config", default="ucsa/configs/default.yaml")
+    parser.add_argument(
+        "--tasks", nargs="*", default=list(eval_harness.TASK_REGISTRY)
+    )
+    parser.add_argument(
+        "--max-examples",
+        type=int,
+        default=0,
+        help="Cap per task; 0 (default) runs the full split.",
+    )
+    parser.add_argument("--data", default="data")
+    parser.add_argument("--ppl-batches", type=int, default=200)
+    parser.add_argument("--max-seq-len", type=int, default=1024)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--out-json", default="runs/eval.json")
+    args = parser.parse_args()
+
     torch.manual_seed(args.seed)
     os.makedirs(os.path.dirname(args.out_json) or ".", exist_ok=True)
+    for spec in eval_harness.TASK_REGISTRY.values():
+        spec.max_examples = args.max_examples or None
 
-    with open(args.ucsa_config) as f:
-        cfg = yaml.safe_load(f)
-
-    device = (
-        torch.device("mps", 0)
-        if torch.backends.mps.is_available()
-        else (
-            torch.device("cuda", 0)
-            if torch.cuda.is_available()
-            else torch.device("cpu")
-        )
-    )
+    device = engine.pick_device()
     print(f"Device: {device}", flush=True)
+    report: dict = {"device": str(device)}
 
-    report: dict = {"device": str(device), "tasks": {}, "ucsa_params": None}
-
+    if args.recurrent_ckpt:
+        model = engine.load_model(args.recurrent_ckpt, device)
+        run_model("recurrent", model, "recurrent", args, device, report)
     if args.ucsa_ckpt:
-        print(f"Loading UCSA from {args.ucsa_ckpt} ...", flush=True)
-        # Match the config to the checkpoint's architectural size.
-        cfg["training"]["batch_size"] = 1
-        cfg["model"]["hidden_size"] = cfg["model"].get("hidden_size", 384)
-        cfg["model"]["max_seq_len"] = args.max_seq_len
-        model = build_model(cfg)
-        from safetensors.torch import load_file
+        with open(args.ucsa_config) as f:
+            config = yaml.safe_load(f)
+        config["training"]["batch_size"] = 1
+        small_config.apply_small_overrides(config)
+        config["model"]["max_seq_len"] = args.max_seq_len
+        model = ucsa_train.build_model(config)
+        state = safetensors_torch.load_file(args.ucsa_ckpt)
+        renamed = {k.removeprefix("model."): v for k, v in state.items()}
+        checkpoint.load_state_dict_compat(model, renamed, strict=True)
+        run_model("ucsa", model.to(device), "ucsa", args, device, report)
 
-        from ucsa.utils.checkpoint import load_state_dict_compat
-
-        sd = load_file(args.ucsa_ckpt)
-        renamed = {name.removeprefix("model."): t for name, t in sd.items()}
-        for note in load_state_dict_compat(model, renamed, strict=False):
-            print(f"  ckpt compat: {note}", flush=True)
-        n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        report["ucsa_params"] = n_params
-        model = model.to(device).eval()
-
-        tokenizer = TokenizerWrapper(
-            tokenizer_name=cfg["tokenizer"]["name"],
-            max_seq_len=args.max_seq_len,
-        )
-        results = evaluate_all(args.tasks, model, tokenizer, device)
-        for r in results:
-            report["tasks"][r.name] = r.to_dict()
-        avg = sum(r.accuracy for r in results) / max(1, len(results))
-        report["ucsa_avg_acc"] = avg
-        print(f"UCSA-small avg acc: {avg:.4f}", flush=True)
-    else:
-        print("(no UCSA ckpt provided; skipping UCSA eval)", flush=True)
-
-    if args.baseline_results and os.path.exists(args.baseline_results):
-        with open(args.baseline_results) as f:
-            bl = json.load(f)
-        report["baseline"] = bl
-        print(
-            f"Baseline val_ppl: {bl.get('final_val_ppl', 'n/a')}",
-            flush=True,
-        )
-
+    primary = report.get("recurrent_tasks") or report.get("ucsa_tasks")
+    if primary:
+        ref = reference.load_reference()
+        rows = reference.compare(primary, ref)
+        report["reference_comparison"] = rows
+        print(reference.format_table(rows, ref), flush=True)
     with open(args.out_json, "w") as f:
         json.dump(report, f, indent=2)
     print(f"Wrote {args.out_json}", flush=True)
