@@ -3,18 +3,18 @@
 Four independent projection heads read from the working-memory bank of the
 PCS and produce:
 
-- **LanguageHead** -- vocabulary logits for autoregressive text generation.
-- **PlanningHead** -- logits over a discrete set of plan tokens.
-- **ToolHead** -- logits over a discrete set of tool tokens.
-- **MemoryHead** -- dense memory-query embeddings used by the retrieval
+- **Language** -- vocabulary logits for autoregressive text generation.
+- **Planning** -- logits over a discrete set of plan tokens.
+- **Tool** -- logits over a discrete set of tool tokens.
+- **Memory** -- dense memory-query embeddings used by the retrieval
   pipeline.
 
 Heads never share parameters, never communicate, and never store state
 beyond their own projection matrices.
 
 Two further modules live here but sit outside that contract because they
-read more than working memory: **InputReconstructionHead** (the LeWM
-capacity bottleneck) and **OriginationHead** (``G``, which generates the
+read more than working memory: **Reconstruction** (the LeWM
+capacity bottleneck) and **Origination** (``G``, which generates the
 next iteration's input from the ``intent`` bank).
 """
 
@@ -29,7 +29,7 @@ from ucsa.models.moe import load_balancing_loss, top_k_mask
 
 
 @dataclass(frozen=True)
-class HeadConfig:
+class Config:
     """Common configuration values for projection heads.
 
     Attributes:
@@ -46,7 +46,7 @@ class HeadConfig:
             origination attributable.
         origination_aux_loss_weight: Weight on the origination gate's
             load-balancing loss, exposed as
-            ``OriginationHead.last_aux_loss``.
+            ``Origination.last_aux_loss``.
         intent_update_scale: Weight on the residual refresh of the
             origination state from working memory. ``0.0`` freezes the
             intent bank at its parameter value, which makes it identical
@@ -107,7 +107,7 @@ class HeadConfig:
             object.__setattr__(self, "reconstruction_dim", self.hidden_size)
 
 
-class LanguageHead(nn.Module):
+class Language(nn.Module):
     """Project working memory to vocabulary logits."""
 
     def __init__(self, hidden_size: int, vocab_size: int) -> None:
@@ -134,7 +134,7 @@ class LanguageHead(nn.Module):
         return projected
 
 
-class PlanningHead(nn.Module):
+class Planning(nn.Module):
     """Project working memory to planning logits."""
 
     def __init__(self, hidden_size: int, num_plan_tokens: int) -> None:
@@ -161,7 +161,7 @@ class PlanningHead(nn.Module):
         return projected
 
 
-class ToolHead(nn.Module):
+class Tool(nn.Module):
     """Project working memory to tool logits."""
 
     def __init__(self, hidden_size: int, num_tools: int) -> None:
@@ -188,7 +188,7 @@ class ToolHead(nn.Module):
         return projected
 
 
-class MemoryHead(nn.Module):
+class Memory(nn.Module):
     """Project working memory to memory-query embeddings."""
 
     def __init__(self, hidden_size: int, memory_query_dim: int) -> None:
@@ -216,7 +216,7 @@ class MemoryHead(nn.Module):
         return projected
 
 
-class InputReconstructionHead(nn.Module):
+class Reconstruction(nn.Module):
     """Predict input-token embeddings from working memory.
 
     Used for the LeWM-style "capacity bottleneck" loss: the JEPA latent
@@ -304,7 +304,7 @@ class IntentUpdate(nn.Module):
         return intent + self.scale * read
 
 
-class OriginationHead(nn.Module):
+class Origination(nn.Module):
     """Generate the next iteration's input from the origination state.
 
     This is ``G`` in ``obs_{k+1} = (1 - alpha_k) * G + alpha_k * obs``. It
@@ -322,7 +322,7 @@ class OriginationHead(nn.Module):
     observation: 16 intent slots cannot by themselves say how many input
     tokens to emit, or in what order. No observation content reaches the
     output except through the attention weights, so the mix in
-    :class:`~ucsa.models.reasoning_loop.ReasoningLoop` remains the only
+    :class:`~ucsa.models.reasoning.Loop` remains the only
     path by which the real observation survives.
 
     The intent read is routed through a **top-k sparse gate**, reusing the
@@ -477,33 +477,33 @@ class OriginationHead(nn.Module):
         return generated
 
 
-class ProjectionHeads(nn.Module):
+class Heads(nn.Module):
     """Bundle of all four projection heads."""
 
-    def __init__(self, config: HeadConfig | None = None) -> None:
+    def __init__(self, config: Config | None = None) -> None:
         """Initialise the bundle.
 
         Args:
             config: Optional head configuration. Defaults to
-                :class:`HeadConfig` defaults.
+                :class:`Config` defaults.
         """
         super().__init__()
         if config is None:
-            config = HeadConfig()
+            config = Config()
         self.config = config
-        self.language = LanguageHead(config.hidden_size, config.vocab_size)
-        self.planning = PlanningHead(config.hidden_size, config.num_plan_tokens)
-        self.tool = ToolHead(config.hidden_size, config.num_tools)
-        self.memory = MemoryHead(config.hidden_size, config.memory_query_dim)
+        self.language = Language(config.hidden_size, config.vocab_size)
+        self.planning = Planning(config.hidden_size, config.num_plan_tokens)
+        self.tool = Tool(config.hidden_size, config.num_tools)
+        self.memory = Memory(config.hidden_size, config.memory_query_dim)
         # Input-reconstruction head (LeWM-style capacity bottleneck).
-        self.input_reconstruct = InputReconstructionHead(
+        self.input_reconstruct = Reconstruction(
             config.hidden_size, config.reconstruction_dim
         )
         # The origination generator. Deliberately *not* part of
         # ``forward``: it reads the intent bank and the input stream
         # rather than working memory alone, so it cannot share the head
         # contract. The reasoning loop calls it directly.
-        self.origination = OriginationHead(
+        self.origination = Origination(
             config.hidden_size,
             top_k=config.origination_top_k,
             aux_loss_weight=config.origination_aux_loss_weight,
@@ -539,27 +539,27 @@ class ProjectionHeads(nn.Module):
 
 
 __all__ = [
-    "HeadConfig",
-    "InputReconstructionHead",
+    "Config",
+    "Reconstruction",
     "IntentUpdate",
-    "LanguageHead",
-    "MemoryHead",
-    "OriginationHead",
-    "PlanningHead",
-    "ProjectionHeads",
-    "ToolHead",
+    "Language",
+    "Memory",
+    "Origination",
+    "Planning",
+    "Heads",
+    "Tool",
 ]
 
 
 def collect_head_outputs(  # internal: convenient accessor for tests
-    heads: ProjectionHeads, working_memory: Tensor
+    heads: Heads, working_memory: Tensor
 ) -> dict[str, Tensor]:
     """internal: run all heads and return their outputs."""
     outputs: dict[str, Tensor] = heads(working_memory)
     return outputs
 
 
-def head_parameter_count(heads: ProjectionHeads) -> dict[str, int]:
+def head_parameter_count(heads: Heads) -> dict[str, int]:
     """internal: per-head parameter count, useful for diagnostics."""
     return {
         "language": sum(p.numel() for p in heads.language.parameters()),
