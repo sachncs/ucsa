@@ -6,6 +6,7 @@ Kept in one place so the naming test, CI and humans agree on the scope.
 STRICT_FILES: tuple[str, ...] = (
     "ucsa/models/recurrent.py",
     "ucsa/models/graph.py",
+    "ucsa/models/curation.py",
     "ucsa/arithmetic.py",
     "ucsa/training/compression.py",
     "ucsa/training/diagnostics.py",
@@ -28,6 +29,7 @@ STRICT_FILES: tuple[str, ...] = (
     "tests/test_naming_policy.py",
     "tests/test_recurrent.py",
     "tests/test_graph.py",
+    "tests/test_curation.py",
     "tests/test_arithmetic.py",
     "tests/test_compression.py",
     "tests/test_diagnostics.py",
