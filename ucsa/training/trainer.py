@@ -4,7 +4,6 @@ Implements the UCSA training loop with:
 
 - AdamW optimiser
 - Cosine learning-rate scheduler with linear warmup
-- Mixed-precision training via ``torch.amp``
 - Gradient clipping
 - Optional gradient checkpointing of the operator
 - Metrics tracking and TensorBoard logging
@@ -14,7 +13,6 @@ Implements the UCSA training loop with:
 
 from __future__ import annotations
 
-import contextlib
 import math
 import time
 from collections import deque
@@ -50,7 +48,6 @@ class Config:
         grad_clip_norm: Maximum gradient norm (``0`` disables clipping).
         warmup_steps: Number of warmup steps for the scheduler.
         max_steps: Total training steps for the cosine schedule.
-        amp_dtype: Mixed-precision dtype. ``torch.float32`` disables AMP.
         log_every_n_steps: Logging interval.
         eval_every_n_steps: Evaluation interval. ``0`` disables eval.
         checkpoint_every_n_steps: Checkpoint save interval. ``0`` disables
@@ -67,7 +64,6 @@ class Config:
     grad_clip_norm: float = 1.0
     warmup_steps: int = 100
     max_steps: int = 10000
-    amp_dtype: torch.dtype = torch.bfloat16
     log_every_n_steps: int = 10
     eval_every_n_steps: int = 0
     checkpoint_every_n_steps: int = 0
@@ -208,10 +204,6 @@ class Trainer:
             max_steps=config.max_steps,
         )
         self.state = State()
-        self.amp_enabled = self.device.type in (
-            "cuda",
-            "mps",
-        ) and config.amp_dtype in (torch.float16, torch.bfloat16)
         # Stash a reference for the scheduler to read.
         self.optimizer.__ucsa_trainer_state = self.state  # type: ignore[attr-defined]
 
@@ -402,15 +394,7 @@ class Trainer:
         """
         inputs, targets = self.move_batch(batch)
         self.optimizer.zero_grad(set_to_none=True)
-        autocast_ctx = (
-            torch.amp.autocast(
-                device_type=self.device.type, dtype=self.config.amp_dtype
-            )
-            if self.amp_enabled
-            else contextlib.nullcontext()
-        )
-        with autocast_ctx:
-            loss, components = self.compute_loss(inputs, targets)
+        loss, components = self.compute_loss(inputs, targets)
         loss.backward()  # type: ignore[no-untyped-call]
         if self.config.grad_clip_norm > 0.0:
             torch.nn.utils.clip_grad_norm_(
