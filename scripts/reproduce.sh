@@ -29,7 +29,7 @@ $AWAKE "$PY" scripts/train_r.py --preset small --out-dir "$OUT" --resume \
 cp "$OUT/record.json" runs/final-record.json
 
 [ -f runs/eval.json ] || "$PY" scripts/eval.py \
-    --recurrent-ckpt "$OUT/final.pt" --out-json runs/eval.json
+    --ckpt "$OUT/final.pt" --out-json runs/eval.json
 
 [ -f runs/compress.json ] || "$PY" scripts/compress.py \
     --ckpt "$OUT/final.pt" --tokens 4096 --out-json runs/compress.json

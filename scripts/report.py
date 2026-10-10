@@ -87,7 +87,7 @@ def section_compression(report: dict[str, Any] | None) -> str:
 def section_benchmarks(report: dict[str, Any] | None) -> str:
     """Renders benchmark accuracy beside published models and chance."""
     if report is None or "reference_comparison" not in report:
-        return missing("eval.json", "scripts/eval.py --recurrent-ckpt ...")
+        return missing("eval.json", "scripts/eval.py --ckpt ...")
     rows = report["reference_comparison"]
     names = [
         k
@@ -106,7 +106,7 @@ def section_benchmarks(report: dict[str, Any] | None) -> str:
             *[f"{r[n]:.1f}" for n in names],
         ]
         lines.append("| " + " | ".join(cells) + " |")
-    ppl = report.get("recurrent_ppl", {})
+    ppl = report.get("ppl", {})
     if ppl:
         lines += [
             "",
