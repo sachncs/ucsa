@@ -9,7 +9,7 @@ Banks
 -----
 
 Every PCS has the following banks by default. Sizes and roles are configurable
-via :class:`PCSConfig`.
+via :class:`Config`.
 
 ================== ============== ============================================
 Bank               Default tokens Role
@@ -40,7 +40,7 @@ Every long-term memory token carries four scalar metadata fields:
 - ``retention_score``-- composite score driving the recycle policy.
 
 The recycle policy lives in :func:`retention_score` and
-:meth:`PersistentCognitiveState.recycle_bottom_k`.
+:meth:`State.recycle_bottom_k`.
 """
 
 from __future__ import annotations
@@ -98,8 +98,8 @@ class BankSpec:
 
 
 @dataclass(frozen=True)
-class PCSConfig:
-    """Configuration for :class:`PersistentCognitiveState`.
+class Config:
+    """Configuration for :class:`State`.
 
     Attributes:
         hidden_size: Hidden dimensionality of every token in every bank.
@@ -168,7 +168,7 @@ def resolve_bank_sizes(
 
 
 def build_bank_specs(
-    config: PCSConfig,
+    config: Config,
 ) -> list[BankSpec]:
     """Build the :class:`BankSpec` list for the configured banks.
 
@@ -186,7 +186,7 @@ def retention_score(
     importance: Tensor,
     usage: Tensor,
     age: Tensor,
-    weights: PCSConfig,
+    weights: Config,
 ) -> Tensor:
     r"""Compute retention score in ``[0, 1]``.
 
@@ -231,7 +231,7 @@ def retention_score(
     return torch.clamp(raw, min=0.0, max=1.0)
 
 
-class PersistentCognitiveState(nn.Module):
+class State(nn.Module):
     """The single persistent differentiable cognitive state.
 
     The PCS holds its token banks as :class:`torch.nn.ParameterDict` entries
@@ -243,16 +243,16 @@ class PersistentCognitiveState(nn.Module):
     state.
     """
 
-    def __init__(self, config: PCSConfig | None = None) -> None:
+    def __init__(self, config: Config | None = None) -> None:
         """Initialise the PCS.
 
         Args:
             config: Optional PCS configuration. Defaults to
-                :class:`PCSConfig` defaults.
+                :class:`Config` defaults.
         """
         super().__init__()
         if config is None:
-            config = PCSConfig()
+            config = Config()
         self.config = config
 
         bank_parameter_dict: nn.ParameterDict = nn.ParameterDict()
@@ -536,8 +536,8 @@ __all__ = [
     "INTENT_BANK",
     "METADATA_FIELDS",
     "BankSpec",
-    "PCSConfig",
-    "PersistentCognitiveState",
+    "Config",
+    "State",
     "build_bank_specs",
     "resolve_bank_sizes",
     "retention_score",
