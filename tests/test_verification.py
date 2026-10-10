@@ -367,3 +367,53 @@ class TestGuarantees:
     def test_invalid_weights_are_refused_at_construction(self, weights):
         with pytest.raises(ValueError):
             verification.Heuristic(**weights)
+
+
+class TestLearnedGuarantees:
+    @staticmethod
+    def make():
+        torch.manual_seed(0)
+        state = cognitive.State(cognitive.Config(hidden_size=8))
+        return verification.Learned(8, 4), state
+
+    def test_scores_are_probabilities_and_decisions_follow_the_threshold(self):
+        verifier, state = self.make()
+        cand = tiers.Update(torch.randn(3, 8), torch.ones(3))
+        score, accepted = verifier.verify(cand, state)
+        assert 0.0 <= score <= 1.0
+        assert accepted == (score >= verifier.acceptance_threshold)
+
+    def test_an_empty_candidate_returns_a_clean_rejection_not_nan(self):
+        verifier, state = self.make()
+        empty = tiers.Update(torch.zeros(0, 8), torch.zeros(0))
+        score, accepted = verifier.verify(empty, state)
+        assert score == 0.0
+        assert accepted is False
+
+    def test_a_corrupted_state_returns_a_clean_rejection_not_nan(self):
+        verifier, state = self.make()
+        with torch.no_grad():
+            state.get_bank("working")[0, 0] = float("nan")
+        cand = tiers.Update(torch.randn(3, 8), torch.ones(3))
+        score, accepted = verifier.verify(cand, state)
+        assert score == 0.0
+        assert accepted is False
+
+    def test_the_training_signal_is_a_finite_scalar_that_reaches_the_mlp(self):
+        verifier, state = self.make()
+        cand = tiers.Update(torch.randn(3, 8), torch.ones(3))
+        loss = verifier.update_signal(cand, state, was_used=True)
+        assert loss.dim() == 0
+        assert torch.isfinite(loss)
+        loss.backward()
+        assert verifier.mlp[0].weight.grad.abs().sum() > 0
+
+    def test_verifying_does_not_build_a_graph_or_change_weights(self):
+        verifier, state = self.make()
+        before = [p.clone() for p in verifier.parameters()]
+        cand = tiers.Update(torch.randn(3, 8), torch.ones(3))
+        verifier.verify(cand, state)
+        assert all(
+            torch.equal(a, b)
+            for a, b in zip(before, verifier.parameters(), strict=True)
+        )
