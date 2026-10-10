@@ -35,7 +35,7 @@ class DummyTokenizer:
         return [min(255, ord(c)) for c in text][:64]
 
 
-class _ConstantLogitsModel:
+class ConstantLogitsModel:
     """Returns logits so that token 0 is always the most likely."""
 
     def __init__(self, vocab_size: int = 256):
@@ -100,7 +100,7 @@ def test_evaluate_all_smoke_with_fake_examples(monkeypatch):
 
     # Replace each loader with our trivial one.
     saved = {n: s.loader for n, s in eval_harness.TASK_REGISTRY.items()}
-    for n, _s in eval_harness.TASK_REGISTRY.items():
+    for n in eval_harness.TASK_REGISTRY:
         eval_harness.TASK_REGISTRY[n] = eval_harness.TaskSpec(
             name=n, loader=fake_loader, max_examples=2
         )
@@ -133,7 +133,7 @@ def test_evaluate_task_returns_finite_accuracy_when_loader_is_empty():
     saved_loader = spec.loader
     spec.loader = lambda seed=0: iter([])
     try:
-        r = evaluate_task(spec, _ConstantLogitsModel(), DummyTokenizer(), None)
+        r = evaluate_task(spec, ConstantLogitsModel(), DummyTokenizer(), None)
         assert r.n == 0
         assert r.accuracy == 0.0
         assert r.log_likelihood_mean == 0.0
@@ -169,8 +169,10 @@ class TestWinograndeLoader:
         Reading ``options`` raised ``KeyError`` and the task never ran.
         """
         rows = self.fake_dataset()
-        monkeypatch.setattr(eval_harness, "load_dataset", lambda *a, **k: rows)
-        examples = list(eval_harness._load_winogrande(seed=42))
+        monkeypatch.setattr(
+            eval_harness.datasets, "load_dataset", lambda *a, **k: rows
+        )
+        examples = list(eval_harness.load_winogrande(seed=42))
         assert len(examples) == 2
 
     def test_label_indexes_the_choice_it_names(
@@ -182,13 +184,18 @@ class TestWinograndeLoader:
         label inverted every example.
         """
         rows = self.fake_dataset()
-        monkeypatch.setattr(eval_harness, "load_dataset", lambda *a, **k: rows)
+        monkeypatch.setattr(
+            eval_harness.datasets, "load_dataset", lambda *a, **k: rows
+        )
         # Seed chosen so the shuffle preserves the input order for this
         # tiny 2-row fixture.
-        examples = list(eval_harness._load_winogrande(seed=0))
+        examples = list(eval_harness.load_winogrande(seed=0))
         first, second = examples
-        assert first["choices"][first["label"]] == "A beat B so A was happy."
-        assert second["choices"][second["label"]] == "C beat D so D was sad."
+        # Partial scoring: the option goes into the context and the text
+        # after the blank is the (shared) continuation that is scored.
+        assert first["contexts"][first["label"]] == "A beat B so A"
+        assert second["contexts"][second["label"]] == "C beat D so D"
+        assert first["choices"] == ["was happy.", "was happy."]
 
 
 def test_streaming_loader_is_seed_deterministic(
@@ -201,7 +208,14 @@ def test_streaming_loader_is_seed_deterministic(
     upstream stream order and report different accuracy numbers.
     """
     rows = [
-        {"ctx": str(i), "endings": ["a", "b"], "label": 0} for i in range(20)
+        {
+            "ctx_a": str(i),
+            "ctx_b": "x",
+            "activity_label": "act",
+            "endings": ["a", "b"],
+            "label": 0,
+        }
+        for i in range(20)
     ]
 
     class FakeStreaming:
@@ -216,9 +230,9 @@ def test_streaming_loader_is_seed_deterministic(
             rng = random.Random(seed)
             order = list(range(len(self.rows)))
             rng.shuffle(order)
-            return _FakeIterable([self.rows[i] for i in order])
+            return FakeIterable([self.rows[i] for i in order])
 
-    class _FakeIterable:
+    class FakeIterable:
         def __init__(self, items):
             self.items = items
 
@@ -226,13 +240,13 @@ def test_streaming_loader_is_seed_deterministic(
             return iter(self.items)
 
     monkeypatch.setattr(
-        eval_harness,
+        eval_harness.datasets,
         "load_dataset",
         lambda *a, **k: FakeStreaming(rows),
     )
     spec = eval_harness.TaskSpec(
         name="hellaswag",
-        loader=eval_harness._load_hellaswag,
+        loader=eval_harness.load_hellaswag,
         max_examples=5,
     )
     first = [ex["context"] for ex in spec.loader(spec.seed)][
@@ -245,7 +259,7 @@ def test_streaming_loader_is_seed_deterministic(
     # And a different seed picks a different prefix.
     other_spec = eval_harness.TaskSpec(
         name="hellaswag",
-        loader=eval_harness._load_hellaswag,
+        loader=eval_harness.load_hellaswag,
         max_examples=5,
         seed=999,
     )
