@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 import torch
 
+from ucsa.models import architecture
+from ucsa.models.architecture import UCSA
 from ucsa.models.origination import (
     chain_latents,
     counterfactual_controllability,
@@ -13,7 +15,6 @@ from ucsa.models.origination import (
     intent_collapse_report,
     intervene_intent,
 )
-from ucsa.models.ucsa import UCSA, UCSAConfig
 
 
 def tiny_model(**overrides: object) -> UCSA:
@@ -28,7 +29,7 @@ def tiny_model(**overrides: object) -> UCSA:
     }
     defaults.update(overrides)
     torch.manual_seed(0)
-    return UCSA(UCSAConfig(**defaults))  # type: ignore[arg-type]
+    return UCSA(architecture.Config(**defaults))  # type: ignore[arg-type]
 
 
 def tiny_inputs() -> torch.Tensor:
