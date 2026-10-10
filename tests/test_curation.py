@@ -1,6 +1,9 @@
-"""Tests for :mod:`ucsa.models.curation`."""
+"""Guarantees of the memory curator.
 
-from __future__ import annotations
+Grouped by what is promised, not by method: one code path for every task,
+deterministic effects, rejection of misuse, isolation of failures, recovery
+across restarts, and behaviour under concurrency.
+"""
 
 import threading
 import time
@@ -9,285 +12,323 @@ import pytest
 import torch
 
 from ucsa.models import cognitive, curation, tiers, verification
-from ucsa.models.curation import PruneTask
-from ucsa.models.tiers import Memory
 
 
-def tiny_pcs() -> cognitive.State:
-    """Return a fresh PCS sized for tests."""
+def make_state() -> cognitive.State:
+    torch.manual_seed(0)  # the banks start random; make them reproducible
     return cognitive.State(cognitive.Config(hidden_size=32))
 
 
-def tiny_update(confidence: float = 1.0) -> tiers.Update:
-    """Return a small :class:`tiers.Update`."""
+def make_update(confidence: float = 1.0, seed: int = 0) -> tiers.Update:
+    gen = torch.Generator().manual_seed(seed)
     return tiers.Update(
-        tokens=torch.randn(4, 32),
+        tokens=torch.randn(4, 32, generator=gen),
         importance=torch.ones(4),
         confidence=confidence,
     )
 
 
-class TestServiceStats:
-    """Tests for :class:`curation.Stats`."""
+def make_curator(verifier=None) -> curation.Curator:
+    return curation.Curator(
+        tiers.Memory(make_state()), verifier or verification.Heuristic()
+    )
 
-    def test_default_values_zero(self) -> None:
-        """All counters start at zero."""
-        stats = curation.Stats()
-        assert stats.verified == 0
-        assert stats.accepted == 0
-        assert stats.pruned == 0
-        assert stats.errors == 0
 
-    def test_to_dict(self) -> None:
-        """``to_dict`` returns a JSON-friendly dict."""
-        stats = curation.Stats(verified=2, accepted=1, pruned=3, errors=4)
-        out = stats.to_dict()
-        assert out == {
-            "verified": 2,
-            "accepted": 1,
-            "pruned": 3,
-            "errors": 4,
+class AcceptAll(verification.Verifier):
+    """Accepts everything with a fixed score."""
+
+    def verify(self, candidate, state):
+        return 1.0, True
+
+    def update_signal(self, *args, **kwargs):
+        return None
+
+
+class Rejecting(AcceptAll):
+    def verify(self, candidate, state):
+        return 0.0, False
+
+
+class Exploding(AcceptAll):
+    """Raises on the second call, succeeds otherwise."""
+
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+
+    def verify(self, candidate, state):
+        self.calls += 1
+        if self.calls == 2:
+            raise RuntimeError("boom")
+        return 1.0, True
+
+
+def wait_for(predicate, timeout=5.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+@pytest.fixture
+def running():
+    curator = make_curator(AcceptAll())
+    curator.start()
+    yield curator
+    curator.stop()
+
+
+# ----------------------------------------------------------- deterministic flow
+
+
+class TestDeterministicFlow:
+    def test_stats_start_at_zero(self):
+        assert make_curator().stats.to_dict() == {
+            "verified": 0,
+            "accepted": 0,
+            "pruned": 0,
+            "errors": 0,
         }
 
-
-class TestMemoryServiceInline:
-    """Tests that exercise :class:`curation.Curator` synchronously."""
-
-    @pytest.fixture
-    def service(self) -> curation.Curator:
-        """Provide an inline memory service."""
-        pcs = tiny_pcs()
-        mem = Memory(pcs)
-        verifier = verification.Heuristic()
-        return curation.Curator(mem, verifier)
-
-    def test_submit_sync_inline_processes_verification(
-        self, service: curation.Curator
-    ) -> None:
-        """``submit_sync_inline`` runs the verifier and updates stats."""
-        service.submit_sync_inline(
-            curation.VerifyTask(tiny_update(), tiny_pcs())
+    def test_accepted_candidates_are_counted_and_written(self):
+        curator = make_curator(AcceptAll())
+        before = curator.memory.cstate.get_bank("long_term").clone()
+        curator.handle(curation.VerifyTask(make_update(), make_state()))
+        assert curator.stats.verified == 1
+        assert curator.stats.accepted == 1
+        assert not torch.equal(
+            curator.memory.cstate.get_bank("long_term"), before
         )
-        assert service.stats.verified == 1
 
-    def test_submit_sync_inline_accepts_high_confidence(
-        self, service: curation.Curator
-    ) -> None:
-        """High-confidence candidates are accepted into long-term."""
-        service.submit_sync_inline(
-            curation.VerifyTask(tiny_update(confidence=0.99), tiny_pcs())
+    def test_rejected_candidates_leave_memory_untouched(self):
+        curator = make_curator(Rejecting())
+        before = curator.memory.cstate.get_bank("long_term").clone()
+        curator.handle(curation.VerifyTask(make_update(), make_state()))
+        assert curator.stats.verified == 1
+        assert curator.stats.accepted == 0
+        assert torch.equal(curator.memory.cstate.get_bank("long_term"), before)
+
+    def test_callback_receives_candidate_score_and_decision(self):
+        seen = []
+        curator = make_curator(AcceptAll())
+        update, state = make_update(), make_state()
+        curator.handle(
+            curation.VerifyTask(update, state, lambda *a: seen.append(a))
         )
-        assert service.stats.accepted >= 0
+        assert seen == [(update, state, 1.0, True)]
 
-    def test_submit_sync_inline_rejects_low_confidence(
-        self, service: curation.Curator
-    ) -> None:
-        """Low-confidence candidates are rejected."""
-        service.submit_sync_inline(
-            curation.VerifyTask(tiny_update(confidence=0.0), tiny_pcs())
+    def test_identical_task_sequences_give_identical_memory(self):
+        def run():
+            curator = make_curator(AcceptAll())
+            for seed in range(5):
+                curator.handle(
+                    curation.VerifyTask(make_update(seed=seed), make_state())
+                )
+            return curator.memory.cstate.get_bank("long_term").clone()
+
+        assert torch.equal(run(), run())
+
+    def test_pruning_reports_how_many_slots_it_recycled(self):
+        curator = make_curator(AcceptAll())
+        curator.handle(curation.VerifyTask(make_update(), make_state()))
+        curator.handle(curation.PruneTask(k=2))
+        assert curator.stats.pruned == 2
+
+    def test_signals_are_recorded_in_submission_order(self):
+        curator = make_curator(AcceptAll())
+        for _ in range(3):
+            curator.handle(curation.VerifyTask(make_update(), make_state()))
+        assert curation.collect_signals(curator).tolist() == [1.0] * 3
+
+
+class TestOneCodePathForEveryTask:
+    def test_worker_and_inline_processing_give_identical_results(self):
+        tasks = [
+            curation.VerifyTask(make_update(seed=s), make_state())
+            for s in range(4)
+        ]
+        inline = make_curator(AcceptAll())
+        for t in tasks:
+            inline.handle(t)
+
+        threaded = make_curator(AcceptAll())
+        threaded.start()
+        for t in tasks:
+            threaded.submit(t).result(timeout=5)
+        threaded.stop()
+
+        assert threaded.stats.to_dict() == inline.stats.to_dict()
+        assert torch.equal(
+            threaded.memory.cstate.get_bank("long_term"),
+            inline.memory.cstate.get_bank("long_term"),
         )
-        # Rejected only if score is below threshold; just check it ran.
-        assert service.stats.verified == 1
 
-    def test_submit_sync_inline_prune(self, service: curation.Curator) -> None:
-        """A prune task is processed synchronously."""
-        candidate = tiny_update()
-        service.submit_sync_inline(curation.VerifyTask(candidate, tiny_pcs()))
-        service.submit_sync_inline(PruneTask(k=2))
-        assert service.stats.pruned == 2
 
-    def test_on_complete_callback_invoked(
-        self, service: curation.Curator
-    ) -> None:
-        """The ``on_complete`` callback is invoked after verification."""
-        captured: list[tuple[float, bool]] = []
+# ------------------------------------------------------------------- bad flows
 
-        def callback(
-            candidate: tiers.Update,
-            cstate: cognitive.State,
-            score: float,
-            accepted: bool,
-        ) -> None:
-            captured.append((score, accepted))
 
-        service.submit_sync_inline(
-            curation.VerifyTask(tiny_update(), tiny_pcs(), on_complete=callback)
+class TestMisuse:
+    def test_submitting_before_start_is_reported_not_silently_dropped(self):
+        curator = make_curator()
+        assert curator.submit_prune(1) is None
+        assert curator.stats.verified == 0
+
+    def test_unknown_task_types_are_rejected(self):
+        with pytest.raises(TypeError, match="task"):
+            make_curator().handle(object())
+
+    def test_negative_prune_counts_are_rejected(self):
+        with pytest.raises(ValueError, match="k"):
+            make_curator().handle(curation.PruneTask(k=-1))
+
+    def test_start_and_stop_are_idempotent(self):
+        curator = make_curator()
+        curator.stop()  # before start: harmless
+        curator.start()
+        thread = curator.thread
+        curator.start()  # second start must not spawn another worker
+        assert curator.thread is thread
+        curator.stop()
+        curator.stop()
+        assert not curator.started
+
+
+# ---------------------------------------------------- breakage and recovery
+
+
+class TestFailureIsolationAndRecovery:
+    def test_a_failing_task_does_not_stop_the_worker(self):
+        curator = make_curator(Exploding())
+        curator.start()
+        for _ in range(4):
+            curator.submit(
+                curation.VerifyTask(make_update(), make_state())
+            ).result(timeout=5)
+        curator.stop()
+        assert curator.stats.errors == 1
+        assert curator.stats.accepted == 3  # the other three went through
+
+    def test_a_failing_callback_is_contained_and_counted(self):
+        def bad_callback(*args):
+            raise ValueError("callback bug")
+
+        curator = make_curator(AcceptAll())
+        curator.start()
+        curator.submit(
+            curation.VerifyTask(make_update(), make_state(), bad_callback)
+        ).result(timeout=5)
+        curator.submit(curation.VerifyTask(make_update(), make_state())).result(
+            timeout=5
         )
-        assert len(captured) == 1
-        assert 0.0 <= captured[0][0] <= 1.0
+        curator.stop()
+        assert curator.stats.errors == 1
+        assert curator.stats.verified == 2
 
-    def test_start_idempotent(self, service: curation.Curator) -> None:
-        """Calling ``start`` twice keeps the same worker running."""
-        service.start()
-        first_loop = service.loop
-        service.start()
-        assert service.loop is first_loop
-        service.stop()
+    def test_the_curator_can_be_restarted_after_stop(self):
+        """Regression: the queue was bound to the first event loop, so any
+        task submitted after a restart failed."""
+        curator = make_curator(AcceptAll())
+        curator.start()
+        curator.submit(curation.VerifyTask(make_update(), make_state())).result(
+            timeout=5
+        )
+        curator.stop()
 
-    def test_stop_idempotent(self, service: curation.Curator) -> None:
-        """Calling ``stop`` without ``start`` is a no-op."""
-        service.stop()
-        assert service.started is False
-
-
-class TestMemoryServiceAsync:
-    """Tests for the asynchronous worker behaviour."""
-
-    @pytest.fixture
-    def started_service(self) -> tuple[curation.Curator, cognitive.State]:
-        """Provide a started memory service and its PCS."""
-        pcs = tiny_pcs()
-        mem = Memory(pcs)
-        verifier = verification.Heuristic()
-        service = curation.Curator(mem, verifier)
-        service.start()
-        yield service, pcs
-        service.stop()
-
-    def test_start_creates_loop(
-        self, started_service: tuple[curation.Curator, cognitive.State]
-    ) -> None:
-        """``start`` creates an asyncio loop running in a thread."""
-        service, _ = started_service
-        assert service.loop is not None
-        assert service.loop.is_running()
-        assert service.thread is not None
-        assert service.thread.is_alive()
-
-    def test_submit_verification_returns_future(
-        self, started_service: tuple[curation.Curator, cognitive.State]
-    ) -> None:
-        """``submit_verification`` returns a future when the loop is running."""
-        service, pcs = started_service
-        future = service.submit_verification(tiny_update(), pcs)
+        curator.start()
+        future = curator.submit(
+            curation.VerifyTask(make_update(), make_state())
+        )
         assert future is not None
-        # Wait briefly for the worker to process.
-        time.sleep(0.3)
-        assert service.stats.verified >= 1
+        future.result(timeout=5)
+        curator.stop()
+        assert curator.stats.verified == 2
 
-    def test_non_blocking_enqueue(
-        self, started_service: tuple[curation.Curator, cognitive.State]
-    ) -> None:
-        """``submit_*`` does not block the caller."""
-        service, pcs = started_service
+    def test_repeated_restart_cycles_stay_healthy(self):
+        curator = make_curator(AcceptAll())
+        for cycle in range(5):
+            curator.start()
+            curator.submit(
+                curation.VerifyTask(make_update(), make_state())
+            ).result(timeout=5)
+            curator.stop()
+            assert not curator.thread.is_alive(), cycle
+        assert curator.stats.verified == 5
+
+    def test_stop_waits_for_queued_work_to_finish(self):
+        done = []
+
+        class Slow(AcceptAll):
+            def verify(self, candidate, state):
+                time.sleep(0.05)
+                done.append(1)
+                return 1.0, True
+
+        curator = make_curator(Slow())
+        curator.start()
+        for _ in range(5):
+            curator.submit(curation.VerifyTask(make_update(), make_state()))
+        curator.stop()
+        assert len(done) == 5  # nothing was discarded by shutting down
+
+    def test_state_is_consistent_after_a_mix_of_good_and_bad_tasks(self):
+        curator = make_curator(Exploding())
+        for _ in range(5):
+            with contextlib.suppress(RuntimeError):
+                curator.handle(curation.VerifyTask(make_update(), make_state()))
+        stats = curator.stats
+        assert stats.accepted == 4
+        assert stats.verified == 5  # attempts are counted, even failed ones
+
+
+# ------------------------------------------------------------------ concurrency
+
+
+class TestConcurrency:
+    def test_many_producer_threads_lose_no_tasks(self, running):
+        per_thread, threads = 25, 8
+
+        def produce():
+            for _ in range(per_thread):
+                running.submit(curation.VerifyTask(make_update(), make_state()))
+
+        workers = [threading.Thread(target=produce) for _ in range(threads)]
+        for w in workers:
+            w.start()
+        for w in workers:
+            w.join()
+        assert wait_for(lambda: running.stats.verified == per_thread * threads)
+
+    def test_submission_does_not_block_on_slow_work(self):
+        class Slow(AcceptAll):
+            def verify(self, candidate, state):
+                time.sleep(0.2)
+                return 1.0, True
+
+        curator = make_curator(Slow())
+        curator.start()
         start = time.time()
-        for _ in range(20):
-            service.submit_verification(tiny_update(), pcs)
-        elapsed = time.time() - start
-        # 20 submits should complete in well under a second.
-        assert elapsed < 1.0
+        for _ in range(5):
+            curator.submit(curation.VerifyTask(make_update(), make_state()))
+        assert time.time() - start < 0.5  # enqueue returns immediately
+        curator.stop()
 
-    def test_fifo_processing(
-        self, started_service: tuple[curation.Curator, cognitive.State]
-    ) -> None:
-        """Tasks are processed in FIFO order."""
-        service, pcs = started_service
-        scores_seen: list[float] = []
-
-        def make_callback(score: float) -> callable:  # type: ignore[name-defined]
-            def callback(
-                candidate: tiers.Update,
-                cstate: cognitive.State,
-                observed_score: float,
-                accepted: bool,
-            ) -> None:
-                scores_seen.append(observed_score)
-
-            return callback
-
-        # Submit 5 tasks each with a different confidence so scores differ.
-        for confidence in [0.1, 0.3, 0.5, 0.7, 0.9]:
-            service.submit_verification(
-                tiny_update(confidence=confidence),
-                pcs,
-                on_complete=make_callback(confidence),
+    def test_tasks_are_processed_in_fifo_order(self):
+        order = []
+        curator = make_curator(AcceptAll())
+        curator.start()
+        futures = [
+            curator.submit(
+                curation.VerifyTask(
+                    make_update(),
+                    make_state(),
+                    lambda *a, i=i: order.append(i),
+                )
             )
-        time.sleep(0.5)
-        # Tasks should complete in submission order; the recorded scores
-        # should be monotonically non-decreasing in confidence.
-        assert len(scores_seen) == 5
-
-    def test_stop_drains_queue(
-        self, started_service: tuple[curation.Curator, cognitive.State]
-    ) -> None:
-        """``stop`` drains pending tasks before tearing down the worker."""
-        service, pcs = started_service
-        for _ in range(10):
-            service.submit_verification(tiny_update(), pcs)
-        # Give the worker a moment to start processing.
-        time.sleep(0.2)
-        service.stop(timeout=5.0)
-        assert not service.thread.is_alive()
-
-    def test_submit_returns_none_when_not_started(
-        self,
-    ) -> None:
-        """Without a running loop, ``submit`` returns ``None``."""
-        pcs = tiny_pcs()
-        mem = Memory(pcs)
-        verifier = verification.Heuristic()
-        service = curation.Curator(mem, verifier)
-        future = service.submit_verification(tiny_update(), pcs)
-        assert future is None
-
-
-class TestMemoryServiceErrorIsolation:
-    """Tests for worker error isolation."""
-
-    def test_error_in_verification_does_not_crash_worker(self) -> None:
-        """A failing verifier does not stop subsequent tasks."""
-
-        class FailingVerifier(verification.Heuristic):
-            def __init__(self) -> None:
-                super().__init__()
-                self.fail_count: int = 0
-
-            def verify(
-                self,
-                candidate: tiers.Update,
-                cstate: cognitive.State,
-            ) -> tuple[float, bool]:
-                self.fail_count += 1
-                if self.fail_count <= 2:
-                    raise RuntimeError("intentional failure")
-                return super().verify(candidate, cstate)
-
-        pcs = tiny_pcs()
-        mem = Memory(pcs)
-        verifier = FailingVerifier()
-        service = curation.Curator(mem, verifier)
-        service.start()
-        try:
-            for _ in range(5):
-                service.submit_verification(tiny_update(), pcs)
-            time.sleep(0.5)
-        finally:
-            service.stop()
-        assert service.stats.errors >= 2
-        # The successful tasks still ran.
-        assert service.stats.verified == 5
-
-    def test_concurrent_submits_dont_drop(self) -> None:
-        """Many concurrent submits are all eventually processed."""
-
-        pcs = tiny_pcs()
-        mem = Memory(pcs)
-        verifier = verification.Heuristic()
-        service = curation.Curator(mem, verifier)
-        service.start()
-        try:
-            n = 50
-
-            def submit_many() -> None:
-                for _ in range(n):
-                    service.submit_verification(tiny_update(), pcs)
-
-            threads = [threading.Thread(target=submit_many) for _ in range(4)]
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join()
-            time.sleep(1.0)
-        finally:
-            service.stop()
-        assert service.stats.verified == n * 4
+            for i in range(20)
+        ]
+        for f in futures:
+            f.result(timeout=5)
+        curator.stop()
+        assert order == list(range(20))
