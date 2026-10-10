@@ -10,13 +10,10 @@ import torch
 from torch import Tensor, nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from ucsa.training.curriculum import Curriculum, CurriculumSchedule
+from ucsa.training import curriculum as curriculum_lib, trainer as trainer_lib
+from ucsa.training.curriculum import Curriculum
 from ucsa.training.metrics import DEFAULT_METRIC_NAMES, build_default_registry
-from ucsa.training.trainer import (
-    CosineWarmupScheduler,
-    Trainer,
-    TrainerConfig,
-)
+from ucsa.training.trainer import CosineWarmupScheduler, Trainer
 
 
 class TinyModel(nn.Module):
@@ -36,18 +33,18 @@ def tiny_trainer(
     model: nn.Module | None = None,
     curriculum: Curriculum | None = None,
     metrics=None,
-    config: TrainerConfig | None = None,
+    config: trainer_lib.Config | None = None,
     vocab_size: int = 100,
 ) -> Trainer:
     """Build a small trainer for tests."""
     if model is None:
         model = TinyModel(vocab_size=vocab_size)
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
-    from ucsa.models.losses import UCSACombinedLoss
+    from ucsa.models import losses
 
-    loss_fn = UCSACombinedLoss()
+    loss_fn = losses.Combined()
     if config is None:
-        config = TrainerConfig(
+        config = trainer_lib.Config(
             learning_rate=3e-4,
             max_steps=20,
             warmup_steps=2,
@@ -124,11 +121,11 @@ class TestTargetAlignment:
 
 
 class TestTrainerConfig:
-    """Tests for :class:`TrainerConfig`."""
+    """Tests for :class:`trainer_lib.Config`."""
 
     def test_default_values(self) -> None:
         """Defaults are sensible."""
-        config = TrainerConfig()
+        config = trainer_lib.Config()
         assert config.learning_rate > 0.0
         assert config.grad_clip_norm >= 0.0
 
@@ -206,7 +203,7 @@ class TestTrainerBasics:
     def test_train_returns_history(self, dataset: DataLoader) -> None:
         """``train`` returns a list of metric snapshots."""
         trainer = tiny_trainer(
-            config=TrainerConfig(
+            config=trainer_lib.Config(
                 learning_rate=3e-4,
                 max_steps=10,
                 warmup_steps=1,
@@ -233,7 +230,7 @@ class TestTrainerBasics:
         """The curriculum's total step increments during training."""
         trainer = tiny_trainer(
             curriculum=Curriculum(
-                CurriculumSchedule(
+                curriculum_lib.Schedule(
                     stage_1_end=5, stage_2_end=10, stage_3_end=15
                 )
             ),
@@ -251,7 +248,7 @@ class TestTrainerBasics:
 
     def test_grad_clip_applied(self, dataset: DataLoader) -> None:
         """Gradient clipping is applied when configured."""
-        config = TrainerConfig(
+        config = trainer_lib.Config(
             learning_rate=3e-4,
             max_steps=10,
             warmup_steps=1,
@@ -265,7 +262,7 @@ class TestTrainerBasics:
 
     def test_grad_clip_disabled(self, dataset: DataLoader) -> None:
         """Gradient clipping is a no-op when set to zero."""
-        config = TrainerConfig(
+        config = trainer_lib.Config(
             learning_rate=3e-4,
             max_steps=10,
             warmup_steps=1,
@@ -316,7 +313,9 @@ class TestTrainerBasics:
     def test_compute_loss_curriculum_aware(self) -> None:
         """``compute_loss`` reflects the curriculum's active components."""
         curriculum = Curriculum(
-            CurriculumSchedule(stage_1_end=10, stage_2_end=20, stage_3_end=30)
+            curriculum_lib.Schedule(
+                stage_1_end=10, stage_2_end=20, stage_3_end=30
+            )
         )
         trainer = tiny_trainer(curriculum=curriculum)
         inputs = torch.randint(0, 100, (2, 4))
@@ -334,7 +333,7 @@ class TestTrainerBasics:
         one.
         """
         curriculum = Curriculum(
-            CurriculumSchedule(stage_1_end=1, stage_2_end=2, stage_3_end=3)
+            curriculum_lib.Schedule(stage_1_end=1, stage_2_end=2, stage_3_end=3)
         )
         trainer = tiny_trainer(curriculum=curriculum)
         for _ in range(5):
