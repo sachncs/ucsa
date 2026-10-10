@@ -46,16 +46,58 @@ def test_strictly_causal_across_and_within_chunks():
 
 
 def test_state_carries_information_across_chunks():
-    """With the state on, an early chunk changes later chunks' logits; with
-    use_state=False it provably cannot."""
+    """With chunk-local attention (window 0) an early chunk can reach later
+    chunks only through the state: it does with the state on and provably
+    cannot with it off."""
     x = torch.randint(0, 64, (1, 24))
     y = x.clone()
     y[0, :8] = (y[0, :8] + 1) % 64
-    on, off = make(), make(use_state=False)
+    on, off = make(window=0), make(window=0, use_state=False)
     d_on = (on(x)["logits"] - on(y)["logits"]).abs()[0, 8:].max()
     d_off = (off(x)["logits"] - off(y)["logits"]).abs()[0, 8:].max()
     assert d_on > 1e-6
     assert d_off < 1e-6
+
+
+def test_the_window_lets_the_previous_chunk_reach_the_next_without_a_state():
+    x = torch.randint(0, 64, (1, 24))
+    y = x.clone()
+    y[0, :8] = (y[0, :8] + 1) % 64
+    m = make(use_state=False)  # default window is one chunk
+    diff = (m(x)["logits"] - m(y)["logits"]).abs()[0]
+    assert diff[8:16].max() > 1e-6  # the next chunk sees the changed tokens
+
+
+def test_window_visibility_is_exactly_the_last_window_tokens():
+    """One layer, no state: position i of chunk 1 depends on position j of
+    chunk 0 if and only if j > i (a window of one chunk of 8 tokens)."""
+    m = make(layers=1, use_state=False, read_gate=True, jepa_weight=0.0)
+    m.eval()
+    x = torch.randint(0, 64, (1, 16))
+    base = m(x)["logits"][0]
+    for j in range(8):
+        y = x.clone()
+        y[0, j] = (y[0, j] + 1) % 64
+        changed = (m(y)["logits"][0] - base).abs().amax(-1) > 1e-6
+        for i in range(8):
+            assert bool(changed[8 + i]) == (j > i), (j, i)
+
+
+def test_a_narrower_window_sees_less_of_the_previous_chunk():
+    base = make(layers=1, use_state=False, read_gate=True, jepa_weight=0.0)
+    narrow = make(
+        layers=1, use_state=False, read_gate=True, jepa_weight=0.0, window=2
+    )
+    narrow.load_state_dict(base.state_dict(), strict=False)
+    x = torch.randint(0, 64, (1, 16))
+    y = x.clone()
+    y[0, 5] = (y[0, 5] + 1) % 64
+
+    def reach(model):
+        diff = (model(y)["logits"] - model(x)["logits"])[0, 8:]
+        return int((diff.abs().amax(-1) > 1e-6).sum())
+
+    assert reach(narrow) < reach(base)
 
 
 def test_loss_backprops_into_state_path():
@@ -143,8 +185,8 @@ def test_active_slots_changes_reads_and_full_slots_matches_default():
 def test_slot_dropout_reads_random_prefixes_only_while_training():
     m = make(slot_dropout=1.0, min_slots=2).train()
     seen = []
-    hook = m.blocks[0].read.register_forward_hook(
-        lambda mod, args, out: seen.append(args[1].shape[1])
+    hook = m.blocks[0].slot_norm.register_forward_hook(
+        lambda mod, args, out: seen.append(args[0].shape[1])
     )
     x = torch.randint(0, 64, (1, 24))
     for _ in range(40):
@@ -258,12 +300,14 @@ def test_streaming_logits_match_teacher_forced_logits(use_state, surprise):
     full = m(x)["logits"][0]
     size = m.config.chunk_size
     state = m.initial_state(1)
+    previous = cache = None
     for pos in range(x.shape[1]):
         start = (pos // size) * size
         if pos and pos % size == 0:
             state = m.advance(state, x[:, pos - size : pos])
-        logits = m.next_logits(state, x[:, start : pos + 1])[0]
-        assert torch.allclose(logits, full[pos], atol=1e-4), pos
+            previous = cache  # the chunk that just completed
+        logits, cache = m.next_logits(state, x[:, start : pos + 1], previous)
+        assert torch.allclose(logits[0], full[pos], atol=1e-4), pos
 
 
 def test_closed_read_gate_makes_the_logits_independent_of_the_state():
@@ -280,7 +324,7 @@ def test_closed_read_gate_makes_the_logits_independent_of_the_state():
 
 def test_read_scales_start_at_zero_and_learn():
     m = make(read_gate=True).train()
-    scales = [b.read_scale for b in m.blocks if b.read_scale is not None]
+    scales = [b.slot_scale for b in m.blocks if b.slot_scale is not None]
     assert scales
     assert all(float(s) == 0.0 for s in scales)
     x = torch.randint(0, 64, (2, 32))
@@ -290,14 +334,14 @@ def test_read_scales_start_at_zero_and_learn():
 
 
 def test_once_the_scale_opens_the_state_matters():
-    m = make(read_gate=True).eval()
+    m = make(read_gate=True, window=0).eval()
     x = torch.randint(0, 64, (1, 24))
     y = x.clone()
     y[0, :8] = (y[0, :8] + 1) % 64
     before = (m(x)["logits"] - m(y)["logits"]).abs()[0, 8:].max()
     with torch.no_grad():
         for b in m.blocks:
-            b.read_scale.fill_(1.0)
+            b.slot_scale.fill_(1.0)
     after = (m(x)["logits"] - m(y)["logits"]).abs()[0, 8:].max()
-    assert before < 1e-6  # closed gate: earlier chunks are invisible
-    assert after > 1e-6  # open gate: they influence later chunks
+    assert before < 1e-6  # closed gate and no window: chunk 0 is invisible
+    assert after > 1e-6  # open gate: it influences later chunks
