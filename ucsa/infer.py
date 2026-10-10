@@ -25,8 +25,9 @@ import logging
 import torch
 from torch import Tensor
 
+from ucsa.models import architecture
+from ucsa.models.architecture import UCSA
 from ucsa.models.intent_descent import DescentReport, optimize_intent
-from ucsa.models.ucsa import UCSA, build_ucsa_from_hydra
 from ucsa.utils.seed import set_seed
 
 LOGGER = logging.getLogger(__name__)
@@ -207,7 +208,7 @@ def run_inference(
         The generated text including the prompt.
     """
     set_seed(seed)
-    model = build_ucsa_from_hydra()
+    model = architecture.build_from_hydra()
     tokenizer = model.perception.tokenizer.tokenizer
     input_ids = tokenizer.encode(prompt, return_tensors="pt")
     if input_ids.dim() == 1:
