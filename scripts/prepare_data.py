@@ -53,20 +53,40 @@ def main() -> None:
     parser.add_argument(
         "--no-dedup", action="store_true", help="Keep duplicate documents."
     )
+    parser.add_argument(
+        "--zratio",
+        type=float,
+        nargs=2,
+        default=None,
+        metavar=("LOW", "HIGH"),
+        help="keep documents whose zlib ratio lies in [LOW, HIGH]",
+    )
+    parser.add_argument(
+        "--tag",
+        default="",
+        help="suffix for the train shard, e.g. 'zfilter' -> train-zfilter.bin",
+    )
     parser.add_argument("--skip-wikitext", action="store_true")
     args = parser.parse_args()
 
     tokenizer = transformers.AutoTokenizer.from_pretrained("gpt2")
     os.makedirs(args.out, exist_ok=True)
     stream = datasets.load_dataset(args.dataset, split="train", streaming=True)
-    docs = tokenized_documents((row["text"] for row in stream), tokenizer)
+    texts = (row["text"] for row in stream)
+    zstats: dict[str, int] = {}
+    if args.zratio:
+        texts = shards.filter_by_compressibility(
+            texts, args.zratio[0], args.zratio[1], zstats
+        )
+    docs = tokenized_documents(texts, tokenizer)
     stats: dict[str, int] = {}
     if not args.no_dedup:
         docs = shards.filter_documents(docs, args.min_tokens, stats=stats)
 
     started = time.time()
     for name, limit in (("val", args.val_tokens), ("train", args.train_tokens)):
-        path = os.path.join(args.out, f"{name}.bin")
+        suffix = f"-{args.tag}" if args.tag and name == "train" else ""
+        path = os.path.join(args.out, f"{name}{suffix}.bin")
         written = shards.write_shard(docs, path, limit)
         print(
             f"{name}: {written:,} tokens -> {path} "
@@ -75,6 +95,8 @@ def main() -> None:
         )
     if stats:
         print(f"document filter: {stats}", flush=True)
+    if zstats:
+        print(f"compressibility filter: {zstats}", flush=True)
     if not args.skip_wikitext:
         wiki = datasets.load_dataset(
             "Salesforce/wikitext", "wikitext-103-raw-v1", split="test"
