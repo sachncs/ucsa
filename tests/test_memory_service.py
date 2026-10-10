@@ -1,4 +1,4 @@
-"""Tests for :mod:`ucsa.models.memory_service`."""
+"""Tests for :mod:`ucsa.models.curation`."""
 
 from __future__ import annotations
 
@@ -8,25 +8,19 @@ import time
 import pytest
 import torch
 
-from ucsa.models.memory import Memory, MemoryUpdate
-from ucsa.models.memory_service import (
-    MemoryService,
-    PruneTask,
-    ServiceStats,
-    VerificationTask,
-)
-from ucsa.models.state import PCSConfig, PersistentCognitiveState
-from ucsa.models.verification import HeuristicVerifier
+from ucsa.models import cognitive, curation, tiers, verification
+from ucsa.models.curation import PruneTask
+from ucsa.models.tiers import Memory
 
 
-def tiny_pcs() -> PersistentCognitiveState:
+def tiny_pcs() -> cognitive.State:
     """Return a fresh PCS sized for tests."""
-    return PersistentCognitiveState(PCSConfig(hidden_size=32))
+    return cognitive.State(cognitive.Config(hidden_size=32))
 
 
-def tiny_update(confidence: float = 1.0) -> MemoryUpdate:
-    """Return a small :class:`MemoryUpdate`."""
-    return MemoryUpdate(
+def tiny_update(confidence: float = 1.0) -> tiers.Update:
+    """Return a small :class:`tiers.Update`."""
+    return tiers.Update(
         tokens=torch.randn(4, 32),
         importance=torch.ones(4),
         confidence=confidence,
@@ -34,11 +28,11 @@ def tiny_update(confidence: float = 1.0) -> MemoryUpdate:
 
 
 class TestServiceStats:
-    """Tests for :class:`ServiceStats`."""
+    """Tests for :class:`curation.Stats`."""
 
     def test_default_values_zero(self) -> None:
         """All counters start at zero."""
-        stats = ServiceStats()
+        stats = curation.Stats()
         assert stats.verified == 0
         assert stats.accepted == 0
         assert stats.pruned == 0
@@ -46,7 +40,7 @@ class TestServiceStats:
 
     def test_to_dict(self) -> None:
         """``to_dict`` returns a JSON-friendly dict."""
-        stats = ServiceStats(verified=2, accepted=1, pruned=3, errors=4)
+        stats = curation.Stats(verified=2, accepted=1, pruned=3, errors=4)
         out = stats.to_dict()
         assert out == {
             "verified": 2,
@@ -57,68 +51,72 @@ class TestServiceStats:
 
 
 class TestMemoryServiceInline:
-    """Tests that exercise :class:`MemoryService` synchronously."""
+    """Tests that exercise :class:`curation.Curator` synchronously."""
 
     @pytest.fixture
-    def service(self) -> MemoryService:
+    def service(self) -> curation.Curator:
         """Provide an inline memory service."""
         pcs = tiny_pcs()
         mem = Memory(pcs)
-        verifier = HeuristicVerifier()
-        return MemoryService(mem, verifier)
+        verifier = verification.Heuristic()
+        return curation.Curator(mem, verifier)
 
     def test_submit_sync_inline_processes_verification(
-        self, service: MemoryService
+        self, service: curation.Curator
     ) -> None:
         """``submit_sync_inline`` runs the verifier and updates stats."""
-        service.submit_sync_inline(VerificationTask(tiny_update(), tiny_pcs()))
+        service.submit_sync_inline(
+            curation.VerifyTask(tiny_update(), tiny_pcs())
+        )
         assert service.stats.verified == 1
 
     def test_submit_sync_inline_accepts_high_confidence(
-        self, service: MemoryService
+        self, service: curation.Curator
     ) -> None:
         """High-confidence candidates are accepted into long-term."""
         service.submit_sync_inline(
-            VerificationTask(tiny_update(confidence=0.99), tiny_pcs())
+            curation.VerifyTask(tiny_update(confidence=0.99), tiny_pcs())
         )
         assert service.stats.accepted >= 0
 
     def test_submit_sync_inline_rejects_low_confidence(
-        self, service: MemoryService
+        self, service: curation.Curator
     ) -> None:
         """Low-confidence candidates are rejected."""
         service.submit_sync_inline(
-            VerificationTask(tiny_update(confidence=0.0), tiny_pcs())
+            curation.VerifyTask(tiny_update(confidence=0.0), tiny_pcs())
         )
         # Rejected only if score is below threshold; just check it ran.
         assert service.stats.verified == 1
 
-    def test_submit_sync_inline_prune(self, service: MemoryService) -> None:
+    def test_submit_sync_inline_prune(self, service: curation.Curator) -> None:
         """A prune task is processed synchronously."""
         candidate = tiny_update()
-        service.submit_sync_inline(VerificationTask(candidate, tiny_pcs()))
+        service.submit_sync_inline(curation.VerifyTask(candidate, tiny_pcs()))
         service.submit_sync_inline(PruneTask(k=2))
         assert service.stats.pruned == 2
 
-    def test_on_complete_callback_invoked(self, service: MemoryService) -> None:
+    def test_on_complete_callback_invoked(
+        self, service: curation.Curator
+    ) -> None:
         """The ``on_complete`` callback is invoked after verification."""
         captured: list[tuple[float, bool]] = []
 
         def callback(
-            candidate: MemoryUpdate,
-            cstate: PersistentCognitiveState,
+            candidate: tiers.Update,
+            cstate: cognitive.State,
             score: float,
             accepted: bool,
         ) -> None:
             captured.append((score, accepted))
 
         service.submit_sync_inline(
-            VerificationTask(tiny_update(), tiny_pcs(), on_complete=callback)
+            curation.VerifyTask(tiny_update(), tiny_pcs(), on_complete=callback)
         )
         assert len(captured) == 1
         assert 0.0 <= captured[0][0] <= 1.0
 
-    def test_start_idempotent(self, service: MemoryService) -> None:
+    def test_start_idempotent(self, service: curation.Curator) -> None:
         """Calling ``start`` twice keeps the same worker running."""
         service.start()
         first_loop = service.loop
@@ -126,7 +124,7 @@ class TestMemoryServiceInline:
         assert service.loop is first_loop
         service.stop()
 
-    def test_stop_idempotent(self, service: MemoryService) -> None:
+    def test_stop_idempotent(self, service: curation.Curator) -> None:
         """Calling ``stop`` without ``start`` is a no-op."""
         service.stop()
         assert service.started is False
@@ -136,18 +134,18 @@ class TestMemoryServiceAsync:
     """Tests for the asynchronous worker behaviour."""
 
     @pytest.fixture
-    def started_service(self) -> tuple[MemoryService, PersistentCognitiveState]:
+    def started_service(self) -> tuple[curation.Curator, cognitive.State]:
         """Provide a started memory service and its PCS."""
         pcs = tiny_pcs()
         mem = Memory(pcs)
-        verifier = HeuristicVerifier()
-        service = MemoryService(mem, verifier)
+        verifier = verification.Heuristic()
+        service = curation.Curator(mem, verifier)
         service.start()
         yield service, pcs
         service.stop()
 
     def test_start_creates_loop(
-        self, started_service: tuple[MemoryService, PersistentCognitiveState]
+        self, started_service: tuple[curation.Curator, cognitive.State]
     ) -> None:
         """``start`` creates an asyncio loop running in a thread."""
         service, _ = started_service
@@ -157,7 +155,7 @@ class TestMemoryServiceAsync:
         assert service.thread.is_alive()
 
     def test_submit_verification_returns_future(
-        self, started_service: tuple[MemoryService, PersistentCognitiveState]
+        self, started_service: tuple[curation.Curator, cognitive.State]
     ) -> None:
         """``submit_verification`` returns a future when the loop is running."""
         service, pcs = started_service
@@ -168,7 +166,7 @@ class TestMemoryServiceAsync:
         assert service.stats.verified >= 1
 
     def test_non_blocking_enqueue(
-        self, started_service: tuple[MemoryService, PersistentCognitiveState]
+        self, started_service: tuple[curation.Curator, cognitive.State]
     ) -> None:
         """``submit_*`` does not block the caller."""
         service, pcs = started_service
@@ -180,7 +178,7 @@ class TestMemoryServiceAsync:
         assert elapsed < 1.0
 
     def test_fifo_processing(
-        self, started_service: tuple[MemoryService, PersistentCognitiveState]
+        self, started_service: tuple[curation.Curator, cognitive.State]
     ) -> None:
         """Tasks are processed in FIFO order."""
         service, pcs = started_service
@@ -188,8 +186,8 @@ class TestMemoryServiceAsync:
 
         def make_callback(score: float) -> callable:  # type: ignore[name-defined]
             def callback(
-                candidate: MemoryUpdate,
-                cstate: PersistentCognitiveState,
+                candidate: tiers.Update,
+                cstate: cognitive.State,
                 observed_score: float,
                 accepted: bool,
             ) -> None:
@@ -210,7 +208,7 @@ class TestMemoryServiceAsync:
         assert len(scores_seen) == 5
 
     def test_stop_drains_queue(
-        self, started_service: tuple[MemoryService, PersistentCognitiveState]
+        self, started_service: tuple[curation.Curator, cognitive.State]
     ) -> None:
         """``stop`` drains pending tasks before tearing down the worker."""
         service, pcs = started_service
@@ -227,8 +225,8 @@ class TestMemoryServiceAsync:
         """Without a running loop, ``submit`` returns ``None``."""
         pcs = tiny_pcs()
         mem = Memory(pcs)
-        verifier = HeuristicVerifier()
-        service = MemoryService(mem, verifier)
+        verifier = verification.Heuristic()
+        service = curation.Curator(mem, verifier)
         future = service.submit_verification(tiny_update(), pcs)
         assert future is None
 
@@ -239,15 +237,15 @@ class TestMemoryServiceErrorIsolation:
     def test_error_in_verification_does_not_crash_worker(self) -> None:
         """A failing verifier does not stop subsequent tasks."""
 
-        class FailingVerifier(HeuristicVerifier):
+        class FailingVerifier(verification.Heuristic):
             def __init__(self) -> None:
                 super().__init__()
                 self.fail_count: int = 0
 
             def verify(
                 self,
-                candidate: MemoryUpdate,
-                cstate: PersistentCognitiveState,
+                candidate: tiers.Update,
+                cstate: cognitive.State,
             ) -> tuple[float, bool]:
                 self.fail_count += 1
                 if self.fail_count <= 2:
@@ -257,7 +255,7 @@ class TestMemoryServiceErrorIsolation:
         pcs = tiny_pcs()
         mem = Memory(pcs)
         verifier = FailingVerifier()
-        service = MemoryService(mem, verifier)
+        service = curation.Curator(mem, verifier)
         service.start()
         try:
             for _ in range(5):
@@ -274,8 +272,8 @@ class TestMemoryServiceErrorIsolation:
 
         pcs = tiny_pcs()
         mem = Memory(pcs)
-        verifier = HeuristicVerifier()
-        service = MemoryService(mem, verifier)
+        verifier = verification.Heuristic()
+        service = curation.Curator(mem, verifier)
         service.start()
         try:
             n = 50
