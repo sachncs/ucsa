@@ -28,7 +28,7 @@ def newton_schulz_5(G: Tensor, steps: int = 5) -> Tensor:
     Muon update.
     """
     a, b, c = (3.4445, -4.7750, 2.0315)
-    X = G.float()
+    X = G
     transposed = False
     if X.size(0) > X.size(1):
         X = X.T
@@ -40,8 +40,7 @@ def newton_schulz_5(G: Tensor, steps: int = 5) -> Tensor:
         X = a * X + B @ X
     if transposed:
         X = X.T
-    orthogonalised: Tensor = X.to(G.dtype)
-    return orthogonalised
+    return X
 
 
 class Muon(torch.optim.Optimizer):
