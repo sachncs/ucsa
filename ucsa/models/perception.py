@@ -26,7 +26,7 @@ MODALITY_CODE: int = 1
 
 
 @dataclass(frozen=True)
-class PerceptionConfig:
+class Config:
     """Configuration for :class:`Perception`.
 
     Attributes:
@@ -67,7 +67,7 @@ class PerceptionConfig:
             raise ValueError("modalities must contain at least one entry.")
 
 
-class TokenizerWrapper:
+class Tokenizer:
     """A thin, replaceable wrapper around a Hugging Face tokenizer.
 
     The wrapper is intentionally minimal: it exposes the tokenizer plus a
@@ -170,8 +170,8 @@ class Perception(nn.Module):
 
     def __init__(
         self,
-        config: PerceptionConfig | None = None,
-        tokenizer: TokenizerWrapper | None = None,
+        config: Config | None = None,
+        tokenizer: Tokenizer | None = None,
     ) -> None:
         """Initialise perception.
 
@@ -182,10 +182,10 @@ class Perception(nn.Module):
         """
         super().__init__()
         if config is None:
-            config = PerceptionConfig()
+            config = Config()
         self.config = config
         if tokenizer is None:
-            tokenizer = TokenizerWrapper(
+            tokenizer = Tokenizer(
                 tokenizer_name=config.tokenizer_name,
                 max_seq_len=config.max_seq_len,
                 pad_token_id=config.pad_token_id,
@@ -296,6 +296,6 @@ __all__ = [
     "MODALITY_CODE",
     "MODALITY_TEXT",
     "Perception",
-    "PerceptionConfig",
-    "TokenizerWrapper",
+    "Config",
+    "Tokenizer",
 ]
