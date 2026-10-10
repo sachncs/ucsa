@@ -24,6 +24,7 @@ def filter_documents(
     min_tokens: int = 32,
     prefix_len: int = 128,
     stats: dict[str, int] | None = None,
+    seen: set[bytes] | None = None,
 ) -> Iterator[list[int]]:
     """Drops short and duplicate documents.
 
@@ -38,6 +39,8 @@ def filter_documents(
       prefix_len: Number of leading tokens that identify a document.
       stats: If given, updated in place with `seen`, `kept`, `short` and
         `duplicate` counts.
+      seen: Fingerprints already seen. Pass the same set to several calls so
+        a document written to one shard is never written to another.
 
     Yields:
       The documents that survive both filters, in order.
@@ -45,7 +48,7 @@ def filter_documents(
     counts = stats if stats is not None else {}
     for key in ("seen", "kept", "short", "duplicate"):
         counts.setdefault(key, 0)
-    seen_hashes: set[bytes] = set()
+    seen_hashes = set() if seen is None else seen
     for ids in token_lists:
         counts["seen"] += 1
         if len(ids) < min_tokens:
