@@ -34,7 +34,7 @@ PRECISIONS = {"fp32": None, "fp16": torch.float16, "bf16": torch.bfloat16}
 
 
 @dataclasses.dataclass(frozen=True)
-class TrainConfig:
+class Config:
     """Optimisation and bookkeeping knobs.
 
     Attributes:
@@ -109,7 +109,7 @@ class TrainConfig:
             raise ValueError("weight_ema must be in [0, 1), every >= 1")
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> TrainConfig:
+    def from_dict(cls, data: dict[str, Any]) -> Config:
         """Builds a config from a dict, rejecting unknown keys.
 
         Args:
@@ -136,7 +136,7 @@ def pick_device() -> torch.device:
     return torch.device("cpu")
 
 
-def lr_at(step: int, config: TrainConfig) -> float:
+def lr_at(step: int, config: Config) -> float:
     """Returns the learning rate: linear warm-up, then cosine decay.
 
     Args:
@@ -156,7 +156,7 @@ def lr_at(step: int, config: TrainConfig) -> float:
     )
 
 
-def build_optimizer(model: nn.Module, config: TrainConfig) -> torch.optim.AdamW:
+def build_optimizer(model: nn.Module, config: Config) -> torch.optim.AdamW:
     """Builds AdamW with weight decay on matrices only.
 
     Args:
@@ -323,7 +323,7 @@ class WeightEma:
 
 @torch.no_grad()
 def evaluate(
-    model: recurrent.RecurrentUCSA,
+    model: recurrent.Model,
     batches: BatchIterator,
     count: int,
     byte_lengths: torch.Tensor | None = None,
@@ -420,7 +420,7 @@ def prune_checkpoints(out_dir: str, keep: int) -> None:
         os.remove(os.path.join(out_dir, name))
 
 
-def load_model(path: str, device: torch.device) -> recurrent.RecurrentUCSA:
+def load_model(path: str, device: torch.device) -> recurrent.Model:
     """Loads a model saved by `fit`.
 
     Args:
@@ -431,15 +431,15 @@ def load_model(path: str, device: torch.device) -> recurrent.RecurrentUCSA:
       The model in eval mode.
     """
     blob = torch.load(path, map_location="cpu", weights_only=False)
-    config = recurrent.RecurrentConfig.from_dict(blob["model_config"])
-    model = recurrent.RecurrentUCSA(config)
+    config = recurrent.Config.from_dict(blob["model_config"])
+    model = recurrent.Model(config)
     model.load_state_dict(blob["model"], strict=True)
     return model.to(device).eval()
 
 
 def fit(
-    model: recurrent.RecurrentUCSA,
-    config: TrainConfig,
+    model: recurrent.Model,
+    config: Config,
     train_batches: Batches,
     val_batches: Batches | None = None,
     resume: bool = False,
