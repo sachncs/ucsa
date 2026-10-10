@@ -10,8 +10,7 @@ import time
 import pytest
 import torch
 
-from ucsa.models import graph
-from ucsa.models import state as pcs_state
+from ucsa.models import graph, state as pcs_state
 
 HIDDEN = 16
 
