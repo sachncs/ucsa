@@ -27,7 +27,7 @@ import statistics
 from collections import defaultdict
 
 
-def _load_jsons(root: str, pattern: str) -> list[dict]:
+def load_jsons(root: str, pattern: str) -> list[dict]:
     found: list[dict] = []
     rx = re.compile(pattern)
     if not os.path.isdir(root):
@@ -46,7 +46,7 @@ def _load_jsons(root: str, pattern: str) -> list[dict]:
     return found
 
 
-def _agg(rows: list[dict], key: str) -> tuple[float, float, int]:
+def aggregate(rows: list[dict], key: str) -> tuple[float, float, int]:
     vals = [
         r["data"][key]
         for r in rows
@@ -65,9 +65,9 @@ def _agg(rows: list[dict], key: str) -> tuple[float, float, int]:
 
 def build_main_table(ucsa_paths: list[dict], baseline_paths: list[dict]) -> str:
     """Table 1: matched-compute comparison."""
-    ucsa_loss, ucsa_sd, n_u = _agg(ucsa_paths, "best_val_ppl")
-    base_ppl, base_sd, n_b = _agg(baseline_paths, "final_val_ppl")
-    base_best, base_best_sd, _ = _agg(baseline_paths, "best_val_ppl")
+    ucsa_loss, ucsa_sd, n_u = aggregate(ucsa_paths, "best_val_ppl")
+    base_ppl, base_sd, n_b = aggregate(baseline_paths, "final_val_ppl")
+    base_best, base_best_sd, _ = aggregate(baseline_paths, "best_val_ppl")
     if not math.isnan(ucsa_loss) and not math.isnan(base_ppl):
         delta_pct = (ucsa_loss - base_ppl) / base_ppl * 100.0
     else:
@@ -116,7 +116,7 @@ def build_ablation_table(ucsa_paths: list[dict]) -> str:
     s += "| ----------------- | ---- | ------------ | ------------ |\n"
     for tag in sorted(by_tag.keys()):
         rows = by_tag[tag]
-        mean_ppl, sd_ppl, _ = _agg(rows, "best_val_ppl")
+        mean_ppl, sd_ppl, _ = aggregate(rows, "best_val_ppl")
         # We don't stdev best across seeds because we average.
         if math.isnan(mean_ppl):
             continue
@@ -200,15 +200,15 @@ def main() -> None:
     args = parse_args()
     runs = args.runs_dir
 
-    ucsa_files = _load_jsons(runs, r"^ucsa-(?!baseline).*-seed\d+\.json$")
+    ucsa_files = load_jsons(runs, r"^ucsa-(?!baseline).*-seed\d+\.json$")
     ucsa_files = [
         f for f in ucsa_files if not f["name"].startswith("ucsa-baseline-")
     ]
-    baseline_files = _load_jsons(
+    baseline_files = load_jsons(
         runs, r"^baseline.*\.json$|^ucsa-baseline-.*\.json$"
     )
-    eval_files = _load_jsons(runs, r"^eval-.*\.json$")
-    probe_files = _load_jsons(runs, r"^bank-probe.*\.json$")
+    eval_files = load_jsons(runs, r"^eval-.*\.json$")
+    probe_files = load_jsons(runs, r"^bank-probe.*\.json$")
 
     print(
         f"Found {len(ucsa_files)} UCSA training runs, "
