@@ -1,9 +1,8 @@
 """Evaluates a trained checkpoint against published reference results.
 
-Reports zero-shot accuracy on HellaSwag, ARC-Easy, ARC-Challenge, PIQA and
-WinoGrande over the full evaluation splits, held-out perplexity on the
-last 64 positions of fixed windows, and a comparison with the numbers in
-`paper/reference_results.json`.
+Reports zero-shot BLiMP accuracy over the full set of 67 phenomena, held-out
+perplexity on the last 64 positions of fixed windows, and a comparison with
+the numbers in `paper/reference_results.json`.
 
     python scripts/eval.py --ckpt ckpts/r-small/final.pt \
         --out-json runs/eval-r-small.json
@@ -19,7 +18,11 @@ import transformers
 from ucsa.models import recurrent
 from ucsa.training import engine, eval_harness, reference, scoring, shards
 
-PPL_SETS = {"fineweb-edu": "val.bin", "wikitext-103": "wikitext_test.bin"}
+PPL_SETS = {
+    "babylm-dev": "val.bin",
+    "babylm-test": "test.bin",
+    "wikitext-103": "wikitext_test.bin",
+}
 
 
 @torch.no_grad()
@@ -59,9 +62,7 @@ def main() -> None:
     """Parses arguments, evaluates, prints the comparison table."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ckpt", required=True, help="UCSA-R checkpoint")
-    parser.add_argument(
-        "--tasks", nargs="*", default=list(eval_harness.TASK_REGISTRY)
-    )
+    parser.add_argument("--tasks", nargs="*", default=list(eval_harness.TASKS))
     parser.add_argument(
         "--max-examples",
         type=int,
@@ -92,7 +93,6 @@ def main() -> None:
     report: dict = {
         "device": str(device),
         "tasks": {r.name: r.to_dict() for r in results},
-        "avg_acc": sum(r.accuracy for r in results) / max(1, len(results)),
         "ppl": {},
         "params": sum(p.numel() for p in model.parameters()),
     }
