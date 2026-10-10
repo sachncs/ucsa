@@ -1,33 +1,33 @@
-"""Tests for :mod:`ucsa.models.memory`."""
+"""Tests for :mod:`ucsa.models.tiers`."""
 
 from __future__ import annotations
 
 import pytest
 import torch
 
-from ucsa.models.memory import Memory, MemoryUpdate
-from ucsa.models.state import PCSConfig, PersistentCognitiveState
+from ucsa.models import cognitive, tiers
+from ucsa.models.tiers import Memory
 
 
-def tiny_pcs() -> PersistentCognitiveState:
+def tiny_pcs() -> cognitive.State:
     """Return a fresh PCS sized for tests."""
-    return PersistentCognitiveState(PCSConfig(hidden_size=32))
+    return cognitive.State(cognitive.Config(hidden_size=32))
 
 
 class TestMemoryUpdate:
-    """Tests for :class:`MemoryUpdate`."""
+    """Tests for :class:`tiers.Update`."""
 
     def test_construction(self) -> None:
-        """Valid inputs construct a :class:`MemoryUpdate`."""
+        """Valid inputs construct a :class:`tiers.Update`."""
         tokens = torch.randn(4, 32)
         importance = torch.ones(4)
-        update = MemoryUpdate(tokens=tokens, importance=importance)
+        update = tiers.Update(tokens=tokens, importance=importance)
         assert update.tokens.shape == (4, 32)
 
     def test_dimension_mismatch_rejected(self) -> None:
         """Tokens and importance with different token counts raise."""
         with pytest.raises(ValueError):
-            MemoryUpdate(
+            tiers.Update(
                 tokens=torch.randn(4, 32),
                 importance=torch.ones(5),
             )
@@ -35,7 +35,7 @@ class TestMemoryUpdate:
     def test_non_2d_tokens_rejected(self) -> None:
         """Tokens with the wrong rank raise."""
         with pytest.raises(ValueError):
-            MemoryUpdate(
+            tiers.Update(
                 tokens=torch.randn(4, 2, 32),
                 importance=torch.ones(4),
             )
@@ -43,13 +43,13 @@ class TestMemoryUpdate:
     def test_confidence_out_of_range_rejected(self) -> None:
         """Confidence outside ``[0, 1]`` raises."""
         with pytest.raises(ValueError):
-            MemoryUpdate(
+            tiers.Update(
                 tokens=torch.randn(4, 32),
                 importance=torch.ones(4),
                 confidence=1.5,
             )
         with pytest.raises(ValueError):
-            MemoryUpdate(
+            tiers.Update(
                 tokens=torch.randn(4, 32),
                 importance=torch.ones(4),
                 confidence=-0.1,
