@@ -15,7 +15,16 @@ That makes compression an end-to-end test of the model as well as a result:
 
 The coder is the integer range coder of Witten, Neal and Cleary with Python
 integers, so there is no overflow at any precision. Probabilities are
-quantised to integer counts from float64 softmax, identically on both sides.
+quantised to integer counts from the model's own softmax in the library
+dtype, and encoder and decoder do this identically.
+
+Limit: the model's probabilities are floating-point numbers, and a one-ulp
+difference between two runs can move a count across an integer boundary and
+desynchronise the decoder. A compressed file is therefore guaranteed to
+decode only with the same software, device and thread configuration that
+wrote it (tested exactly that way). It is a measurement of compression, not
+an interchange format; integer-only model arithmetic would be needed for
+that.
 """
 
 import math
