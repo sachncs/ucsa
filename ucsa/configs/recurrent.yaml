@@ -1,0 +1,14 @@
+# UCSA-R presets. Select with `scripts/train_r.py --preset <name>`; override
+# any field with `--set model.chunk_size=64 train.lr=3e-4`.
+presets:
+  tiny:     # CPU smoke tests
+    model: {hidden: 64, layers: 2, heads: 4, ffn_dim: 128, chunk_size: 32,
+            banks: {working: 8, long_term: 4}, bank_write_bias: {working: 0.0, long_term: -2.0}}
+    train: {steps: 50, seq_len: 128, warmup_steps: 5, eval_every: 25, eval_batches: 2, log_every: 10}
+  small:    # compute-sized for a single laptop GPU
+    model: {hidden: 384, layers: 6, heads: 6, ffn_dim: 1024, chunk_size: 128}
+    train: {steps: 12000, seq_len: 1024, lr: 6.0e-4}
+  base:
+    model: {hidden: 768, layers: 12, heads: 12, ffn_dim: 2048, chunk_size: 128,
+            banks: {working: 32, long_term: 16, intent: 16}}
+    train: {steps: 30000, seq_len: 1024, lr: 4.0e-4, grad_accum: 4}
