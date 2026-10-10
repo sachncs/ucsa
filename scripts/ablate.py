@@ -26,6 +26,8 @@ from ucsa.training import compression, diagnostics, engine
 ARMS: dict[str, list[str]] = {
     "base": [],
     "base-seed43": [],  # noise floor: only the seed differs (see --seed)
+    "base-seed44": [],
+    "base-seed45": [],
     "no-state": ["model.use_state=false"],
     "no-jepa": ["model.jepa_weight=0"],
     "surprise": ["model.surprise_gate=true"],
@@ -37,7 +39,7 @@ ARMS: dict[str, list[str]] = {
     "lr-1.2e-3": ["train.lr=1.2e-3"],
     "lr-2.4e-3": ["train.lr=2.4e-3"],
 }
-SEED_OVERRIDES = {"base-seed43": 43}
+SEED_OVERRIDES = {"base-seed43": 43, "base-seed44": 44, "base-seed45": 45}
 
 
 def run_arm(
