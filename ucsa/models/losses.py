@@ -20,6 +20,8 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor, nn
 
+from ucsa.utils import precision
+
 
 @dataclass(frozen=True)
 class Weights:
@@ -317,9 +319,11 @@ class RouterBalance(nn.Module):
         routing_weights = torch.softmax(router_logits, dim=-1)
         avg_routing = routing_weights.mean(dim=0)
         with torch.no_grad():
-            expert_mask = torch.nn.functional.one_hot(
-                router_logits.argmax(dim=-1), num_classes=num_experts
-            ).float()
+            expert_mask = precision.to_dtype(
+                torch.nn.functional.one_hot(
+                    router_logits.argmax(dim=-1), num_classes=num_experts
+                )
+            )
         tokens_per_expert = expert_mask.mean(dim=0)
         return num_experts * (tokens_per_expert * avg_routing).sum()
 
