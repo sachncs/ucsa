@@ -199,3 +199,45 @@ def test_a_leaking_model_cannot_be_decoded():
     assert len(data) < 40  # looks spectacular: ~0 bits per token
     honest = arithmetic.decompress(PeekingPredictor(future=None), data)
     assert honest != tokens  # the decoder has no future to peek at
+
+
+class CharTokenizer:
+    """A tiny reversible tokenizer: one id per character, ids below 63."""
+
+    def encode(self, text, add_special_tokens=False):
+        return [ord(c) % 62 for c in text]
+
+    def decode(self, ids, clean_up_tokenization_spaces=False):
+        return "".join(chr(i) for i in ids)
+
+
+def test_text_round_trips_through_the_model_and_a_tokenizer():
+    model = tiny_model()
+    tokenizer = CharTokenizer()
+    text = "Hello, Compression is Intelligence!"
+    # Characters map to ids below 62, so decoding yields the same ids' text.
+    expected = tokenizer.decode(tokenizer.encode(text))
+    data = arithmetic.compress_text(model, tokenizer, text, BOS)
+    assert arithmetic.decompress_text(model, tokenizer, data, BOS) == expected
+
+
+def test_the_real_gpt2_tokenizer_round_trips_awkward_text_exactly():
+    import transformers
+
+    tokenizer = transformers.AutoTokenizer.from_pretrained("gpt2")
+    torch.manual_seed(0)
+    model = recurrent.Model(
+        recurrent.Config(
+            vocab_size=50257,
+            hidden=32,
+            layers=1,
+            heads=2,
+            ffn_dim=64,
+            chunk_size=8,
+            banks=(("working", 4),),
+            bank_write_bias=(("working", 0.0),),
+        )
+    ).eval()
+    text = "Naïve café — 日本語 text 🙂\n\tTabbed  line, two  spaces."
+    data = arithmetic.compress_text(model, tokenizer, text, 50256)
+    assert arithmetic.decompress_text(model, tokenizer, data, 50256) == text
