@@ -175,9 +175,11 @@ class Config:
                 lambda: 0.0 <= self.slot_dropout <= 1.0,
                 "slot_dropout must be in [0, 1]",
             ),
+            (lambda: self.min_slots >= 1, "min_slots must be >= 1"),
             (
-                lambda: 1 <= self.min_slots <= self.num_slots,
-                "min_slots must be in [1, num_slots]",
+                lambda: self.slot_dropout == 0.0
+                or self.min_slots <= self.num_slots,
+                "min_slots must be <= num_slots when slot_dropout is on",
             ),
             (lambda: self.jepa_weight >= 0.0, "jepa_weight must be >= 0"),
             (
