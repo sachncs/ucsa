@@ -207,8 +207,12 @@ published numbers (Gu and Dao, 2023, Table 3):
 The model is above chance on HellaSwag, PIQA and ARC-Easy, at or below chance
 on ARC-Challenge and WinoGrande, and below every published model on every task.
 With 3,000 times fewer training tokens this is expected, and we do not claim
-competitiveness. ARC-Challenge, 3.8 points below chance (3 standard errors), is
-the one result we cannot explain.
+competitiveness. ARC-Challenge is below chance (21.2 with length normalisation, 16.0 without).
+The Challenge split was built from questions that retrieval and word
+co-occurrence solvers answered wrongly, so a small model that follows
+co-occurrence statistics is pushed toward the wrong choices; the published 130M
+to 160M models sit at 24%, near chance. We did not test this explanation beyond
+the construction of the split.
 
 **Does the persistent state help?** This is the question the architecture
 exists to answer. We trained an identical model with the state reset every chunk
