@@ -7,7 +7,7 @@ name = "ucsa"
 version = "0.1.0"
 description = "Unified Cognitive State Architecture: a research-grade foundation model whose computation revolves around a single persistent differentiable cognitive state."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 license = { text = "Apache-2.0" }
 authors = [{ name = "sachin", email = "sachncs@gmail.com" }]
 keywords = ["cognitive-architecture", "pytorch", "research", "foundation-model"]
@@ -16,8 +16,7 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
@@ -71,7 +70,7 @@ ucsa = ["configs/*.yaml"]
 
 [tool.ruff]
 line-length = 80
-target-version = "py311"
+target-version = "py314"
 src = ["ucsa", "tests"]
 extend-exclude = ["build", "dist", ".venv"]
 
@@ -104,10 +103,10 @@ combine-as-imports = true
 
 [tool.black]
 line-length = 80
-target-version = ["py311"]
+target-version = ["py314"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.14"
 warn_unused_ignores = false
 warn_return_any = false
 disallow_untyped_defs = false
@@ -117,15 +116,6 @@ check_untyped_defs = false
 ignore_missing_imports = true
 plugins = []
 exclude = ["build/", "dist/", ".venv/"]
-
-# The installed numpy ships stubs written with 3.12 `type` statements,
-# which mypy refuses to parse under python_version 3.11 and then aborts
-# before checking anything. We only use numpy for RNG seeding, so skip
-# following its stubs rather than dropping 3.11 as the target.
-[[tool.mypy.overrides]]
-module = ["numpy", "numpy.*"]
-follow_imports = "skip"
-follow_imports_for_stubs = true
 
 [[tool.mypy.overrides]]
 module = "tests.*"
