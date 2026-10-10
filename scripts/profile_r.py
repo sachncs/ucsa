@@ -12,10 +12,9 @@ import os
 import time
 
 import torch
-import yaml
 
 from ucsa.models import recurrent
-from ucsa.training import engine, shards
+from ucsa.training import engine, presets, shards
 
 
 def synchronize(device: torch.device) -> None:
@@ -102,7 +101,7 @@ def main() -> None:
     fields = {}
     for item in args.set:
         key, _, raw = item.partition("=")
-        fields[key.removeprefix("model.")] = yaml.safe_load(raw)
+        fields[key.removeprefix("model.")] = presets.parse_value(raw)
     config = recurrent.Config.from_dict(fields)
     shard = shards.Shard(os.path.join(args.data, "train.bin"))
     for batch in args.batch:
