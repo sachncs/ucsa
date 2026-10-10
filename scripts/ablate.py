@@ -39,7 +39,6 @@ ARMS: dict[str, list[str]] = {
     "chunk-64": ["model.chunk_size=64"],
     "slot-dropout": ["model.slot_dropout=0.5"],
     "weight-ema": ["train.weight_ema=0.99"],
-    "zfilter": ["train.train_shard=train-zfilter.bin"],
     "lr-3e-4": ["train.lr=3e-4"],
     "lr-1.2e-3": ["train.lr=1.2e-3"],
     "lr-2.4e-3": ["train.lr=2.4e-3"],
