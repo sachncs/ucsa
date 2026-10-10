@@ -1,7 +1,7 @@
 """Mixture of Experts block.
 
 Implements a top-k router and a bank of expert FFNs. Used by the
-:class:`ucsa.models.transformer_operator.TransformerBlock` on the upper
+:class:`ucsa.models.transformer.Block` on the upper
 half of layers when Mixture of Experts is enabled.
 """
 
@@ -14,8 +14,8 @@ from torch import Tensor, nn
 
 
 @dataclass(frozen=True)
-class MoEConfig:
-    """Configuration for :class:`MixtureOfExperts`.
+class Config:
+    """Configuration for :class:`Mixture`.
 
     Attributes:
         num_experts: Number of experts in the bank.
@@ -58,7 +58,7 @@ def load_balancing_loss(
 ) -> Tensor:
     """Compute the Switch Transformer load-balancing auxiliary loss.
 
-    Shared by :class:`MixtureOfExperts` and by the origination generator's
+    Shared by :class:`Mixture` and by the origination generator's
     intent gate, which is the same top-k routing problem with intent slots
     in place of experts.
 
@@ -114,7 +114,7 @@ class Expert(nn.Module):
     """A single gated FFN expert.
 
     Uses the same gated linear unit as
-    :class:`ucsa.models.transformer_operator.FeedForward`.
+    :class:`ucsa.models.transformer.FeedForward`.
     """
 
     def __init__(self, hidden_size: int, intermediate_size: int) -> None:
@@ -144,7 +144,7 @@ class Expert(nn.Module):
         return projected
 
 
-class MixtureOfExperts(nn.Module):
+class Mixture(nn.Module):
     """Top-k Mixture of Experts block.
 
     Routes each token to the ``top_k`` highest-scoring experts. The output is
@@ -157,7 +157,7 @@ class MixtureOfExperts(nn.Module):
         self,
         hidden_size: int,
         intermediate_size: int,
-        config: MoEConfig,
+        config: Config,
     ) -> None:
         """Initialise the MoE block.
 
@@ -261,8 +261,8 @@ class MixtureOfExperts(nn.Module):
 
 __all__ = [
     "Expert",
-    "MixtureOfExperts",
-    "MoEConfig",
+    "Mixture",
+    "Config",
     "load_balancing_loss",
     "top_k_mask",
 ]
