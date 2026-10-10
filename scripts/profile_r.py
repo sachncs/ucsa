@@ -8,13 +8,14 @@ optimisation is judged by measurement.
 
 import argparse
 import gc
+import os
 import time
 
 import torch
 import yaml
 
 from ucsa.models import recurrent
-from ucsa.training import engine
+from ucsa.training import engine, shards
 
 
 def synchronize(device: torch.device) -> None:
@@ -35,15 +36,20 @@ def memory_mb(device: torch.device) -> float:
 
 
 def measure(
-    config: recurrent.Config, batch: int, seq_len: int, steps: int
+    config: recurrent.Config,
+    batch: int,
+    seq_len: int,
+    steps: int,
+    shard: shards.Shard,
 ) -> tuple[int, float, float, float]:
-    """Times full optimiser steps on random tokens.
+    """Times full optimiser steps on real training batches.
 
     Args:
       config: Model configuration.
       batch: Sequences per step.
       seq_len: Tokens per sequence.
       steps: Timed steps (two warm-up steps are added).
+      shard: Training shard the batch is read from.
 
     Returns:
       `(params, tokens_per_second, seconds_per_step, memory_mib)` using the
@@ -55,8 +61,7 @@ def measure(
     train_config = engine.Config(seq_len=seq_len, batch_size=batch)
     optimizer = engine.build_optimizer(model, train_config)
     params = [p for p in model.parameters() if p.requires_grad]
-    x = torch.randint(0, config.vocab_size, (batch, seq_len), device=device)
-    y = torch.roll(x, -1, 1)
+    x, y = (t.to(device) for t in next(shard.batches(batch, seq_len, seed=0)))
     times = []
     for i in range(steps + 2):
         synchronize(device)
@@ -91,6 +96,7 @@ def main() -> None:
     parser.add_argument("--batch", type=int, nargs="+", default=[1, 4])
     parser.add_argument("--seq", type=int, default=1024)
     parser.add_argument("--steps", type=int, default=6)
+    parser.add_argument("--data", default="data")
     args = parser.parse_args()
 
     fields = {}
@@ -98,10 +104,11 @@ def main() -> None:
         key, _, raw = item.partition("=")
         fields[key.removeprefix("model.")] = yaml.safe_load(raw)
     config = recurrent.Config.from_dict(fields)
+    shard = shards.Shard(os.path.join(args.data, "train.bin"))
     for batch in args.batch:
         try:
             count, tps, seconds, mem = measure(
-                config, batch, args.seq, args.steps
+                config, batch, args.seq, args.steps, shard
             )
         except RuntimeError as error:  # e.g. out of memory
             print(f"batch={batch}: FAILED {str(error)[:80]}")
