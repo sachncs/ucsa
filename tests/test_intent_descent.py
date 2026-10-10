@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 import torch
 
+from ucsa.models import architecture, verification
+from ucsa.models.architecture import UCSA
 from ucsa.models.intent_descent import (
     DescentReport,
     compute_matched_comparison,
@@ -16,9 +18,7 @@ from ucsa.models.intent_descent import (
     realized_outcome,
     resolved_objective,
 )
-from ucsa.models.ucsa import UCSA, UCSAConfig
-from ucsa.models.verification import LearnedVerifier
-from ucsa.training.ema import EMATargetEncoder
+from ucsa.training import ema as ema_lib
 
 
 def tiny_model(**overrides: object) -> UCSA:
@@ -32,7 +32,7 @@ def tiny_model(**overrides: object) -> UCSA:
     }
     defaults.update(overrides)
     torch.manual_seed(0)
-    return UCSA(UCSAConfig(**defaults))  # type: ignore[arg-type]
+    return UCSA(architecture.Config(**defaults))  # type: ignore[arg-type]
 
 
 def tiny_inputs() -> tuple[torch.Tensor, torch.Tensor]:
@@ -46,7 +46,7 @@ class TestCriticObjective:
     """The spec's outcome oracle, as a differentiable objective."""
 
     def test_none_when_verifier_is_heuristic(self) -> None:
-        """Only a ``LearnedVerifier`` produces a differentiable signal."""
+        """Only a ``verification.Learned`` produces a differentiable signal."""
         model = tiny_model()
         out = model(tiny_inputs()[0])
         assert critic_objective(model, out) is None
@@ -54,7 +54,9 @@ class TestCriticObjective:
     def test_returns_a_differentiable_tensor(self) -> None:
         """The result is a real logit with grad through the bank."""
         model = tiny_model()
-        model.verifier = LearnedVerifier(hidden_size=32, cstate_summary_size=8)
+        model.verifier = verification.Learned(
+            hidden_size=32, cstate_summary_size=8
+        )
         out = model(tiny_inputs()[0])
         logit = critic_objective(model, out)
         assert logit is not None
@@ -74,13 +76,17 @@ class TestObjectiveResolution:
     def test_auto_picks_critic_when_learned_verifier_present(self) -> None:
         """A learned verifier takes priority over the JEPA chain."""
         model = tiny_model()
-        model.verifier = LearnedVerifier(hidden_size=32, cstate_summary_size=8)
+        model.verifier = verification.Learned(
+            hidden_size=32, cstate_summary_size=8
+        )
         assert resolved_objective(model, "auto") == "critic"
 
     def test_explicit_request_overrides_auto(self) -> None:
         """``jepa`` and ``critic`` are honoured even when the other is faster."""
         model = tiny_model()
-        model.verifier = LearnedVerifier(hidden_size=32, cstate_summary_size=8)
+        model.verifier = verification.Learned(
+            hidden_size=32, cstate_summary_size=8
+        )
         assert resolved_objective(model, "jepa") == "jepa"
         assert resolved_objective(model, "critic") == "critic"
 
@@ -93,7 +99,9 @@ class TestObjectiveResolution:
     def test_optimize_intent_routes_to_critic_when_requested(self) -> None:
         """``objective="critic"`` runs and a real verifier is reached."""
         model = tiny_model()
-        model.verifier = LearnedVerifier(hidden_size=32, cstate_summary_size=8)
+        model.verifier = verification.Learned(
+            hidden_size=32, cstate_summary_size=8
+        )
         # Two iterations to be sure the inner loop runs.
         optimize_intent(
             model,
@@ -271,7 +279,7 @@ class TestEmaOutputs:
         optimiser.
         """
         model = tiny_model()
-        encoder = EMATargetEncoder(model, momentum=0.99)
+        encoder = ema_lib.TargetEncoder(model, momentum=0.99)
         before = {
             name: encoder.target.pcs.get_bank(name).detach().clone()
             for name in encoder.target.pcs.bank_order
@@ -467,7 +475,7 @@ class TestOptimizeIntent:
         """The EMA path runs and reports."""
         model = tiny_model()
         inputs, targets = tiny_inputs()
-        encoder = EMATargetEncoder(model, momentum=0.99)
+        encoder = ema_lib.TargetEncoder(model, momentum=0.99)
         report = optimize_intent(
             model,
             inputs,
