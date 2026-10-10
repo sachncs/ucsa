@@ -64,7 +64,7 @@ def make_fake_dataset(
     """Build a TextDataset against an in-memory fake dataset."""
 
     class FakeBackedDataset(TextDataset):
-        def _initialise_dataset(self_inner) -> object:  # type: ignore[override]
+        def initialise_dataset(self_inner) -> object:  # type: ignore[override]
             data = {
                 "text": (
                     texts
@@ -78,7 +78,7 @@ def make_fake_dataset(
             }
             return Dataset.from_dict(data)
 
-        def _detect_text_field(self_inner) -> str:  # type: ignore[override]
+        def detect_text_field(self_inner) -> str:  # type: ignore[override]
             return "text"
 
     return FakeBackedDataset(tiny_wrapper(), config or tiny_config())
@@ -107,10 +107,10 @@ class TestTextDataset:
         """Text-field detection finds a known field name."""
 
         class CustomFieldDataset(TextDataset):
-            def _initialise_dataset(self_inner) -> object:  # type: ignore[override]
+            def initialise_dataset(self_inner) -> object:  # type: ignore[override]
                 return Dataset.from_dict({"content": ["sample text"]})
 
-            def _detect_text_field(self_inner) -> str:  # type: ignore[override]
+            def detect_text_field(self_inner) -> str:  # type: ignore[override]
                 return "content"
 
         ds = CustomFieldDataset(tiny_wrapper(), tiny_config())
@@ -164,7 +164,7 @@ class TestTextDataset:
     def test_iter_yields_default_batch(self) -> None:
         """``__iter__`` yields batches of size 1 by default."""
         ds = make_fake_dataset()
-        for inputs, _targets in ds:
+        for inputs, _ in ds:
             assert inputs.shape[0] == 1
             break
 
@@ -172,10 +172,10 @@ class TestTextDataset:
         """Dataset raises when no recognisable text field is found."""
 
         class NoTextFieldDataset(TextDataset):
-            def _initialise_dataset(self_inner) -> object:  # type: ignore[override]
+            def initialise_dataset(self_inner) -> object:  # type: ignore[override]
                 return Dataset.from_dict({"other": ["x"]})
 
-            def _detect_text_field(self_inner) -> str:  # type: ignore[override]
+            def detect_text_field(self_inner) -> str:  # type: ignore[override]
                 sample = next(iter(self_inner.dataset))
                 for candidate in ("text", "content", "article"):
                     if candidate in sample:
