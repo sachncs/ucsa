@@ -5,22 +5,15 @@ from __future__ import annotations
 import pytest
 import torch
 
-from ucsa.models.losses import (
-    AutoregressiveLoss,
-    JEPALoss,
-    LossWeights,
-    MemoryStabilityLoss,
-    RouterLoadBalancingLoss,
-    UCSACombinedLoss,
-)
+from ucsa.models import losses
 
 
 class TestLossWeights:
-    """Tests for :class:`LossWeights`."""
+    """Tests for :class:`losses.Weights`."""
 
     def test_default_weights_valid(self) -> None:
         """Defaults are non-negative."""
-        weights = LossWeights()
+        weights = losses.Weights()
         assert weights.jepa >= 0
         assert weights.memory >= 0
         assert weights.router >= 0
@@ -28,25 +21,25 @@ class TestLossWeights:
     def test_negative_jepa_rejected(self) -> None:
         """Negative ``jepa`` is rejected."""
         with pytest.raises(ValueError):
-            LossWeights(jepa=-0.1)
+            losses.Weights(jepa=-0.1)
 
     def test_negative_memory_rejected(self) -> None:
         """Negative ``memory`` is rejected."""
         with pytest.raises(ValueError):
-            LossWeights(memory=-0.1)
+            losses.Weights(memory=-0.1)
 
     def test_negative_router_rejected(self) -> None:
         """Negative ``router`` is rejected."""
         with pytest.raises(ValueError):
-            LossWeights(router=-0.1)
+            losses.Weights(router=-0.1)
 
 
 class TestAutoregressiveLoss:
-    """Tests for :class:`AutoregressiveLoss`."""
+    """Tests for :class:`losses.Autoregressive`."""
 
     def test_loss_finite(self) -> None:
         """Loss is finite for random logits."""
-        loss_fn = AutoregressiveLoss()
+        loss_fn = losses.Autoregressive()
         logits = torch.randn(2, 5, 100)
         targets = torch.randint(0, 100, (2, 5))
         loss = loss_fn(logits, targets)
@@ -54,7 +47,7 @@ class TestAutoregressiveLoss:
 
     def test_loss_zero_for_perfect_predictions(self) -> None:
         """A perfect prediction has very low loss."""
-        loss_fn = AutoregressiveLoss()
+        loss_fn = losses.Autoregressive()
         targets = torch.tensor([[0, 1, 2]])
         logits = torch.full((1, 3, 100), -10.0)
         logits[0, 0, 0] = 10.0
@@ -65,7 +58,7 @@ class TestAutoregressiveLoss:
 
     def test_ignore_index(self) -> None:
         """``ignore_index`` excludes those targets from the loss."""
-        loss_fn = AutoregressiveLoss(ignore_index=-100)
+        loss_fn = losses.Autoregressive(ignore_index=-100)
         logits = torch.randn(1, 4, 10)
         targets = torch.tensor([[0, -100, 1, -100]])
         loss = loss_fn(logits, targets)
@@ -73,7 +66,7 @@ class TestAutoregressiveLoss:
 
     def test_gradient_flows(self) -> None:
         """Loss flows gradients to the logits."""
-        loss_fn = AutoregressiveLoss()
+        loss_fn = losses.Autoregressive()
         logits = torch.randn(1, 3, 10, requires_grad=True)
         targets = torch.tensor([[0, 1, 2]])
         loss_fn(logits, targets).backward()
@@ -81,18 +74,18 @@ class TestAutoregressiveLoss:
 
 
 class TestJEPALoss:
-    """Tests for :class:`JEPALoss`."""
+    """Tests for :class:`losses.JEPA`."""
 
     def test_zero_for_perfect_match(self) -> None:
         """Loss is zero when predicted equals target."""
-        loss_fn = JEPALoss()
+        loss_fn = losses.JEPA()
         x = torch.randn(2, 4, 32)
         loss = loss_fn(x, x)
         assert loss.item() == pytest.approx(0.0, abs=1e-5)
 
     def test_loss_increases_with_distance(self) -> None:
         """Farther predictions produce larger loss."""
-        loss_fn = JEPALoss()
+        loss_fn = losses.JEPA()
         target = torch.zeros(1, 1, 32)
         close = 0.01 * torch.randn(1, 1, 32)
         far = 5.0 * torch.randn(1, 1, 32)
@@ -101,19 +94,19 @@ class TestJEPALoss:
     def test_invalid_alpha(self) -> None:
         """``alpha`` outside ``[0, 1]`` is rejected."""
         with pytest.raises(ValueError):
-            JEPALoss(alpha=-0.1)
+            losses.JEPA(alpha=-0.1)
         with pytest.raises(ValueError):
-            JEPALoss(alpha=1.5)
+            losses.JEPA(alpha=1.5)
 
     def test_shape_mismatch_raises(self) -> None:
         """Shape mismatch between predicted and target raises."""
-        loss_fn = JEPALoss()
+        loss_fn = losses.JEPA()
         with pytest.raises(ValueError):
             loss_fn(torch.randn(2, 4, 32), torch.randn(2, 5, 32))
 
     def test_gradient_flows(self) -> None:
         """Loss flows gradients to the predicted embeddings."""
-        loss_fn = JEPALoss()
+        loss_fn = losses.JEPA()
         pred = torch.randn(2, 4, 32, requires_grad=True)
         target = torch.randn(2, 4, 32)
         loss_fn(pred, target).backward()
@@ -121,18 +114,18 @@ class TestJEPALoss:
 
 
 class TestMemoryStabilityLoss:
-    """Tests for :class:`MemoryStabilityLoss`."""
+    """Tests for :class:`losses.MemoryStability`."""
 
     def test_zero_when_no_drift(self) -> None:
         """Loss is zero when ``long_term`` equals the baseline."""
-        loss_fn = MemoryStabilityLoss()
+        loss_fn = losses.MemoryStability()
         x = torch.randn(8, 32)
         loss = loss_fn(x, baseline=x)
         assert loss.item() == 0.0
 
     def test_loss_with_detached_baseline(self) -> None:
         """Default baseline is a detached copy."""
-        loss_fn = MemoryStabilityLoss()
+        loss_fn = losses.MemoryStability()
         x = torch.randn(8, 32, requires_grad=True)
         loss = loss_fn(x)
         assert torch.isfinite(loss)
@@ -141,11 +134,11 @@ class TestMemoryStabilityLoss:
 
 
 class TestRouterLoadBalancingLoss:
-    """Tests for :class:`RouterLoadBalancingLoss`."""
+    """Tests for :class:`losses.RouterBalance`."""
 
     def test_balanced_routing_has_loss_one(self) -> None:
         """A perfectly balanced routing yields loss = 1.0."""
-        loss_fn = RouterLoadBalancingLoss()
+        loss_fn = losses.RouterBalance()
         # Construct logits where each expert is the argmax of exactly one
         # token, giving a perfectly balanced assignment.
         router_logits = torch.full((4, 4), -10.0)
@@ -156,7 +149,7 @@ class TestRouterLoadBalancingLoss:
 
     def test_loss_positive_for_collapsed_routing(self) -> None:
         """Collapsed routing (all to one expert) gives a positive loss."""
-        loss_fn = RouterLoadBalancingLoss()
+        loss_fn = losses.RouterBalance()
         router_logits = torch.full((16, 4), -10.0)
         router_logits[:, 0] = 10.0
         loss = loss_fn(router_logits)
@@ -164,25 +157,25 @@ class TestRouterLoadBalancingLoss:
 
     def test_empty_routing_returns_zero(self) -> None:
         """Zero tokens yields zero loss."""
-        loss_fn = RouterLoadBalancingLoss()
+        loss_fn = losses.RouterBalance()
         router_logits = torch.zeros(0, 4)
         loss = loss_fn(router_logits)
         assert loss.item() == 0.0
 
     def test_gradient_flows(self) -> None:
         """Loss flows gradients to router logits."""
-        loss_fn = RouterLoadBalancingLoss()
+        loss_fn = losses.RouterBalance()
         router_logits = torch.randn(8, 4, requires_grad=True)
         loss_fn(router_logits).backward()
         assert router_logits.grad is not None
 
 
 class TestUCSACombinedLoss:
-    """Tests for :class:`UCSACombinedLoss`."""
+    """Tests for :class:`losses.Combined`."""
 
     def test_ar_only(self) -> None:
         """Without auxiliary inputs, only AR loss contributes."""
-        loss_fn = UCSACombinedLoss()
+        loss_fn = losses.Combined()
         logits = torch.randn(2, 5, 100)
         targets = torch.randint(0, 100, (2, 5))
         total, comps = loss_fn(logits, targets)
@@ -194,7 +187,7 @@ class TestUCSACombinedLoss:
 
     def test_with_jepa(self) -> None:
         """JEPA auxiliary is added when both tensors are provided."""
-        loss_fn = UCSACombinedLoss(LossWeights(jepa=0.5))
+        loss_fn = losses.Combined(losses.Weights(jepa=0.5))
         logits = torch.randn(2, 5, 100)
         targets = torch.randint(0, 100, (2, 5))
         jepa_pred = torch.randn(2, 5, 32)
@@ -208,7 +201,7 @@ class TestUCSACombinedLoss:
 
     def test_with_memory(self) -> None:
         """Memory stability is added when ``long_term`` is provided."""
-        loss_fn = UCSACombinedLoss(LossWeights(memory=0.1))
+        loss_fn = losses.Combined(losses.Weights(memory=0.1))
         logits = torch.randn(2, 5, 100)
         targets = torch.randint(0, 100, (2, 5))
         long_term = torch.randn(8, 32)
@@ -217,7 +210,7 @@ class TestUCSACombinedLoss:
 
     def test_with_router(self) -> None:
         """Router loss is added when ``router_logits`` is provided."""
-        loss_fn = UCSACombinedLoss(LossWeights(router=0.01))
+        loss_fn = losses.Combined(losses.Weights(router=0.01))
         logits = torch.randn(2, 5, 100)
         targets = torch.randint(0, 100, (2, 5))
         router_logits = torch.randn(8, 4)
@@ -226,7 +219,7 @@ class TestUCSACombinedLoss:
 
     def test_full_combination(self) -> None:
         """All four components contribute when all inputs are provided."""
-        loss_fn = UCSACombinedLoss()
+        loss_fn = losses.Combined()
         logits = torch.randn(2, 5, 100)
         targets = torch.randint(0, 100, (2, 5))
         jepa_pred = torch.randn(2, 5, 32)
@@ -246,7 +239,7 @@ class TestUCSACombinedLoss:
 
     def test_gradient_flows(self) -> None:
         """Backward pass through the combined loss propagates to all inputs."""
-        loss_fn = UCSACombinedLoss()
+        loss_fn = losses.Combined()
         logits = torch.randn(2, 5, 100, requires_grad=True)
         targets = torch.randint(0, 100, (2, 5))
         jepa_pred = torch.randn(2, 5, 32, requires_grad=True)
