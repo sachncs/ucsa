@@ -233,41 +233,24 @@ if __name__ == "__main__":
 The same approach works for any loss term: set its weight to 0.0 to
 ablate it, leave it at its default to keep it on.
 
-## Tutorial 4 — Running matched-compute experiments
+## Tutorial 4 — Matched-control experiments for UCSA-R
 
-A matched-compute run compares UCSA against a vanilla Transformer
-with the same parameter count, the same dataset, the same step
-budget, and the same optimiser. The script does the grid search
-over `(hidden, num_layers, ffn_mult)` for you.
-
-```bash
-.venv/bin/python scripts/train_baseline.py \
-    --seed 42 \
-    --out-json runs/baseline.json
-```
-
-The output JSON includes the chosen config, the per-step history,
-the final validation perplexity, and the best validation perplexity.
-Compare it against `runs/ucsa-<tag>-seed42.json` to see whether
-UCSA's extra structure pays for itself.
-
-For a multi-seed sweep:
+UCSA-R is compared with *published* numbers, not with a baseline trained
+here. What is trained here is a matched control that differs in one switch,
+for example the same model with the state reset every chunk:
 
 ```bash
-for seed in 42 43 44; do
-    .venv/bin/python scripts/train_baseline.py \
-        --seed $seed \
-        --out-json runs/baseline-seed${seed}.json
-done
+.venv/bin/python scripts/train_r.py --preset small --out-dir ckpts/r-small \
+    --set train.lr=2.4e-3
+.venv/bin/python scripts/train_r.py --preset small --out-dir ckpts/r-nostate \
+    --set train.lr=2.4e-3 model.use_state=false
+.venv/bin/python scripts/probe_state.py --ckpt ckpts/r-small/final.pt \
+    --control ckpts/r-nostate/final.pt --out-json runs/probe-state.json
 ```
 
-Then build the table:
-
-```bash
-.venv/bin/python scripts/build_paper_tables.py \
-    --runs-dir runs \
-    --out-md paper/TABLES.md
-```
+Judge the gap against the run-to-run noise floor (about 0.015 bits/token),
+not against zero; `scripts/report.py` does this and writes `paper/RESULTS.md`.
+See [ucsa-r.md](ucsa-r.md) for the short-run ablation and learning-curve tools.
 
 ## Tutorial 5 — Probing the intent bank
 
