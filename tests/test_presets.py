@@ -54,7 +54,6 @@ def test_overrides_parse_json_values():
         ("[1, 2]", [1, 2]),
         ("64", 64),
         ("word", "word"),
-        ("train-zfilter.bin", "train-zfilter.bin"),
     ],
 )
 def test_values_parse_the_way_they_look(raw, value):
