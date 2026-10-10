@@ -27,6 +27,11 @@ from ucsa.utils import precision
 BatchIterator = Iterator[tuple[torch.Tensor, torch.Tensor]]
 Batches = Callable[[int], BatchIterator]
 
+# Parameters whose names contain one of these are never weight-decayed. Shape
+# alone is not enough: the state update's `slot_bias` and `surprise_gain` are
+# (slots, 1), and decaying them erodes the per-bank retention design.
+NO_DECAY_NAMES = ("embed", "state0", "bias", "gain", "scale")
+
 # Positions scored for the headline perplexity: the last 64 of each window.
 SCORED_TAIL = 64
 
@@ -94,14 +99,35 @@ class Config:
         Raises:
           ValueError: If a count is not positive or a ratio is out of range.
         """
-        if min(self.steps, self.batch_size, self.grad_accum) <= 0:
-            raise ValueError("steps, batch_size, grad_accum must be positive")
-        if not 0.0 <= self.min_lr_ratio <= 1.0:
-            raise ValueError("min_lr_ratio must be in [0, 1]")
-        if self.prefetch < 1:
-            raise ValueError("prefetch must be >= 1")
-        if not 0.0 <= self.weight_ema < 1.0 or self.weight_ema_every < 1:
-            raise ValueError("weight_ema must be in [0, 1), every >= 1")
+        positive = {
+            "steps": self.steps,
+            "batch_size": self.batch_size,
+            "grad_accum": self.grad_accum,
+            "seq_len": self.seq_len,
+            "lr": self.lr,
+            "grad_clip": self.grad_clip,
+            "eval_batches": self.eval_batches,
+            "log_every": self.log_every,
+            "prefetch": self.prefetch,
+            "max_bad_steps": self.max_bad_steps,
+            "weight_ema_every": self.weight_ema_every,
+        }
+        for name, value in positive.items():
+            if value <= 0:
+                raise ValueError(f"{name} must be positive, got {value}")
+        non_negative = {
+            "warmup_steps": self.warmup_steps,
+            "weight_decay": self.weight_decay,
+            "eval_every": self.eval_every,
+            "ckpt_every": self.ckpt_every,
+            "keep_ckpts": self.keep_ckpts,
+        }
+        for name, value in non_negative.items():
+            if value < 0:
+                raise ValueError(f"{name} must be >= 0, got {value}")
+        for name in ("beta1", "beta2", "min_lr_ratio", "weight_ema"):
+            if not 0.0 <= getattr(self, name) < 1.0 + (name == "min_lr_ratio"):
+                raise ValueError(f"{name} out of range: {getattr(self, name)}")
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Config:
@@ -166,7 +192,7 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.AdamW:
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
-        skip = param.ndim < 2 or "embed" in name or "state0" in name
+        skip = param.ndim < 2 or any(k in name for k in NO_DECAY_NAMES)
         (no_decay if skip else decay).append(param)
     return torch.optim.AdamW(
         [
@@ -342,6 +368,7 @@ def evaluate(
       `ppl_all` and `ppl_last64`, plus `bpb_all` and `bpb_last64` when
       `byte_lengths` is given; infinite if no batch was available.
     """
+    was_training = model.training
     model.eval()
     device = next(model.parameters()).device
     nll_all = torch.zeros((), device=device)
@@ -368,7 +395,7 @@ def evaluate(
             per_token = lengths[y]
             bytes_all = bytes_all + per_token.sum()
             bytes_tail = bytes_tail + per_token[:, -SCORED_TAIL:].sum()
-    model.train()
+    model.train(was_training)
     if n_all == 0:
         return {"ppl_all": math.inf, "ppl_last64": math.inf}
     metrics = {
@@ -481,7 +508,7 @@ def fit(
         blob = torch.load(latest, map_location="cpu", weights_only=False)
         model.load_state_dict(blob["model"], strict=True)
         optimizer.load_state_dict(blob["optimizer"])
-        if averaged is not None and "ema" in blob:
+        if averaged is not None and blob.get("ema") is not None:
             averaged.shadow = {k: v.to(device) for k, v in blob["ema"].items()}
         step, best, history = blob["step"], blob["best"], blob["history"]
         log(f"resumed from step {step}")
