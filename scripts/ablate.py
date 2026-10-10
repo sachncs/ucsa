@@ -29,6 +29,8 @@ ARMS: dict[str, list[str]] = {
     "base-seed44": [],
     "base-seed45": [],
     "no-state": ["model.use_state=false"],
+    "no-window": ["model.window=0"],
+    "no-state-no-window": ["model.use_state=false", "model.window=0"],
     "no-jepa": ["model.jepa_weight=0"],
     "surprise": ["model.surprise_gate=true"],
     "read-gate": ["model.read_gate=true"],
