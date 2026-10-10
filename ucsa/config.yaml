@@ -63,7 +63,6 @@ training:
   checkpoint_every_n_steps: 0
   gradient_checkpointing: false
   compile_model: false
-  amp_dtype: float32
   # Hard-EMA target encoder for JEPA stability (LeWM / I-JEPA style).
   # Set to 0.0 to disable. Around 0.996 is the standard I-JEPA default;
   # for very short schedules a lower value (e.g. 0.99) is more responsive.
