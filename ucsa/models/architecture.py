@@ -144,7 +144,7 @@ class UCSA(nn.Module):
         perception: Perception | None = None,
         heads: projection.Heads | None = None,
         verifier: Verifier | None = None,
-        memory_service: curation.Curator | None = None,
+        curator: curation.Curator | None = None,
         graph: concept_graph.Graph | None = None,
     ) -> None:
         """Initialise the UCSA model.
@@ -155,7 +155,7 @@ class UCSA(nn.Module):
             perception: Optional pre-built perception module.
             heads: Optional pre-built projection heads.
             verifier: Optional verifier for memory.
-            memory_service: Optional pre-built memory service.
+            curator: Optional pre-built memory curator.
             graph: Optional pre-built concept graph.
         """
         super().__init__()
@@ -212,7 +212,7 @@ class UCSA(nn.Module):
         )
         self.memory = Memory(self.pcs)
         self.verifier = verifier or verification.Heuristic()
-        self.memory_service = memory_service or curation.Curator(
+        self.curator = curator or curation.Curator(
             self.memory, self.verifier
         )
         self.graph = graph or concept_graph.Graph(
@@ -387,13 +387,13 @@ class UCSA(nn.Module):
         heads_out["origination_aux_loss"] = self.heads.origination.last_aux_loss
         return heads_out
 
-    def start_memory_service(self) -> None:
+    def start_curator(self) -> None:
         """Start the background memory worker."""
-        self.memory_service.start()
+        self.curator.start()
 
-    def stop_memory_service(self) -> None:
+    def stop_curator(self) -> None:
         """Stop the background memory worker."""
-        self.memory_service.stop()
+        self.curator.stop()
 
 
 __all__ = ["UCSA", "Config"]
