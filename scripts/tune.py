@@ -57,11 +57,11 @@ def main() -> None:
             log_every=max(1, steps),
             out_dir=tempfile.mkdtemp(prefix="ucsa-tune-"),
         )
-        model_config = recurrent.RecurrentConfig.from_dict(raw["model"])
-        train_config = engine.TrainConfig.from_dict(raw["train"])
+        model_config = recurrent.Config.from_dict(raw["model"])
+        train_config = engine.Config.from_dict(raw["train"])
         train, val = train_r.batch_factories(train_config, args.data)
         record = engine.fit(
-            recurrent.RecurrentUCSA(model_config),
+            recurrent.Model(model_config),
             train_config,
             train,
             val,
