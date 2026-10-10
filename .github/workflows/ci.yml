@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.14"]
     steps:
       - uses: actions/checkout@v4
       - name: Setup Python ${{ matrix.python-version }}
@@ -28,6 +28,10 @@ jobs:
         run: ruff check ucsa tests scripts
       - name: Format check (black)
         run: black --check ucsa tests scripts
+      - name: Strict lint (Google style, naming policy)
+        run: |
+          python -c "from tests.strict_files import STRICT_FILES as s; print('\\n'.join(s))" \
+            | xargs ruff check --config ruff-strict.toml
       - name: Test (pytest, with coverage gate)
         run: |
           pytest -q -m "not integration and not slow" \
@@ -35,7 +39,7 @@ jobs:
         env:
           HF_HUB_DISABLE_TELEMETRY: "1"
       - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.12'
+        if: matrix.python-version == '3.14'
         uses: codecov/codecov-action@v4
         with:
           files: coverage.xml
@@ -48,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12"]
+        python-version: ["3.14"]
     steps:
       - uses: actions/checkout@v4
       - name: Setup Python ${{ matrix.python-version }}
