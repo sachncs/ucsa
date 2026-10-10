@@ -152,3 +152,33 @@ def test_a_shared_seen_set_keeps_a_document_out_of_a_second_shard():
     second = list(shards.filter_documents(docs, seen=seen))
     assert first == docs[:1]
     assert second == docs[1:]  # the repeated document is dropped
+
+
+def test_rewriting_a_shard_never_disturbs_a_reader_that_has_it_mapped(tmp_path):
+    """Regression: an in-place rewrite truncated the file under a mapped
+    reader, which can crash it. The reader must keep its intact copy."""
+    path = str(tmp_path / "s.bin")
+    shards.write_shard([list(range(1000))], path)
+    reader = shards.Shard(path)
+    before = np.array(reader.tokens[:50])
+    shards.write_shard([list(range(500, 700))], path)  # a different shard
+    assert np.array_equal(np.array(reader.tokens[:50]), before)
+    assert len(reader) == 1001  # the old mapping is unchanged
+    assert len(shards.Shard(path)) == 201  # new readers see the new file
+
+
+def test_a_failed_write_leaves_the_previous_shard_intact(tmp_path):
+    path = str(tmp_path / "s.bin")
+    shards.write_shard([[1, 2, 3]], path)
+    with open(path, "rb") as f:
+        original = f.read()
+
+    def exploding():
+        yield [4, 5]
+        raise RuntimeError("source failed mid-write")
+
+    with pytest.raises(RuntimeError):
+        shards.write_shard(exploding(), path)
+    with open(path, "rb") as f:
+        assert f.read() == original
+    assert not (tmp_path / "s.bin.tmp").exists()
