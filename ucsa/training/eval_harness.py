@@ -201,7 +201,9 @@ TASK_REGISTRY: dict[str, TaskSpec] = {
 }
 
 
-def encode(tokenizer: transformers.PreTrainedTokenizerBase, text: str) -> list[int]:
+def encode(
+    tokenizer: transformers.PreTrainedTokenizerBase, text: str
+) -> list[int]:
     """Returns the token ids of `text` without special tokens.
 
     Args:
