@@ -17,7 +17,7 @@ from tests import strict_files
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SEMI_PRIVATE = re.compile(r"^_[A-Za-z0-9]")
 # Standard-library APIs that happen to start with an underscore.
-LIBRARY_NAMES = frozenset({"_exit"})
+LIBRARY_NAMES = frozenset({"_exit", "_python_dispatch"})
 
 
 def semi_private_names(source: str) -> list[tuple[int, str]]:
