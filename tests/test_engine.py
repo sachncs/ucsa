@@ -1,0 +1,127 @@
+import math
+
+import pytest
+import torch
+
+from ucsa.models.recurrent import RecurrentConfig, RecurrentUCSA
+from ucsa.training.engine import TrainConfig, evaluate, fit, load_model, lr_at
+
+
+def tiny_model():
+    torch.manual_seed(0)
+    return RecurrentUCSA(
+        RecurrentConfig(
+            vocab_size=32,
+            hidden=32,
+            layers=1,
+            heads=2,
+            ffn_dim=64,
+            chunk_size=8,
+            banks=(("working", 4),),
+            bank_write_bias=(("working", 0.0),),
+        )
+    )
+
+
+def batches(skip=0):
+    g = torch.Generator().manual_seed(1)
+    i = 0
+    while True:
+        x = torch.randint(0, 32, (2, 33), generator=g)
+        if i >= skip:
+            yield x[:, :32], x[:, 1:33]
+        i += 1
+
+
+def cfg(tmp_path, **kw):
+    base = dict(  # noqa: C408
+        steps=6,
+        seq_len=32,
+        batch_size=2,
+        warmup_steps=2,
+        eval_every=3,
+        eval_batches=2,
+        ckpt_every=3,
+        log_every=3,
+        out_dir=str(tmp_path),
+    )
+    base.update(kw)
+    return TrainConfig(**base)
+
+
+def test_lr_schedule_warms_up_then_decays_to_floor():
+    c = TrainConfig(steps=100, warmup_steps=10, lr=1.0, min_lr_ratio=0.1)
+    assert lr_at(0, c) < lr_at(9, c) <= 1.0
+    assert lr_at(10, c) == pytest.approx(1.0)
+    assert lr_at(99, c) == pytest.approx(0.1, abs=1e-2)
+
+
+def test_fit_trains_and_writes_record(tmp_path):
+    rec = fit(tiny_model(), cfg(tmp_path), batches, batches, log=lambda s: None)
+    assert math.isfinite(rec["final"]["ppl_last64"])
+    assert (tmp_path / "final.pt").exists()
+    assert (tmp_path / "record.json").exists()
+
+
+def test_resume_matches_an_uninterrupted_run(tmp_path):
+    full = tmp_path / "full"
+    fit(tiny_model(), cfg(full, steps=6), batches, None, log=lambda s: None)
+    part = tmp_path / "part"
+    fit(tiny_model(), cfg(part, steps=3), batches, None, log=lambda s: None)
+    # Continue the 3-step run to 6 with the same schedule.
+    fit(
+        tiny_model(),
+        cfg(part, steps=6),
+        batches,
+        None,
+        resume=True,
+        log=lambda s: None,
+    )
+    a = torch.load(full / "final.pt", weights_only=False)["model"]
+    b = torch.load(part / "final.pt", weights_only=False)["model"]
+    for k in a:
+        assert torch.allclose(a[k], b[k], atol=1e-5), k
+
+
+def test_nonfinite_batches_are_skipped_not_applied(tmp_path):
+    def poisoned(skip=0):
+        for i, (x, y) in enumerate(batches(skip)):
+            yield (x, y)
+            if i > 100:
+                return
+
+    model = tiny_model()
+    with torch.no_grad():
+        model.state0[0, 0] = float("nan")
+    with pytest.raises(RuntimeError, match="non-finite"):
+        fit(
+            model,
+            cfg(tmp_path, max_bad_steps=3),
+            poisoned,
+            None,
+            log=lambda s: None,
+        )
+
+
+def test_load_model_round_trips(tmp_path):
+    m = tiny_model()
+    fit(m, cfg(tmp_path), batches, None, log=lambda s: None)
+    loaded = load_model(str(tmp_path / "final.pt"), torch.device("cpu"))
+    x, _ = next(batches())
+    assert torch.allclose(
+        m.cpu().eval()(x)["logits"], loaded(x)["logits"], atol=1e-5
+    )
+
+
+def test_evaluate_reports_tail_and_all(tmp_path):
+    m = tiny_model().eval()
+    r = evaluate(m, batches(), 2)
+    assert r["ppl_all"] > 1
+    assert r["ppl_last64"] > 1
+
+
+def test_config_rejects_bad_values():
+    with pytest.raises(ValueError):
+        TrainConfig(prefetch=0)
+    with pytest.raises(ValueError):
+        TrainConfig.from_dict({"stepz": 1})
