@@ -5,6 +5,7 @@ deterministic effects, rejection of misuse, isolation of failures, recovery
 across restarts, and behaviour under concurrency.
 """
 
+import contextlib
 import threading
 import time
 
