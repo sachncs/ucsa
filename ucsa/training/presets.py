@@ -1,6 +1,6 @@
 """Named configurations: presets, overrides and the batch sources they imply.
 
-`ucsa/config.yaml` is the single configuration file. It holds named presets,
+`ucsa/config.json` is the single configuration file. It holds named presets,
 each with a `model` section (fields of `recurrent.Config`) and a `train`
 section (fields of `engine.Config`). A run is a preset plus `section.key=value`
 overrides; every field is validated by the config classes, so a typo fails
@@ -13,12 +13,10 @@ import os
 from collections.abc import Iterable
 from typing import Any
 
-import yaml
-
 from ucsa.models import recurrent
 from ucsa.training import engine, shards
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config.yaml")
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config.json")
 SECTIONS = ("model", "train")
 SIZED_FIELDS = ("hidden", "layers", "heads", "ffn_dim")
 
@@ -26,7 +24,7 @@ SIZED_FIELDS = ("hidden", "layers", "heads", "ffn_dim")
 def names(path: str = CONFIG_PATH) -> list[str]:
     """Returns the preset names defined in the configuration file."""
     with open(path) as f:
-        return sorted(yaml.safe_load(f)["presets"])
+        return sorted(json.load(f)["presets"])
 
 
 def load(name: str, path: str = CONFIG_PATH) -> dict[str, dict[str, Any]]:
@@ -43,7 +41,7 @@ def load(name: str, path: str = CONFIG_PATH) -> dict[str, dict[str, Any]]:
       ValueError: If the preset does not exist.
     """
     with open(path) as f:
-        presets = yaml.safe_load(f)["presets"]
+        presets = json.load(f)["presets"]
     if name not in presets:
         raise ValueError(f"unknown preset {name!r}: {sorted(presets)}")
     preset = copy.deepcopy(presets[name])
@@ -51,12 +49,10 @@ def load(name: str, path: str = CONFIG_PATH) -> dict[str, dict[str, Any]]:
 
 
 def parse_value(raw: str) -> Any:
-    """Parses an override value: JSON first, then YAML, then the raw text.
-
-    JSON first because YAML 1.1 reads `3e-4` (no dot) as a string.
+    """Parses an override value as JSON; a bare word stays a string.
 
     Args:
-      raw: The text after `=`.
+      raw: The text after `=`, e.g. `3e-4`, `false`, `[1, 2]` or `train.bin`.
 
     Returns:
       The parsed value.
@@ -64,7 +60,7 @@ def parse_value(raw: str) -> Any:
     try:
         return json.loads(raw)
     except ValueError:
-        return yaml.safe_load(raw)
+        return raw
 
 
 def apply_overrides(
@@ -75,7 +71,7 @@ def apply_overrides(
     Args:
       config: Dict with `model` and `train` sections.
       overrides: Strings such as `model.chunk_size=64`; values are parsed
-        so `false`, `3e-4` and `[1, 2]` mean what they look like.
+        parsed with `parse_value`.
 
     Returns:
       The updated `config`.
