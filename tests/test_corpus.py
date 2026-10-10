@@ -30,9 +30,13 @@ def write(tmp_path, name, lines):
     return str(path)
 
 
-def test_documents_group_consecutive_non_empty_lines(tmp_path):
+def whole(path):
+    return corpus.tokenize_piece((path, 0, os.path.getsize(path)))
+
+
+def test_documents_group_consecutive_non_empty_lines():
     lines = ["a", "", "b", "  ", *["c"] * corpus.LINES_PER_DOCUMENT]
-    docs = list(corpus.documents(write(tmp_path, "t.txt", lines)))
+    docs = list(corpus.documents("\n".join(lines)))
     assert docs[0] == "a\nb\n" + "\n".join(
         ["c"] * (corpus.LINES_PER_DOCUMENT - 2)
     )
@@ -41,15 +45,36 @@ def test_documents_group_consecutive_non_empty_lines(tmp_path):
 
 def test_each_document_ends_with_the_end_of_text_id(tmp_path):
     path = write(tmp_path, "t.txt", ["ab", "cd"])
-    ids = corpus.tokenize_file(path)
+    ids = whole(path)
     assert ids.dtype == shards.DTYPE
     assert ids[-1] == shards.EOS_ID
     assert int((ids == shards.EOS_ID).sum()) == 1
 
 
+def test_pieces_tile_a_file_on_line_boundaries(tmp_path):
+    lines = [f"line number {i}" for i in range(500)]
+    path = write(tmp_path, "t.txt", lines)
+    cuts = corpus.pieces(path, size=200)
+    assert len(cuts) > 3
+    assert cuts[0][1] == 0
+    assert cuts[-1][2] == os.path.getsize(path)
+    data = pathlib.Path(path).read_bytes()
+    for (_, _, end), (_, start, _) in zip(cuts, cuts[1:], strict=False):
+        assert end == start
+        assert data[end - 1 : end] == b"\n"
+    joined = b"".join(data[s:e] for _, s, e in cuts)
+    assert joined == data
+
+
+def test_a_blank_file_is_one_piece(tmp_path):
+    assert corpus.pieces(write(tmp_path, "e.txt", [])) == [
+        (str(tmp_path / "e.txt"), 0, 1)
+    ]
+
+
 def test_an_empty_file_gives_an_empty_shard(tmp_path):
     path = write(tmp_path, "e.txt", [])
-    assert corpus.tokenize_file(path).size == 0
+    assert whole(path).size == 0
 
 
 def test_the_shard_is_the_sources_joined_in_order(tmp_path):
@@ -58,9 +83,7 @@ def test_the_shard_is_the_sources_joined_in_order(tmp_path):
     out = str(tmp_path / "s.bin")
     tokens, built = corpus.build([a, b], out, workers=1)
     assert built
-    expected = np.concatenate(
-        [corpus.tokenize_file(a), corpus.tokenize_file(b)]
-    )
+    expected = np.concatenate([whole(a), whole(b)])
     assert tokens == expected.size
     assert (np.fromfile(out, dtype=shards.DTYPE) == expected).all()
 
@@ -83,7 +106,7 @@ def test_a_changed_source_forces_a_rebuild(tmp_path):
     write(tmp_path, "a.txt", ["aa", "longer"])
     tokens, built = corpus.build([a], out, workers=1)
     assert built
-    assert tokens == corpus.tokenize_file(a).size
+    assert tokens == whole(a).size
 
 
 def test_a_different_tokenizer_forces_a_rebuild(tmp_path):
