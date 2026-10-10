@@ -1,7 +1,7 @@
 """Transformer state transition operator.
 
-The :class:`TransformerOperator` is the reference implementation of
-:class:`ucsa.models.transition_operator.StateTransitionOperator`. It is a
+The :class:`Operator` is the reference implementation of
+:class:`ucsa.models.transition.Operator`. It is a
 pre-norm transformer with grouped-query attention, sliding-window KV cache,
 optional cross-attention to the ``memory_index`` bank, and either dense FFN
 or Mixture-of-Experts FFN on the upper half of layers.
@@ -29,18 +29,13 @@ from dataclasses import dataclass, field
 import torch
 from torch import Tensor, nn
 
-from ucsa.models.moe import MixtureOfExperts, MoEConfig
-from ucsa.models.state import (
-    BANK_NAMES,
-    INTENT_BANK,
-    PersistentCognitiveState,
-)
-from ucsa.models.transition_operator import StateTransitionOperator
+from ucsa.models import cognitive, moe as moe_lib, transition
+from ucsa.models.cognitive import BANK_NAMES, INTENT_BANK
 
 
 @dataclass(frozen=True)
-class TransformerOperatorConfig:
-    """Configuration for :class:`TransformerOperator`.
+class Config:
+    """Configuration for :class:`Operator`.
 
     Attributes:
         hidden_size: Hidden dimensionality of every token.
@@ -94,7 +89,7 @@ class TransformerOperatorConfig:
     rope_base: float = 10000.0
     use_memory_index_cross_attention: bool = True
     max_position: int = 4096
-    moe: MoEConfig | None = None
+    moe: moe_lib.Config | None = None
     differentiable_state_carry: bool = True
     stream_intent_bank: bool = False
 
@@ -568,8 +563,8 @@ class BlockAux:
     moe_router_logits: Tensor | None = None
 
 
-class TransformerBlock(nn.Module):
-    """A single transformer block used by :class:`TransformerOperator`.
+class Block(nn.Module):
+    """A single transformer block used by :class:`Operator`.
 
     The block performs self-attention over the combined PCS + observation
     stream, an optional cross-attention read from the ``memory_index`` bank,
@@ -578,7 +573,7 @@ class TransformerBlock(nn.Module):
 
     def __init__(
         self,
-        config: TransformerOperatorConfig,
+        config: Config,
         layer_index: int,
     ) -> None:
         """Initialise the block.
@@ -691,8 +686,8 @@ class TransformerBlock(nn.Module):
         return all_tokens, aux
 
 
-class TransformerOperator(StateTransitionOperator):
-    """Reference :class:`StateTransitionOperator` implementation.
+class Operator(transition.Operator):
+    """Reference :class:`transition.Operator` implementation.
 
     The operator reads the PCS, concatenates its banks and the new
     observation into a single token sequence, runs ``num_layers`` blocks of
@@ -700,16 +695,16 @@ class TransformerOperator(StateTransitionOperator):
     attention, then writes the updated banks back into the PCS.
     """
 
-    def __init__(self, config: TransformerOperatorConfig | None = None) -> None:
+    def __init__(self, config: Config | None = None) -> None:
         """Initialise the transformer operator.
 
         Args:
             config: Optional operator configuration. Defaults to
-                :class:`TransformerOperatorConfig` defaults.
+                :class:`Config` defaults.
         """
         super().__init__()
         if config is None:
-            config = TransformerOperatorConfig()
+            config = Config()
         self.config = config
         # The intent bank is the origination signal, not context. Keeping it
         # out of the stream leaves the streamed layout identical to the
@@ -727,13 +722,12 @@ class TransformerOperator(StateTransitionOperator):
             config.max_position, config.hidden_size
         )
         self.blocks = nn.ModuleList(
-            TransformerBlock(config, layer_index=i)
-            for i in range(config.num_layers)
+            Block(config, layer_index=i) for i in range(config.num_layers)
         )
         if config.moe is not None:
             for block in self.transformer_blocks():
                 if block.is_moe_layer:
-                    moe_module: nn.Module = MixtureOfExperts(
+                    moe_module: nn.Module = moe_lib.Mixture(
                         hidden_size=config.hidden_size,
                         intermediate_size=config.intermediate_size,
                         config=config.moe,
@@ -761,7 +755,7 @@ class TransformerOperator(StateTransitionOperator):
 
         The PCS bank offsets are bound lazily on the first call to
         :meth:`forward` via :meth:`__bind_offsets`, because bank sizes are
-        only known once a :class:`PersistentCognitiveState` is attached.
+        only known once a :class:`cognitive.State` is attached.
         This :meth:`initialize` therefore marks the operator ready and
         initialises the bookkeeping containers, but does not populate
         per-bank offsets ahead of time.
@@ -776,7 +770,7 @@ class TransformerOperator(StateTransitionOperator):
         for block in self.transformer_blocks():
             block.self_attn.reset_cache()
 
-    def transformer_blocks(self) -> list[TransformerBlock]:
+    def transformer_blocks(self) -> list[Block]:
         """Return the block stack typed as blocks.
 
         Indexing an ``nn.ModuleList`` yields ``Tensor | Module``, so the
@@ -785,9 +779,9 @@ class TransformerOperator(StateTransitionOperator):
         Returns:
             The operator's transformer blocks in order.
         """
-        blocks: list[TransformerBlock] = []
+        blocks: list[Block] = []
         for block in self.blocks:
-            assert isinstance(block, TransformerBlock)
+            assert isinstance(block, Block)
             blocks.append(block)
         return blocks
 
@@ -801,9 +795,7 @@ class TransformerOperator(StateTransitionOperator):
         """
         return self.last_bank_tensors
 
-    def __read_bank(
-        self, cstate: PersistentCognitiveState, name: str
-    ) -> Tensor:
+    def __read_bank(self, cstate: cognitive.State, name: str) -> Tensor:
         """Read one bank, preferring the carried differentiable tensor.
 
         Args:
@@ -818,7 +810,7 @@ class TransformerOperator(StateTransitionOperator):
             return carried[name]
         return cstate.get_bank(name)
 
-    def __read_pcs_tokens(self, cstate: PersistentCognitiveState) -> Tensor:
+    def __read_pcs_tokens(self, cstate: cognitive.State) -> Tensor:
         """Read every bank as one tensor, preferring the carried tensors.
 
         Args:
@@ -840,7 +832,7 @@ class TransformerOperator(StateTransitionOperator):
         )
 
     def __bind_offsets(
-        self, cstate: PersistentCognitiveState
+        self, cstate: cognitive.State
     ) -> dict[str, tuple[int, int]]:
         """Bind and return bank offsets for the given PCS.
 
@@ -896,9 +888,9 @@ class TransformerOperator(StateTransitionOperator):
 
     def forward(
         self,
-        cstate: PersistentCognitiveState,
+        cstate: cognitive.State,
         observation: Tensor,
-    ) -> PersistentCognitiveState:
+    ) -> cognitive.State:
         """Run the transformer operator.
 
         Args:
@@ -998,10 +990,9 @@ __all__ = [
     "CrossAttention",
     "FeedForward",
     "GroupedQueryAttention",
-    "MoEConfig",
     "RMSNorm",
     "RotaryEmbedding",
-    "TransformerBlock",
-    "TransformerOperator",
-    "TransformerOperatorConfig",
+    "Block",
+    "Operator",
+    "Config",
 ]
