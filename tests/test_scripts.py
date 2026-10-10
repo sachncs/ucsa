@@ -7,7 +7,8 @@ import torch
 
 import ucsa.infer as infer
 import ucsa.train as train
-from ucsa.models.ucsa import UCSA, UCSAConfig
+from ucsa.models import architecture
+from ucsa.models.architecture import UCSA
 
 
 def tiny_config_dict() -> dict:
@@ -136,7 +137,9 @@ class TestInference:
 
     def test_generate_extends_sequence(self) -> None:
         """``generate`` extends the input sequence by ``max_new_tokens``."""
-        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
+        model = UCSA(
+            architecture.Config(hidden_size=32, vocab_size=100, num_layers=2)
+        )
         prompt = torch.randint(0, 100, (1, 4))
         out = infer.generate(model, prompt, max_new_tokens=3)
         assert out.shape == (1, 7)
@@ -144,7 +147,9 @@ class TestInference:
     def test_generate_argmax_with_zero_temperature(self) -> None:
         """Zero temperature picks argmax deterministically."""
         torch.manual_seed(0)
-        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=10, num_layers=2))
+        model = UCSA(
+            architecture.Config(hidden_size=32, vocab_size=10, num_layers=2)
+        )
         prompt = torch.randint(0, 10, (1, 2))
         first = infer.generate(model, prompt, max_new_tokens=2, temperature=0.0)
         second = infer.generate(
@@ -154,7 +159,9 @@ class TestInference:
 
     def test_generate_stops_at_eos(self) -> None:
         """Generation stops when an EOS token is produced."""
-        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
+        model = UCSA(
+            architecture.Config(hidden_size=32, vocab_size=100, num_layers=2)
+        )
         prompt = torch.randint(0, 100, (1, 2))
         out = infer.generate(model, prompt, max_new_tokens=20, eos_token_id=7)
         # Generation stops on EOS or after max_new_tokens.
@@ -166,7 +173,9 @@ class TestUCSAModel:
 
     def test_forward_returns_all_heads(self) -> None:
         """Forward returns language, planning, tool, memory outputs."""
-        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
+        model = UCSA(
+            architecture.Config(hidden_size=32, vocab_size=100, num_layers=2)
+        )
         inputs = torch.randint(0, 100, (1, 4))
         out = model(inputs)
         assert set(out) >= {"language", "planning", "tool", "memory"}
@@ -179,14 +188,18 @@ class TestUCSAModel:
 
     def test_forward_returns_logits_with_correct_vocab(self) -> None:
         """Language logits have shape ``(batch, working_size, vocab)``."""
-        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
+        model = UCSA(
+            architecture.Config(hidden_size=32, vocab_size=100, num_layers=2)
+        )
         inputs = torch.randint(0, 100, (1, 4))
         out = model(inputs)
         assert out["language"].shape[-1] == 100
 
     def test_forward_lossless_gradients(self) -> None:
         """A loss on the language head flows gradients to PCS parameters."""
-        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
+        model = UCSA(
+            architecture.Config(hidden_size=32, vocab_size=100, num_layers=2)
+        )
         inputs = torch.randint(0, 100, (1, 4))
         out = model(inputs)
         loss = out["language"].sum()
@@ -200,7 +213,9 @@ class TestUCSAModel:
         differentiable state carry the operator received no gradient at all
         and only the working bank plus the language head were trained.
         """
-        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
+        model = UCSA(
+            architecture.Config(hidden_size=32, vocab_size=100, num_layers=2)
+        )
         out = model(torch.randint(0, 100, (1, 4)))
         out["language"].pow(2).mean().backward()
         operator_params = list(model.operator.named_parameters())
@@ -214,7 +229,9 @@ class TestUCSAModel:
 
     def test_jepa_chain_is_differentiable(self) -> None:
         """JEPA predictions carry gradients; targets stay detached."""
-        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
+        model = UCSA(
+            architecture.Config(hidden_size=32, vocab_size=100, num_layers=2)
+        )
         out = model(torch.randint(0, 100, (1, 4)))
         pairs = out["jepa_multi_step"]
         assert pairs
@@ -227,7 +244,9 @@ class TestUCSAModel:
 
         A mismatch here silently broadcasts inside the JEPA loss.
         """
-        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
+        model = UCSA(
+            architecture.Config(hidden_size=32, vocab_size=100, num_layers=2)
+        )
         out = model(torch.randint(0, 100, (1, 4)))
         assert out["jepa_predicted"].shape == out["jepa_target"].shape
         for predicted, target in out["jepa_multi_step"]:
@@ -236,7 +255,7 @@ class TestUCSAModel:
     def test_severed_carry_ablation_starves_the_operator(self) -> None:
         """``differentiable_state_carry=False`` reproduces the old graph."""
         model = UCSA(
-            UCSAConfig(
+            architecture.Config(
                 hidden_size=32,
                 vocab_size=100,
                 num_layers=2,
@@ -257,7 +276,9 @@ class TestUCSAModel:
         The intent bank and generator exist, but ``alpha_k = 1`` keeps the
         exogenous observation, so the default configuration is unchanged.
         """
-        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
+        model = UCSA(
+            architecture.Config(hidden_size=32, vocab_size=100, num_layers=2)
+        )
         assert model.reasoning_loop.origination is model.heads.origination
         model(torch.randint(0, 100, (1, 4)))
         assert model.reasoning_loop.last_generated_inputs == []
@@ -266,7 +287,7 @@ class TestUCSAModel:
     def test_origination_generates_input_when_enabled(self) -> None:
         """A sub-1.0 mix routes later iterations through the generator."""
         model = UCSA(
-            UCSAConfig(
+            architecture.Config(
                 hidden_size=32,
                 vocab_size=100,
                 num_layers=2,
@@ -284,7 +305,7 @@ class TestUCSAModel:
     def test_origination_trains_from_the_language_loss(self) -> None:
         """The generator and the intent bank both receive gradient."""
         model = UCSA(
-            UCSAConfig(
+            architecture.Config(
                 hidden_size=32,
                 vocab_size=100,
                 num_layers=2,
@@ -301,14 +322,14 @@ class TestUCSAModel:
 
     def test_ucsa_with_moe(self) -> None:
         """UCSA can be constructed with MoE configured."""
-        from ucsa.models.moe import MoEConfig
+        from ucsa.models import moe
 
         model = UCSA(
-            UCSAConfig(
+            architecture.Config(
                 hidden_size=32,
                 vocab_size=100,
                 num_layers=2,
-                moe=MoEConfig(num_experts=2, top_k=1),
+                moe=moe.Config(num_experts=2, top_k=1),
             )
         )
         inputs = torch.randint(0, 100, (1, 4))
