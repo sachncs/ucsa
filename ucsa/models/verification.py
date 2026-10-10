@@ -166,7 +166,7 @@ class Heuristic(Verifier):
         long_term: Tensor,
         usage: Tensor,
     ) -> float:
-        """Compute average novelty of ``candidate_tokens`` against ``long_term``.
+        """Computes the average novelty of candidates against ``long_term``.
 
         A long-term bank with no used slots returns novelty ``1.0``.
         """
