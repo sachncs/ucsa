@@ -50,7 +50,7 @@ def split_prefix_targets(
     return inputs[:, : length - k], targets[:, length - k - 1 : length - 1]
 
 
-class PrefixBatches:
+class Batches:
     """Iterable view of a batch source that yields prefix/target splits."""
 
     def __init__(
