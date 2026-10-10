@@ -79,7 +79,7 @@ def test_a_given_noise_overrides_an_underdetermined_estimate(tmp_path):
     for name, losses in {
         "base": base,
         "base-seed43": base + 0.0005,  # two replicates that happen to agree
-        "arm": base - 0.04,
+        "arm": base - 0.015,  # 0.022 bits: > lucky noise, < 2 x 0.0145
     }.items():
         (tmp_path / f"{name}.json").write_text(json.dumps(record(name, losses)))
     trusting = ablate.summarise(str(tmp_path))
