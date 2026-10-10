@@ -35,7 +35,7 @@ def memory_mb(device: torch.device) -> float:
 
 
 def measure(
-    config: recurrent.RecurrentConfig, batch: int, seq_len: int, steps: int
+    config: recurrent.Config, batch: int, seq_len: int, steps: int
 ) -> tuple[int, float, float, float]:
     """Times full optimiser steps on random tokens.
 
@@ -51,8 +51,8 @@ def measure(
     """
     device = engine.pick_device()
     torch.manual_seed(0)
-    model = recurrent.RecurrentUCSA(config).to(device).train()
-    train_config = engine.TrainConfig(seq_len=seq_len, batch_size=batch)
+    model = recurrent.Model(config).to(device).train()
+    train_config = engine.Config(seq_len=seq_len, batch_size=batch)
     optimizer = engine.build_optimizer(model, train_config)
     params = [p for p in model.parameters() if p.requires_grad]
     x = torch.randint(0, config.vocab_size, (batch, seq_len), device=device)
@@ -97,7 +97,7 @@ def main() -> None:
     for item in args.set:
         key, _, raw = item.partition("=")
         fields[key.removeprefix("model.")] = yaml.safe_load(raw)
-    config = recurrent.RecurrentConfig.from_dict(fields)
+    config = recurrent.Config.from_dict(fields)
     for batch in args.batch:
         try:
             count, tps, seconds, mem = measure(
