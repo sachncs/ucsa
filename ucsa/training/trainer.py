@@ -213,7 +213,7 @@ class Trainer:
             "mps",
         ) and config.amp_dtype in (torch.float16, torch.bfloat16)
         # Stash a reference for the scheduler to read.
-        self.optimizer._ucsa_trainer_state = self.state  # type: ignore[attr-defined]
+        self.optimizer.__ucsa_trainer_state = self.state  # type: ignore[attr-defined]
 
         # Hard-EMA target encoder for JEPA stability. When
         # ``ema_momentum > 0`` we hold a frozen copy of the model and
@@ -233,7 +233,7 @@ class Trainer:
         inputs, targets = batch
         return inputs.to(self.device), targets.to(self.device)
 
-    def _input_token_embeddings(self, inputs: Tensor) -> Tensor:
+    def __input_token_embeddings(self, inputs: Tensor) -> Tensor:
         """Return the input token embeddings from the model's perception.
 
         Used as the target for the input-reconstruction loss. Falls
@@ -357,7 +357,7 @@ class Trainer:
             and hasattr(self.model, "perception")
         ):
             recon = outputs["input_reconstruct"]
-            target = self._input_token_embeddings(inputs)
+            target = self.__input_token_embeddings(inputs)
             seq_len = min(recon.shape[1], target.shape[1])
             kwargs["reconstructed"] = recon[:, :seq_len, :]
             kwargs["target_embeddings"] = target[:, :seq_len, :]  # noqa: E501
