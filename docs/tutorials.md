@@ -25,25 +25,25 @@ from __future__ import annotations
 
 import torch
 
-from ucsa.models.perception import Perception, TokenizerWrapper
-from ucsa.models.state import PCSConfig, PersistentCognitiveState
-from ucsa.models.transformer_operator import (
-    TransformerOperator,
-    TransformerOperatorConfig,
+from ucsa.models.perception import Perception, perception.Tokenizer
+from ucsa.models.cognitive import cognitive.Config, cognitive.State
+from ucsa.models.transformer import (
+    transformer.Operator,
+    transformer.Config,
 )
-from ucsa.models.reasoning_loop import (
-    ReasoningLoop,
-    ReasoningLoopConfig,
+from ucsa.models.reasoning import (
+    reasoning.Loop,
+    reasoning.Config,
 )
-from ucsa.models.projection_heads import (
-    HeadConfig,
-    ProjectionHeads,
+from ucsa.models.projection import (
+    projection.Config,
+    projection.Heads,
 )
-from ucsa.models.ucsa import UCSA, UCSAConfig
-from ucsa.models.losses import UCSACombinedLoss
-from ucsa.training.trainer import Trainer, TrainerConfig
-from ucsa.training.curriculum import Curriculum, CurriculumSchedule
-from ucsa.training.dataset import DatasetConfig, TextDataset
+from ucsa.models.architecture import UCSA, architecture.Config
+from ucsa.models.losses import losses.Combined
+from ucsa.training.trainer import Trainer, trainer.Config
+from ucsa.training.curriculum import Curriculum, curriculum.Schedule
+from ucsa.training.dataset import dataset.Config, dataset.Text
 from ucsa.utils.seed import set_seed
 
 
@@ -53,12 +53,12 @@ def main() -> None:
     vocab_size = 64
     hidden_size = 64
 
-    pcs = PersistentCognitiveState(PCSConfig(
+    pcs = cognitive.State(cognitive.Config(
         hidden_size=hidden_size,
         vocab_size=vocab_size,
     ))
 
-    operator = TransformerOperator(TransformerOperatorConfig(
+    operator = transformer.Operator(transformer.Config(
         hidden_size=hidden_size,
         num_layers=2,
         num_q_heads=4,
@@ -67,7 +67,7 @@ def main() -> None:
         vocab_size=vocab_size,
     ))
 
-    heads = ProjectionHeads(HeadConfig(
+    heads = projection.Heads(projection.Config(
         hidden_size=hidden_size,
         vocab_size=vocab_size,
         num_plan_tokens=8,
@@ -79,14 +79,14 @@ def main() -> None:
         intent_update_scale=0.1,
     ))
 
-    loop = ReasoningLoop(
+    loop = reasoning.Loop(
         operator=operator,
-        config=ReasoningLoopConfig(num_iterations=4),
+        config=reasoning.Config(num_iterations=4),
         origination=heads.origination,
         intent_update=heads.intent_update,
     )
 
-    tokenizer = TokenizerWrapper(
+    tokenizer = perception.Tokenizer(
         tokenizer_name="gpt2", max_seq_len=16
     )
     perception = Perception(
@@ -95,7 +95,7 @@ def main() -> None:
     )
 
     model = UCSA(
-        UCSAConfig(
+        architecture.Config(
             hidden_size=hidden_size,
             vocab_size=tokenizer.vocab_size,
             num_layers=2,
@@ -105,25 +105,25 @@ def main() -> None:
         reasoning_loop=loop,
         heads=heads,
         memory=None,
-        memory_service=None,
+        curator=None,
         graph=None,
         verifier=None,
     )
 
-    loss_fn = UCSACombinedLoss()
+    loss_fn = losses.Combined()
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
     trainer = Trainer(
         model=model,
         loss_fn=loss_fn,
         optimizer=optimizer,
-        config=TrainerConfig(
+        config=trainer.Config(
             learning_rate=3e-4,
             max_steps=200,
             warmup_steps=20,
             amp_dtype=torch.float32,
         ),
         curriculum=Curriculum(
-            CurriculumSchedule(
+            curriculum.Schedule(
                 stage_1_end=1, stage_2_end=2, stage_3_end=3
             )
         ),
@@ -161,15 +161,15 @@ You should see the loss decreasing from ~4.2 (uniform over 64) to
 
 The default PCS has seven banks. If you want to add an eighth bank
 (for example, a `world_state` bank the operator reads but never
-writes), extend `PCSConfig` and override the bank sizes.
+writes), extend `cognitive.Config` and override the bank sizes.
 
 ```python
 """UCSA with a custom 8th PCS bank."""
 
 from __future__ import annotations
 
-from ucsa.models.state import (
-    BANK_NAMES, PCSConfig, PersistentCognitiveState,
+from ucsa.models.cognitive import (
+    BANK_NAMES, cognitive.Config, cognitive.State,
 )
 
 
@@ -178,7 +178,7 @@ def main() -> None:
     sizes = {name: 32 for name in BANK_NAMES}
     sizes["world_state"] = 16
 
-    pcs = PersistentCognitiveState(PCSConfig(
+    pcs = cognitive.State(cognitive.Config(
         hidden_size=64,
         vocab_size=64,
         bank_sizes=sizes,
@@ -192,7 +192,7 @@ if __name__ == "__main__":
     main()
 ```
 
-`PCSConfig.bank_sizes` overrides the defaults for any bank you
+`cognitive.Config.bank_sizes` overrides the defaults for any bank you
 specify; the rest fall back to the standard sizes.
 
 ## Tutorial 3 — Designing your own ablation
@@ -208,12 +208,12 @@ argument to the argparse block.
 
 from __future__ import annotations
 
-from ucsa.models.losses import LossWeights, UCSACombinedLoss
+from ucsa.models.losses import losses.Weights, losses.Combined
 
 
 def main() -> None:
-    loss_fn = UCSACombinedLoss(
-        weights=LossWeights(
+    loss_fn = losses.Combined(
+        weights=losses.Weights(
             jepa=1.0,        # JEPA chain contributes
             ar=1.0,
             memory=0.01,
