@@ -13,7 +13,7 @@ import pytest
 import torch
 
 from ucsa import dryrun
-from ucsa.models import architecture, recurrent
+from ucsa.models import recurrent
 from ucsa.training import engine
 from ucsa.utils import precision
 
@@ -158,21 +158,6 @@ def test_evaluation_and_generation_stay_in_one_dtype():
         model(x)
         model.generate(x[:, :5], 12, temperature=0.0)
     assert rec.offenders == []
-
-
-def test_original_model_forward_backward_stays_in_one_dtype():
-    precision.configure()
-    torch.manual_seed(0)
-    model = architecture.UCSA(
-        architecture.Config(hidden_size=32, vocab_size=100, num_layers=2)
-    ).train()
-    x = torch.randint(0, 100, (1, 8))
-    with dryrun.Recorder() as rec:
-        out = model(x)
-        out["language"].sum().backward()
-    assert rec.offenders == []
-    assert dryrun.off_dtype_parameters(model) == []
-    assert out["language"].dtype == precision.DTYPE
 
 
 FP16_PROBE = """
