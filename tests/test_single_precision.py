@@ -38,6 +38,20 @@ def violations(source: str) -> list[tuple[int, str]]:
                 found.append((node.lineno, f".{node.func.attr}()"))
             if node.func.attr in CAST_METHODS - {"float"} and node.args:
                 found.append((node.lineno, f".{node.func.attr}(...)"))
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"to", "type"}
+        ):
+            keyword = any(k.arg == "dtype" for k in node.keywords)
+            positional = any(
+                isinstance(a, ast.Attribute)
+                and isinstance(a.value, ast.Name)
+                and a.value.id in {"torch", "precision"}
+                for a in node.args
+            )
+            if keyword or positional:
+                found.append((node.lineno, ".to(dtype)"))
         if isinstance(node, ast.Attribute):
             if node.attr in BANNED_NAMES:
                 found.append((node.lineno, node.attr))
@@ -72,6 +86,15 @@ def test_the_detector_flags_every_kind_of_cast():
         "GradScaler",
         "torch.float64",
     } <= flagged
+
+
+def test_the_detector_flags_dtype_arguments_to_to_even_across_lines():
+    src = (
+        "a = x.to(\n    device=d, dtype=y.dtype\n)\n"
+        "b = x.to(torch.float16)\n"
+        "c = x.to(device=d)\n"
+    )
+    assert [what for _, what in violations(src)].count(".to(dtype)") == 2
 
 
 def test_the_detector_allows_exact_integer_conversions():
