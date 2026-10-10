@@ -247,3 +247,24 @@ def test_generation_with_surprise_gate_streams_across_chunks():
     out = m.generate(prompt, 20, temperature=0.0)
     assert out.shape == (1, 25)
     assert torch.equal(out, m.generate(prompt, 20, temperature=0.0))
+
+
+@pytest.mark.parametrize("use_state", [True, False])
+@pytest.mark.parametrize("surprise", [True, False])
+def test_streaming_logits_match_teacher_forced_logits(use_state, surprise):
+    """The streaming API must agree with `forward` at every position, across
+    chunk boundaries; this is what lets a decoder reproduce an encoder."""
+    m = make(use_state=use_state, surprise_gate=surprise)
+    with torch.no_grad():
+        if surprise and use_state:
+            m.updater.surprise_gain.fill_(1.0)
+    x = torch.randint(0, 64, (1, 29))  # chunk_size 8: three boundaries
+    full = m(x)["logits"][0]
+    size = m.config.chunk_size
+    state = m.initial_state(1)
+    for pos in range(x.shape[1]):
+        start = (pos // size) * size
+        if pos and pos % size == 0:
+            state = m.advance(state, x[:, pos - size : pos])
+        logits = m.next_logits(state, x[:, start : pos + 1])[0]
+        assert torch.allclose(logits, full[pos], atol=1e-4), pos
