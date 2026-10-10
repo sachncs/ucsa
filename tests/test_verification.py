@@ -261,3 +261,109 @@ class TestLearnedVerifier:
         """The learned verifier exposes trainable parameters."""
         params = list(verifier.parameters())
         assert any(p.requires_grad for p in params)
+
+
+class TestGuarantees:
+    """What a verifier must promise, whatever it is given."""
+
+    @staticmethod
+    def state_with(tokens=None):
+        torch.manual_seed(0)
+        state = cognitive.State(cognitive.Config(hidden_size=8))
+        if tokens is not None:
+            with torch.no_grad():
+                state.get_bank("long_term")[: len(tokens)] = tokens
+                state.metadata("long_term", "usage")[: len(tokens)] = 1.0
+        return state
+
+    @staticmethod
+    def candidate(confidence=1.0, tokens=None, importance=None):
+        tokens = torch.randn(3, 8) if tokens is None else tokens
+        imp = torch.ones(len(tokens)) if importance is None else importance
+        return tiers.Update(tokens, imp, confidence=confidence)
+
+    def test_scores_stay_in_the_unit_interval_for_random_inputs(self):
+        verifier = verification.Heuristic()
+        gen = torch.Generator().manual_seed(1)
+        for _ in range(50):
+            state = self.state_with(torch.randn(4, 8, generator=gen))
+            cand = self.candidate(
+                confidence=float(torch.rand((), generator=gen)),
+                tokens=torch.randn(3, 8, generator=gen),
+                importance=torch.randn(3, generator=gen),
+            )
+            score, _ = verifier.verify(cand, state)
+            assert 0.0 <= score <= 1.0
+
+    def test_decisions_are_deterministic(self):
+        verifier = verification.Heuristic()
+        state, cand = self.state_with(torch.randn(4, 8)), self.candidate()
+        assert verifier.verify(cand, state) == verifier.verify(cand, state)
+
+    def test_acceptance_is_exactly_score_at_or_above_the_threshold(self):
+        state, cand = self.state_with(), self.candidate(confidence=0.7)
+        for threshold in (0.0, 0.3, 0.6, 0.9, 1.0):
+            verifier = verification.Heuristic(acceptance_threshold=threshold)
+            score, accepted = verifier.verify(cand, state)
+            assert accepted == (score >= threshold)
+
+    def test_higher_confidence_never_lowers_the_score(self):
+        verifier = verification.Heuristic()
+        state, tokens = self.state_with(torch.randn(4, 8)), torch.randn(3, 8)
+        scores = [
+            verifier.verify(self.candidate(c, tokens), state)[0]
+            for c in (0.0, 0.25, 0.5, 0.75, 1.0)
+        ]
+        assert scores == sorted(scores)
+
+    def test_a_copy_of_what_is_already_stored_is_less_novel(self):
+        verifier = verification.Heuristic(
+            confidence_weight=0,
+            recency_weight=0,
+            usage_weight=0,
+            novelty_weight=1,
+        )
+        stored = torch.randn(4, 8)
+        state = self.state_with(stored)
+        duplicate, _ = verifier.verify(self.candidate(tokens=stored[:2]), state)
+        fresh, _ = verifier.verify(
+            self.candidate(tokens=torch.randn(2, 8) * 5), state
+        )
+        assert duplicate < fresh
+
+    def test_an_empty_candidate_is_rejected_not_waved_through(self):
+        """Regression: mean([]) is NaN and min(1.0, nan) is 1.0, so an empty
+        candidate used to score a perfect 1.0 and be accepted."""
+        empty = tiers.Update(torch.zeros(0, 8), torch.zeros(0))
+        score, accepted = verification.Heuristic().verify(
+            empty, self.state_with()
+        )
+        assert score == 0.0
+        assert accepted is False
+
+    def test_a_corrupted_memory_cannot_cause_acceptance(self):
+        """A NaN in the stored tokens must reject, never accept."""
+        stored = torch.randn(4, 8)
+        stored[1, 2] = float("nan")
+        score, accepted = verification.Heuristic().verify(
+            self.candidate(), self.state_with(stored)
+        )
+        assert score == 0.0
+        assert accepted is False
+
+    @pytest.mark.parametrize(
+        "weights",
+        [
+            {"confidence_weight": -1.0},
+            {"novelty_weight": -0.2},
+            {
+                "confidence_weight": 0,
+                "novelty_weight": 0,
+                "recency_weight": 0,
+                "usage_weight": 0,
+            },
+        ],
+    )
+    def test_invalid_weights_are_refused_at_construction(self, weights):
+        with pytest.raises(ValueError):
+            verification.Heuristic(**weights)
