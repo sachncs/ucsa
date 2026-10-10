@@ -345,3 +345,52 @@ def test_once_the_scale_opens_the_state_matters():
     after = (m(x)["logits"] - m(y)["logits"]).abs()[0, 8:].max()
     assert before < 1e-6  # closed gate and no window: chunk 0 is invisible
     assert after > 1e-6  # open gate: it influences later chunks
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"heads": 0},
+        {"hidden": 0},
+        {"layers": 0},
+        {"hidden": 65, "heads": 4},
+        {"hidden": 20, "heads": 4},  # head_dim 5 is odd
+        {"banks": ()},
+        {"banks": (("working", 0),)},
+        {"banks": (("a", 2), ("a", 3))},
+        {"banks": ("working",)},  # not a (name, slots) pair
+        {"window": 999},
+        {"window": -1},
+        {"dropout": 1.0},
+    ],
+)
+def test_malformed_configs_raise_a_value_error_never_a_crash(bad):
+    """Regression: heads=0 used to raise ZeroDivisionError from inside the
+    validation itself."""
+    with pytest.raises(ValueError):
+        tiny(**bad)
+
+
+def test_a_ragged_tail_never_reaches_the_returned_state():
+    """Regression: padding the last chunk wrote the pad tokens into the state
+    that is returned, so carrying it into the next segment corrupted memory."""
+    m = make().eval()  # chunk_size 8
+    x = torch.randint(0, 64, (1, 20))  # two full chunks and a partial one
+    with_tail = m(x)["state"]
+    full_only = m(x[:, :16])["state"]
+    assert torch.allclose(with_tail, full_only, atol=1e-6)
+
+
+def test_a_ragged_tail_does_not_change_the_logits_it_shares_with_a_clean_run():
+    m = make().eval()
+    x = torch.randint(0, 64, (1, 20))
+    ragged = m(x)["logits"][0, :16]
+    clean = m(x[:, :16])["logits"][0]
+    assert torch.allclose(ragged, clean, atol=1e-5)
+
+
+def test_the_jepa_pairs_exclude_the_padded_chunk():
+    m = make().eval()
+    x = torch.randint(0, 64, (1, 28))  # three full chunks and a partial one
+    preds, targets = m(x)["jepa"]
+    assert preds.shape[1] == targets.shape[1] == 3
