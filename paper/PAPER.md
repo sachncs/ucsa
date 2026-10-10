@@ -237,13 +237,6 @@ interval 0.013 to 0.015), 0.2% of the loss. What the state remembers from
 earlier chunks is almost unused; the slots work as extra learned context tokens
 that every chunk reads, not as memory of the past.
 
-A recall probe agrees. We plant a random 32-token span, add real text, and repeat
-the span; with a gap above one chunk only the state could know it. The repeat
-costs the same as a fresh random span (18.87 against 18.90 bits per token at a
-gap of 512, and 18.90 against 18.91 for the control), while inside the window it
-is cheap (11.2 against 17.5 bits). Trained on text, the state stores nothing
-that survives past the attention window.
-
 **Design choices at 600 steps** (noise floor 0.0145 bits/token; Section 4.3):
 
 | change | effect (bits/token) | verdict |
@@ -315,11 +308,6 @@ failure was found, and each has a regression test.
   over a matched stateless model (Section 5), with one seed per arm. Training
   windows are 1,024 tokens; a constant-size state could matter at much longer
   contexts or larger scale, which we did not test.
-  We also tried to force the state to store a planted span on a synthetic task.
-  At 4,000 steps the state models stayed at random-token perplexity, but so did
-  a wide-window control until its last evaluation, so the test was too short to
-  say whether the mechanism can store anything; the longer runs were stopped
-  and are not reported. The mechanism is therefore unverified, not refuted.
 * **Noise.** Training is not bitwise reproducible on this hardware. The noise
   floor was measured from repeated same-configuration runs and is about 0.015
   bits/token per run. Conclusions near that size are not claimed.
