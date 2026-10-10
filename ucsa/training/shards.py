@@ -120,6 +120,11 @@ def write_shard(
 ) -> int:
     """Writes documents to a shard, separated by the end-of-text id.
 
+    The file appears all at once: tokens go to a temporary file that replaces
+    `path` only when complete. A reader that has `path` memory-mapped keeps
+    its old, intact copy instead of seeing a truncated file, and a crash while
+    writing leaves the previous shard untouched.
+
     Args:
       token_lists: Iterable of token-id lists, one per document.
       path: Output file.
@@ -130,13 +135,19 @@ def write_shard(
     """
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     written = 0
-    with open(path, "wb") as out:
-        for ids in token_lists:
-            block = np.asarray([*ids, EOS_ID], dtype=DTYPE)
-            out.write(block.tobytes())
-            written += block.size
-            if limit is not None and written >= limit:
-                break
+    temporary = path + ".tmp"
+    try:
+        with open(temporary, "wb") as out:
+            for ids in token_lists:
+                block = np.asarray([*ids, EOS_ID], dtype=DTYPE)
+                out.write(block.tobytes())
+                written += block.size
+                if limit is not None and written >= limit:
+                    break
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
     return written
 
 
