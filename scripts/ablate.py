@@ -17,11 +17,10 @@ import time
 
 import numpy as np
 import torch
-import train_r
 import transformers
 
 from ucsa.models import recurrent
-from ucsa.training import compression, diagnostics, engine
+from ucsa.training import compression, diagnostics, engine, presets
 
 # Arm name -> `section.key=value` overrides on top of the base preset.
 ARMS: dict[str, list[str]] = {
@@ -53,12 +52,9 @@ def run_arm(
     name: str, args: argparse.Namespace, byte_lengths: torch.Tensor
 ) -> dict:
     """Trains one arm and returns its record, including per-window losses."""
-    ns = argparse.Namespace(
-        preset=args.preset,
-        params=0,
-        seed=SEED_OVERRIDES.get(name, args.seed),
-        out_dir=os.path.join(args.out, "ckpt", name),
-        set=[
+    model_config, train_config = presets.build_configs(
+        args.preset,
+        [
             *ARMS[name],
             f"train.steps={args.steps}",
             f"train.warmup_steps={max(10, args.steps // 10)}",
@@ -69,10 +65,11 @@ def run_arm(
             f"train.batch_size={args.batch_size}",
             *args.extra,
         ],
+        seed=SEED_OVERRIDES.get(name, args.seed),
+        out_dir=os.path.join(args.out, "ckpt", name),
     )
-    model_config, train_config = train_r.build_configs(ns)
     model = recurrent.Model(model_config)
-    train, val = train_r.batch_factories(train_config, args.data)
+    train, val = presets.batch_factories(train_config, args.data)
     started = time.time()
     record = engine.fit(
         model,
