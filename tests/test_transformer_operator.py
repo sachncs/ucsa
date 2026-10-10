@@ -1,25 +1,21 @@
-"""Tests for :mod:`ucsa.models.transformer_operator`."""
+"""Tests for :mod:`ucsa.models.transformer`."""
 
 from __future__ import annotations
 
 import pytest
 import torch
 
-from ucsa.models.moe import MoEConfig
-from ucsa.models.state import PCSConfig, PersistentCognitiveState
-from ucsa.models.transformer_operator import (
+from ucsa.models import cognitive, moe, transformer
+from ucsa.models.transformer import (
     CrossAttention,
     FeedForward,
     GroupedQueryAttention,
     RMSNorm,
     RotaryEmbedding,
-    TransformerBlock,
-    TransformerOperator,
-    TransformerOperatorConfig,
 )
 
 
-def tiny_config(**overrides: object) -> TransformerOperatorConfig:
+def tiny_config(**overrides: object) -> transformer.Config:
     """Return a tiny transformer config for tests."""
     defaults: dict[str, object] = {
         "hidden_size": 32,
@@ -31,41 +27,41 @@ def tiny_config(**overrides: object) -> TransformerOperatorConfig:
         "max_position": 8192,
     }
     defaults.update(overrides)
-    return TransformerOperatorConfig(**defaults)  # type: ignore[arg-type]
+    return transformer.Config(**defaults)  # type: ignore[arg-type]
 
 
 class TestTransformerOperatorConfig:
-    """Tests for :class:`TransformerOperatorConfig`."""
+    """Tests for :class:`transformer.Config`."""
 
     def test_default_config_valid(self) -> None:
         """Defaults construct without error."""
-        config = TransformerOperatorConfig()
+        config = transformer.Config()
         assert config.hidden_size > 0
         assert config.num_layers > 0
 
     def test_invalid_q_kv_divisibility(self) -> None:
         """Mismatched q/kv head counts are rejected."""
         with pytest.raises(ValueError):
-            TransformerOperatorConfig(num_q_heads=3, num_kv_heads=2)
+            transformer.Config(num_q_heads=3, num_kv_heads=2)
 
     def test_invalid_hidden_divisibility(self) -> None:
         """Hidden size not divisible by num_q_heads is rejected."""
         with pytest.raises(ValueError):
-            TransformerOperatorConfig(hidden_size=33, num_q_heads=4)
+            transformer.Config(hidden_size=33, num_q_heads=4)
 
     def test_invalid_sliding_window(self) -> None:
         """Non-positive sliding window is rejected."""
         with pytest.raises(ValueError):
-            TransformerOperatorConfig(sliding_window=0)
+            transformer.Config(sliding_window=0)
 
     def test_moe_config_validates(self) -> None:
-        """MoEConfig rejects bad top_k and negative aux weight."""
+        """moe.Config rejects bad top_k and negative aux weight."""
         with pytest.raises(ValueError):
-            MoEConfig(num_experts=4, top_k=5)
+            moe.Config(num_experts=4, top_k=5)
         with pytest.raises(ValueError):
-            MoEConfig(aux_loss_weight=-0.1)
+            moe.Config(aux_loss_weight=-0.1)
         with pytest.raises(ValueError):
-            MoEConfig(capacity_factor=0.0)
+            moe.Config(capacity_factor=0.0)
 
 
 class TestRMSNorm:
@@ -260,21 +256,21 @@ class TestFeedForward:
 
 
 class TestTransformerBlock:
-    """Tests for :class:`TransformerBlock`."""
+    """Tests for :class:`transformer.Block`."""
 
     def test_is_moe_layer_upper_half(self) -> None:
         """Upper-half blocks report ``is_moe_layer`` as ``True`` only when
         MoE is configured."""
-        config = tiny_config(num_layers=4, moe=MoEConfig())
-        lower_block = TransformerBlock(config, layer_index=0)
-        upper_block = TransformerBlock(config, layer_index=3)
+        config = tiny_config(num_layers=4, moe=moe.Config())
+        lower_block = transformer.Block(config, layer_index=0)
+        upper_block = transformer.Block(config, layer_index=3)
         assert lower_block.is_moe_layer is False
         assert upper_block.is_moe_layer is True
 
     def test_forward_shape(self) -> None:
         """Forward preserves token sequence shape."""
         config = tiny_config()
-        block = TransformerBlock(config, layer_index=0)
+        block = transformer.Block(config, layer_index=0)
         tokens = torch.randn(2, 10, 32)
         out, aux = block(
             tokens,
@@ -287,7 +283,7 @@ class TestTransformerBlock:
     def test_cross_attention_used_when_memory_index_provided(self) -> None:
         """Cross attention changes the working-memory output."""
         config = tiny_config()
-        block = TransformerBlock(config, layer_index=0)
+        block = transformer.Block(config, layer_index=0)
         torch.manual_seed(0)
         tokens_a = torch.randn(1, 6, 32)
         tokens_b = torch.randn(1, 6, 32)
@@ -310,35 +306,35 @@ class TestTransformerBlock:
 
 
 class TestTransformerOperator:
-    """Tests for :class:`TransformerOperator`."""
+    """Tests for :class:`transformer.Operator`."""
 
     @pytest.fixture
-    def state(self) -> PersistentCognitiveState:
+    def state(self) -> cognitive.State:
         """Provide a fresh PCS sized for the tiny config."""
-        return PersistentCognitiveState(PCSConfig(hidden_size=32))
+        return cognitive.State(cognitive.Config(hidden_size=32))
 
     @pytest.fixture
-    def operator(self) -> TransformerOperator:
+    def operator(self) -> transformer.Operator:
         """Provide a tiny transformer operator."""
-        return TransformerOperator(tiny_config())
+        return transformer.Operator(tiny_config())
 
     def test_constructs_with_default_config(self) -> None:
         """Default config builds a transformer operator."""
-        op = TransformerOperator(TransformerOperatorConfig())
+        op = transformer.Operator(transformer.Config())
         assert op.name == "transformer"
 
     def test_forward_returns_pcs(
-        self, operator: TransformerOperator, state: PersistentCognitiveState
+        self, operator: transformer.Operator, state: cognitive.State
     ) -> None:
         """Forward returns a PCS with the correct bank shapes."""
         observation = torch.randn(1, 6, 32)
         new_pcs = operator(state, observation)
-        assert isinstance(new_pcs, PersistentCognitiveState)
+        assert isinstance(new_pcs, cognitive.State)
         assert new_pcs.bank_size("working") == 64
         assert new_pcs.bank_size("long_term") == 128
 
     def test_forward_observation_shape_validation(
-        self, operator: TransformerOperator, state: PersistentCognitiveState
+        self, operator: transformer.Operator, state: cognitive.State
     ) -> None:
         """Non-3D observation raises ``ValueError``."""
         with pytest.raises(ValueError):
@@ -346,13 +342,13 @@ class TestTransformerOperator:
 
     def test_forward_hidden_size_validation(self) -> None:
         """A PCS whose hidden size mismatches the operator raises."""
-        op = TransformerOperator(tiny_config(hidden_size=32))
-        bad_state = PersistentCognitiveState(PCSConfig(hidden_size=64))
+        op = transformer.Operator(tiny_config(hidden_size=32))
+        bad_state = cognitive.State(cognitive.Config(hidden_size=64))
         with pytest.raises(ValueError):
             op(bad_state, torch.randn(1, 4, 64))
 
     def test_gradient_flow(
-        self, operator: TransformerOperator, state: PersistentCognitiveState
+        self, operator: transformer.Operator, state: cognitive.State
     ) -> None:
         """A loss on the output flows gradients to PCS parameters."""
         observation = torch.randn(1, 4, 32)
@@ -362,7 +358,7 @@ class TestTransformerOperator:
         assert new_pcs.get_bank("working").grad is not None
 
     def test_reset_clears_kv_cache(
-        self, operator: TransformerOperator, state: PersistentCognitiveState
+        self, operator: transformer.Operator, state: cognitive.State
     ) -> None:
         """``reset`` zeros the KV cache length of every block."""
         operator(state, torch.randn(1, 3, 32))
@@ -371,38 +367,36 @@ class TestTransformerOperator:
             assert block.self_attn.kv_cache["length"] == 0
 
     def test_is_first_step_flag(
-        self, operator: TransformerOperator, state: PersistentCognitiveState
+        self, operator: transformer.Operator, state: cognitive.State
     ) -> None:
         """``is_first_step`` is reset on subsequent ``reset`` calls."""
         operator(state, torch.randn(1, 3, 32))
         operator.reset()
         assert operator.is_first_step is True
 
-    def test_cross_attention_disabled(
-        self, state: PersistentCognitiveState
-    ) -> None:
+    def test_cross_attention_disabled(self, state: cognitive.State) -> None:
         """Disabling cross attention removes the cross-attn module."""
-        op = TransformerOperator(
+        op = transformer.Operator(
             tiny_config(use_memory_index_cross_attention=False)
         )
         assert all(block.cross_attn is None for block in op.blocks)
 
     def test_cross_attention_enabled_by_default(
-        self, state: PersistentCognitiveState
+        self, state: cognitive.State
     ) -> None:
         """By default every block has a cross-attention module."""
-        op = TransformerOperator(tiny_config())
+        op = transformer.Operator(tiny_config())
         assert all(block.cross_attn is not None for block in op.blocks)
 
     def test_aux_loss_is_zero_without_moe(
-        self, operator: TransformerOperator, state: PersistentCognitiveState
+        self, operator: transformer.Operator, state: cognitive.State
     ) -> None:
         """``last_aux_loss`` is a zero tensor when MoE is disabled."""
         operator(state, torch.randn(1, 4, 32))
         assert operator.last_aux_loss.item() == 0.0
 
     def test_multiple_steps_extend_kv_cache(
-        self, operator: TransformerOperator, state: PersistentCognitiveState
+        self, operator: transformer.Operator, state: cognitive.State
     ) -> None:
         """KV cache length grows by the full concatenated sequence length."""
         operator(state, torch.randn(1, 3, 32))
@@ -425,7 +419,7 @@ class TestTransformerOperator:
         )
 
     def test_backward_through_router_logits_with_moe(
-        self, state: PersistentCognitiveState
+        self, state: cognitive.State
     ) -> None:
         """A loss on the MoE router logits reaches the operator weights.
 
@@ -434,8 +428,8 @@ class TestTransformerOperator:
         the version counter of an expanded view of the ``memory_index``
         parameter, making backward raise.
         """
-        op = TransformerOperator(
-            tiny_config(moe=MoEConfig(num_experts=4, top_k=2))
+        op = transformer.Operator(
+            tiny_config(moe=moe.Config(num_experts=4, top_k=2))
         )
         op(state, torch.randn(1, 4, 32))
         router_logits = op.last_router_logits
@@ -447,7 +441,7 @@ class TestTransformerOperator:
         )
 
     def test_last_bank_tensors_are_differentiable(
-        self, operator: TransformerOperator, state: PersistentCognitiveState
+        self, operator: transformer.Operator, state: cognitive.State
     ) -> None:
         """The stashed bank tensors precede the ``no_grad`` write-back."""
         operator(state, torch.randn(1, 4, 32))
@@ -457,7 +451,7 @@ class TestTransformerOperator:
             assert tensor.shape == (state.bank_size(name), 32)
 
     def test_carry_used_on_second_call(
-        self, operator: TransformerOperator, state: PersistentCognitiveState
+        self, operator: transformer.Operator, state: cognitive.State
     ) -> None:
         """A second call consumes the carried tensors, not the parameters."""
         operator(state, torch.randn(1, 4, 32))
@@ -470,10 +464,10 @@ class TestTransformerOperator:
         assert all(p.grad is not None for p in operator.parameters())
 
     def test_carry_disabled_severs_the_graph(
-        self, state: PersistentCognitiveState
+        self, state: cognitive.State
     ) -> None:
         """``differentiable_state_carry=False`` restores severed behaviour."""
-        op = TransformerOperator(tiny_config(differentiable_state_carry=False))
+        op = transformer.Operator(tiny_config(differentiable_state_carry=False))
         op(state, torch.randn(1, 4, 32))
         assert op.last_bank_tensors is None
         assert op.carried_bank_tensors() is None
@@ -481,7 +475,7 @@ class TestTransformerOperator:
         assert op.carried_bank_tensors() is None
 
     def test_reset_clears_carried_tensors(
-        self, operator: TransformerOperator, state: PersistentCognitiveState
+        self, operator: transformer.Operator, state: cognitive.State
     ) -> None:
         """``reset`` clears the carried tensors with the KV cache."""
         operator(state, torch.randn(1, 4, 32))
@@ -490,7 +484,7 @@ class TestTransformerOperator:
         assert operator.last_bank_tensors is None
 
     def test_parameter_count_reasonable(
-        self, operator: TransformerOperator
+        self, operator: transformer.Operator
     ) -> None:
         """Parameter count is positive and not absurdly large."""
         n_params = sum(p.numel() for p in operator.parameters())
