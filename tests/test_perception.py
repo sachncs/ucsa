@@ -6,16 +6,11 @@ import pytest
 import torch
 from torch import Tensor
 
-from ucsa.models.perception import (
-    MODALITY_CODE,
-    MODALITY_TEXT,
-    Perception,
-    PerceptionConfig,
-    TokenizerWrapper,
-)
+from ucsa.models import perception as perception_lib
+from ucsa.models.perception import MODALITY_CODE, MODALITY_TEXT, Perception
 
 
-def tiny_config(**overrides: object) -> PerceptionConfig:
+def tiny_config(**overrides: object) -> perception_lib.Config:
     """Return a tiny perception config for tests."""
     defaults: dict[str, object] = {
         "hidden_size": 32,
@@ -24,7 +19,7 @@ def tiny_config(**overrides: object) -> PerceptionConfig:
         "tokenizer_name": "gpt2",
     }
     defaults.update(overrides)
-    return PerceptionConfig(**defaults)  # type: ignore[arg-type]
+    return perception_lib.Config(**defaults)  # type: ignore[arg-type]
 
 
 class FakeTokenizer:
@@ -53,37 +48,37 @@ class FakeTokenizer:
 
 
 class TestPerceptionConfig:
-    """Tests for :class:`PerceptionConfig`."""
+    """Tests for :class:`perception_lib.Config`."""
 
     def test_default_config_valid(self) -> None:
         """Defaults construct without error."""
-        config = PerceptionConfig()
+        config = perception_lib.Config()
         assert config.hidden_size > 0
         assert config.tokenizer_name == "gpt2"
 
     def test_zero_hidden_size_rejected(self) -> None:
         """``hidden_size`` of zero or less raises."""
         with pytest.raises(ValueError):
-            PerceptionConfig(hidden_size=0)
+            perception_lib.Config(hidden_size=0)
 
     def test_zero_vocab_size_rejected(self) -> None:
         """``vocab_size`` of zero or less raises."""
         with pytest.raises(ValueError):
-            PerceptionConfig(vocab_size=0)
+            perception_lib.Config(vocab_size=0)
 
     def test_empty_modalities_rejected(self) -> None:
         """``modalities`` must contain at least one entry."""
         with pytest.raises(ValueError):
-            PerceptionConfig(modalities=())
+            perception_lib.Config(modalities=())
 
 
 class TestTokenizerWrapper:
-    """Tests for :class:`TokenizerWrapper`."""
+    """Tests for :class:`perception_lib.Tokenizer`."""
 
     def test_constructs_with_injected_tokenizer(self) -> None:
         """A pre-built tokenizer can be injected."""
         fake = FakeTokenizer()
-        wrapper = TokenizerWrapper.__new__(TokenizerWrapper)
+        wrapper = perception_lib.Tokenizer.__new__(perception_lib.Tokenizer)
         wrapper.tokenizer = fake
         wrapper.max_seq_len = 64
         wrapper.vocab_size = fake.vocab_size
@@ -93,7 +88,7 @@ class TestTokenizerWrapper:
     def test_encode_returns_long_tensor(self) -> None:
         """``encode`` returns a Long tensor."""
         fake = FakeTokenizer()
-        wrapper = TokenizerWrapper.__new__(TokenizerWrapper)
+        wrapper = perception_lib.Tokenizer.__new__(perception_lib.Tokenizer)
         wrapper.tokenizer = fake
         wrapper.max_seq_len = 64
         wrapper.vocab_size = fake.vocab_size
@@ -104,7 +99,7 @@ class TestTokenizerWrapper:
     def test_batch_encode_pads(self) -> None:
         """``batch_encode`` pads shorter sequences to the longest."""
         fake = FakeTokenizer()
-        wrapper = TokenizerWrapper.__new__(TokenizerWrapper)
+        wrapper = perception_lib.Tokenizer.__new__(perception_lib.Tokenizer)
         wrapper.tokenizer = fake
         wrapper.max_seq_len = 64
         wrapper.vocab_size = fake.vocab_size
@@ -116,7 +111,7 @@ class TestTokenizerWrapper:
     def test_pad_id_property(self) -> None:
         """``pad_id`` returns the tokenizer's pad token id."""
         fake = FakeTokenizer(pad_token_id=7)
-        wrapper = TokenizerWrapper.__new__(TokenizerWrapper)
+        wrapper = perception_lib.Tokenizer.__new__(perception_lib.Tokenizer)
         wrapper.tokenizer = fake
         wrapper.max_seq_len = 64
         wrapper.vocab_size = fake.vocab_size
@@ -133,7 +128,7 @@ class TestPerception:
         fake = FakeTokenizer(
             vocab_size=config.vocab_size, pad_token_id=config.pad_token_id
         )
-        wrapper = TokenizerWrapper.__new__(TokenizerWrapper)
+        wrapper = perception_lib.Tokenizer.__new__(perception_lib.Tokenizer)
         wrapper.tokenizer = fake
         wrapper.max_seq_len = config.max_seq_len
         wrapper.vocab_size = fake.vocab_size
@@ -207,7 +202,7 @@ class TestPerception:
         fake = FakeTokenizer(
             vocab_size=config.vocab_size, pad_token_id=config.pad_token_id
         )
-        wrapper = TokenizerWrapper.__new__(TokenizerWrapper)
+        wrapper = perception_lib.Tokenizer.__new__(perception_lib.Tokenizer)
         wrapper.tokenizer = fake
         wrapper.max_seq_len = config.max_seq_len
         wrapper.vocab_size = fake.vocab_size
