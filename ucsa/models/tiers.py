@@ -207,9 +207,9 @@ class Memory:
 
         with torch.no_grad():
             long_term[empty_indices] = tokens_to_write
-            self.cstate.metadata("long_term", "importance")[
-                empty_indices
-            ] = importance_to_write
+            self.cstate.metadata("long_term", "importance")[empty_indices] = (
+                importance_to_write
+            )
             self.cstate.metadata("long_term", "age")[empty_indices] = 0
             self.cstate.metadata("long_term", "usage")[empty_indices] = 1.0
         self.cstate.update_retention()
