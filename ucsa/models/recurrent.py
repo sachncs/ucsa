@@ -126,54 +126,73 @@ class Config:
         Raises:
           ValueError: If any field is out of range or inconsistent.
         """
+        # Checks run in order and lazily, so an earlier failure (heads == 0)
+        # is reported as a ValueError before a later check can divide by it.
         checks = (
-            (self.vocab_size > 0, "vocab_size must be positive"),
-            (self.hidden > 0 and self.layers > 0, "hidden/layers must be > 0"),
+            (lambda: self.vocab_size > 0, "vocab_size must be positive"),
+            (lambda: self.hidden > 0, "hidden must be positive"),
+            (lambda: self.layers > 0, "layers must be positive"),
+            (lambda: self.heads > 0, "heads must be positive"),
             (
-                self.heads > 0 and self.hidden % self.heads == 0,
+                lambda: self.hidden % self.heads == 0,
                 "hidden must be divisible by heads",
             ),
             (
-                self.hidden % self.heads == 0
-                and (self.hidden // self.heads) % 2 == 0,
+                lambda: (self.hidden // self.heads) % 2 == 0,
                 "head_dim must be even",
             ),
-            (self.chunk_size >= 2, "chunk_size must be >= 2"),
+            (lambda: self.chunk_size >= 2, "chunk_size must be >= 2"),
             (
-                self.window is None or 0 <= self.window <= self.chunk_size,
+                lambda: self.window is None
+                or 0 <= self.window <= self.chunk_size,
                 "window must be None or in [0, chunk_size]",
             ),
-            (self.encoder_layers >= 1, "encoder_layers must be >= 1"),
+            (lambda: self.encoder_layers >= 1, "encoder_layers must be >= 1"),
+            (lambda: len(self.banks) > 0, "banks must be non-empty"),
             (
-                len(self.banks) > 0 and all(n > 0 for _, n in self.banks),
-                "banks must be non-empty with positive sizes",
+                lambda: all(
+                    isinstance(b, tuple | list) and len(b) == 2
+                    for b in self.banks
+                ),
+                "each bank must be a (name, slots) pair",
             ),
             (
-                len({name for name, _ in self.banks}) == len(self.banks),
+                lambda: all(n > 0 for _, n in self.banks),
+                "banks must have positive sizes",
+            ),
+            (
+                lambda: len({name for name, _ in self.banks})
+                == len(self.banks),
                 "bank names must be unique",
             ),
-            (self.read_every >= 1, "read_every must be >= 1"),
+            (lambda: self.read_every >= 1, "read_every must be >= 1"),
             (
-                0 <= self.write_top_k <= self.num_slots,
-                f"write_top_k must be in [0, {self.num_slots}]",
+                lambda: 0 <= self.write_top_k <= self.num_slots,
+                "write_top_k must be in [0, num_slots]",
             ),
-            (self.bptt_chunks >= 0, "bptt_chunks must be >= 0"),
-            (0.0 <= self.slot_dropout <= 1.0, "slot_dropout must be in [0, 1]"),
+            (lambda: self.bptt_chunks >= 0, "bptt_chunks must be >= 0"),
             (
-                1 <= self.min_slots <= self.num_slots,
-                f"min_slots must be in [1, {self.num_slots}]",
+                lambda: 0.0 <= self.slot_dropout <= 1.0,
+                "slot_dropout must be in [0, 1]",
             ),
-            (self.jepa_weight >= 0.0, "jepa_weight must be >= 0"),
             (
-                not self.surprise_gate or self.jepa_weight > 0,
+                lambda: 1 <= self.min_slots <= self.num_slots,
+                "min_slots must be in [1, num_slots]",
+            ),
+            (lambda: self.jepa_weight >= 0.0, "jepa_weight must be >= 0"),
+            (
+                lambda: not self.surprise_gate or self.jepa_weight > 0,
                 "surprise_gate needs jepa_weight > 0",
             ),
-            (0.0 < self.ema_momentum < 1.0, "ema_momentum must be in (0, 1)"),
-            (self.loss_chunk >= 0, "loss_chunk must be >= 0"),
-            (0.0 <= self.dropout < 1.0, "dropout must be in [0, 1)"),
+            (
+                lambda: 0.0 < self.ema_momentum < 1.0,
+                "ema_momentum must be in (0, 1)",
+            ),
+            (lambda: self.loss_chunk >= 0, "loss_chunk must be >= 0"),
+            (lambda: 0.0 <= self.dropout < 1.0, "dropout must be in [0, 1)"),
         )
         for ok, message in checks:
-            if not ok:
+            if not ok():
                 raise ValueError(message)
         unknown = {n for n, _ in self.bank_write_bias} - {
             n for n, _ in self.banks
@@ -802,11 +821,20 @@ class Model(nn.Module):
                 x.view(batch, chunks, size, -1).mean(2) if predictive else None
             )
             reads, final, writes, preds = self.__scan(start, summaries, pooled)
+            padded = chunks * size != seq
+            if padded:
+                # The last chunk holds padding. It is decoded (its logits are
+                # kept) but never written: the returned state is the one after
+                # the last complete chunk, and the padded chunk is left out of
+                # the JEPA pairs.
+                final = reads[:, -1]
             read = reads.reshape(batch * chunks, *reads.shape[2:])
             read = read[:, : self.__slots_to_read(active_slots)]
-            if config.jepa_weight > 0 and chunks > 1:
+            usable = chunks - int(padded)
+            if config.jepa_weight > 0 and usable > 1:
                 with torch.no_grad():
-                    targets = self.target_summary(pooled)
+                    targets = self.target_summary(pooled)[:, :usable]
+                preds = preds[:, :usable]
             else:
                 preds = None
         else:
