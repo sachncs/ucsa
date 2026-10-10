@@ -22,7 +22,7 @@ from torch import Tensor, nn
 
 
 @dataclass(frozen=True)
-class LossWeights:
+class Weights:
     """Weights for the four loss components.
 
     Attributes:
@@ -60,7 +60,7 @@ class LossWeights:
             )
 
 
-class InputReconstructionLoss(nn.Module):
+class Reconstruction(nn.Module):
     """Predict input-token embeddings from working memory (LeWM-style).
 
     The JEPA latent must retain enough information that a small
@@ -78,7 +78,7 @@ class InputReconstructionLoss(nn.Module):
         )
 
 
-class AutoregressiveLoss(nn.Module):
+class Autoregressive(nn.Module):
     """Cross-entropy loss for the language head."""
 
     def __init__(self, ignore_index: int = -100) -> None:
@@ -108,7 +108,7 @@ class AutoregressiveLoss(nn.Module):
         )
 
 
-class JEPALoss(nn.Module):
+class JEPA(nn.Module):
     """Latent-prediction loss.
 
     Two modes:
@@ -262,7 +262,7 @@ class JEPALoss(nn.Module):
         return loss
 
 
-class MemoryStabilityLoss(nn.Module):
+class MemoryStability(nn.Module):
     """Penalise drift of the long-term memory bank.
 
     Encourages the long-term bank to remain close to a learned baseline.
@@ -287,7 +287,7 @@ class MemoryStabilityLoss(nn.Module):
         return torch.nn.functional.mse_loss(long_term, baseline)
 
 
-class RouterLoadBalancingLoss(nn.Module):
+class RouterBalance(nn.Module):
     """Auxiliary load-balancing loss for MoE routers.
 
     Implements the Switch Transformer load-balancing loss:
@@ -324,12 +324,12 @@ class RouterLoadBalancingLoss(nn.Module):
         return num_experts * (tokens_per_expert * avg_routing).sum()
 
 
-class UCSACombinedLoss(nn.Module):
+class Combined(nn.Module):
     """Combine the four UCSA loss components with configurable weights."""
 
     def __init__(
         self,
-        weights: LossWeights | None = None,
+        weights: Weights | None = None,
         jepa_mode: str = "ijepa",
         jepa_alpha: float = 0.5,
         gaussian_reg_weight: float = 0.1,
@@ -337,7 +337,7 @@ class UCSACombinedLoss(nn.Module):
         """Initialise the combined loss.
 
         Args:
-            weights: Optional :class:`LossWeights`.
+            weights: Optional :class:`Weights`.
             jepa_mode: ``"ijepa"`` (default) or ``"lewm"`` (LeWorldModel).
             jepa_alpha: Cosine blend weight for ``"ijepa"`` mode.
             gaussian_reg_weight: Gaussian regulariser weight for
@@ -345,17 +345,17 @@ class UCSACombinedLoss(nn.Module):
         """
         super().__init__()
         if weights is None:
-            weights = LossWeights()
+            weights = Weights()
         self.weights = weights
-        self.ar = AutoregressiveLoss()
-        self.jepa = JEPALoss(
+        self.ar = Autoregressive()
+        self.jepa = JEPA(
             alpha=jepa_alpha,
             mode=jepa_mode,
             gaussian_reg_weight=gaussian_reg_weight,
         )
-        self.memory = MemoryStabilityLoss()
-        self.router = RouterLoadBalancingLoss()
-        self.reconstruction = InputReconstructionLoss()
+        self.memory = MemoryStability()
+        self.router = RouterBalance()
+        self.reconstruction = Reconstruction()
 
     def forward(
         self,
@@ -430,11 +430,11 @@ class UCSACombinedLoss(nn.Module):
 
 
 __all__ = [
-    "AutoregressiveLoss",
-    "InputReconstructionLoss",
-    "JEPALoss",
-    "LossWeights",
-    "MemoryStabilityLoss",
-    "RouterLoadBalancingLoss",
-    "UCSACombinedLoss",
+    "Autoregressive",
+    "Reconstruction",
+    "JEPA",
+    "Weights",
+    "MemoryStability",
+    "RouterBalance",
+    "Combined",
 ]
