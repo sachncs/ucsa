@@ -30,7 +30,7 @@ PPL_SETS = {"fineweb-edu": "val.bin", "wikitext-103": "wikitext_test.bin"}
 def heldout_ppl(
     model: torch.nn.Module,
     kind: str,
-    shard: shards.TokenShard,
+    shard: shards.Shard,
     device: torch.device,
     batches: int,
     seq_len: int = 1024,
@@ -38,7 +38,7 @@ def heldout_ppl(
     """Measures perplexity of the last 64 positions of fixed windows.
 
     Args:
-      model: A `RecurrentUCSA` (`kind="recurrent"`) or the original slot
+      model: A `recurrent.Model` (`kind="recurrent"`) or the original slot
         `UCSA` (`kind="ucsa"`, which sees only the prefix).
       kind: Model family.
       shard: Held-out tokens.
@@ -90,7 +90,7 @@ def run_model(
       device: Device holding the model.
       report: Dict updated in place.
     """
-    tokenizer = perception.TokenizerWrapper(
+    tokenizer = perception.Tokenizer(
         tokenizer_name="gpt2", max_seq_len=args.max_seq_len
     )
     results = eval_harness.evaluate_all(args.tasks, model, tokenizer, device)
@@ -106,7 +106,7 @@ def run_model(
         ppl = heldout_ppl(
             model,
             kind,
-            shards.TokenShard(path),
+            shards.Shard(path),
             device,
             args.ppl_batches,
             args.max_seq_len,
