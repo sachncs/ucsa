@@ -503,8 +503,8 @@ def build_ucsa_from_hydra(overrides: list[str] | None = None) -> UCSA:
             "Hydra is required for build_ucsa_from_hydra."
         ) from exc
     config_dir = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "configs")
+        os.path.join(os.path.dirname(__file__), "..")
     )
     with initialize_config_dir(version_base=None, config_dir=config_dir):
-        cfg = compose(config_name="default", overrides=overrides or [])
+        cfg = compose(config_name="config", overrides=overrides or [])
     return build_ucsa(cfg)
