@@ -279,14 +279,16 @@ The four stages, step-gated:
 
 ## `ucsa.training.eval_harness` — standard LM benchmarks
 
+Prompts, metrics and splits follow lm-evaluation-harness so results compare
+with published numbers.
+
 | Symbol | Purpose |
 | --- | --- |
-| `TaskSpec` | One task: name, loader, `max_examples`, seed. |
-| `EvalResult` | Per-task result: `n`, `correct`, `accuracy`, mean log-likelihood, `extras`. |
-| `TASK_REGISTRY` | The five tasks: HellaSwag, ARC-easy, ARC-challenge, PIQA, WinoGrande. |
-| `evaluate_task(spec, model, tokenizer, device)` | Run one task. |
-| `evaluate_all(names, model, tokenizer, device)` | Run a list of tasks. |
-| `DEFAULT_EVAL_SEED` | Default seed for deterministic `max_examples` selection. |
+| `TaskSpec` | One task: name, loader, `max_examples` (None = full split), seed, headline `metric`. |
+| `EvalResult` | Per-task result; `extras` holds `acc`, `acc_norm` and the binomial standard error. |
+| `TASK_REGISTRY` | HellaSwag and ARC-Challenge report `acc_norm`; ARC-Easy, PIQA, WinoGrande report `acc`. |
+| `choice_loglik(model, tokenizer, context, choice, device)` | `(sum log-prob, n tokens)` of a choice given its context. A slot model never sees the choice. |
+| `evaluate_task`, `evaluate_all` | Run one task or a list. |
 
 ## `ucsa.training.evaluation` — the eval loop
 
@@ -309,6 +311,41 @@ The four stages, step-gated:
 | --- | --- |
 | `dataset.Config` | Streaming config: sequence length, primary dataset, split, pack. |
 | `dataset.Text` | Iterable dataset with a `pack_sequences` option. |
+
+## UCSA-R and its tooling
+
+See [UCSA-R](ucsa-r.md) for the design. One line per public symbol here.
+
+### `ucsa.models.recurrent`
+
+| Symbol | Purpose |
+| --- | --- |
+| `Config` | Every architecture switch, validated in order; unknown keys rejected by `from_dict`. |
+| `Model` | `forward` (logits for every position), `compute_loss`, `advance` and `next_logits` (streaming), `generate`. |
+| `Attention`, `Block`, `StateUpdater` | One attention class serves windowed decoding, chunk encoding and the state write. |
+| `window_mask`, `shift_chunks` | The sliding-window visibility rule and the previous-chunk shift. |
+| `config_for_params(n)` | Pick width and depth for about `n` parameters. |
+
+### `ucsa.training`
+
+| Module | Symbols |
+| --- | --- |
+| `engine` | `Config`, `fit` (resumable, one host sync per step), `evaluate`, `WeightEma`, `build_optimizer`, `clip_grad_norm`, `load_model`. |
+| `shards` | `Shard` (deterministic, resumable batches), `write_shard` (atomic), `filter_documents` (dedupe), `filter_by_compressibility`, `compression_ratio`. |
+| `prefix` | The prefix-only protocol: `split_prefix_targets`, `tail_nll`, continuation log-probs. |
+| `compression` | `token_byte_lengths`, `bits_per_byte`, `anchors` (zlib, LZMA). |
+| `diagnostics` | `window_nll`, `paired_bootstrap`, `chunk_profile`, `state_rate_distortion`. |
+| `scaling` | `fit` and `forecast` of `L(t) = floor + A t^-alpha`, `crossing`, `paired_forecast_gap`. |
+| `tuning` | `successive_halving`, `sample_candidates`. |
+| `reference` | `load_reference`, `compare`, `format_table` against published results. |
+
+### Top level
+
+| Module | Symbols |
+| --- | --- |
+| `ucsa.arithmetic` | `compress`, `decompress`, `compress_text`, `decompress_text`, `ModelPredictor`, `ideal_bits`. |
+| `ucsa.dryrun` | `run` (dtype audit, memory, speed, health), `Recorder`, `Report`. Never imported by training. |
+| `ucsa.utils.precision` | `DTYPE` (the one float type), `configure`, `to_dtype`, `NUMPY_DTYPE`. |
 
 ## `ucsa` — top-level entrypoints
 
