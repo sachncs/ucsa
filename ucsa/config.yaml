@@ -102,10 +102,10 @@ recurrent:
       train: {steps: 50, seq_len: 128, warmup_steps: 5, eval_every: 25, eval_batches: 2, log_every: 10}
     small:    # ~19M params: compute-optimal for ~100M tokens
       # read_gate: 0.06-0.09 bits/token better than no gate; jepa_weight 0:
-      # JEPA gave no gain beyond noise (docs/ucsa-r.md, runs/ablate-gated).
+      # JEPA gave no gain beyond noise; lr 2.4e-3 chosen by the ladder crossover.
       model: {hidden: 256, layers: 6, heads: 4, ffn_dim: 704, chunk_size: 128,
               read_gate: true, jepa_weight: 0.0}
-      train: {steps: 12000, seq_len: 1024, lr: 6.0e-4}
+      train: {steps: 12000, seq_len: 1024, lr: 2.4e-3}
     base:
       model: {hidden: 768, layers: 12, heads: 12, ffn_dim: 2048, chunk_size: 128,
               banks: {working: 32, long_term: 16, intent: 16}}
