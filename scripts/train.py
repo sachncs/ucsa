@@ -17,7 +17,6 @@ Usage:
     .venv/bin/python scripts/train.py [--seed N] [--max-steps N]
         [--ablation NAME] [--out-json PATH]
         [--no-ema|--no-lewm|--no-recon|--no-tc-jepa|--no-curriculum]
-        [--baselines gpt2 gpt2-medium] [--skip-baselines]
 """
 
 from __future__ import annotations
@@ -28,19 +27,23 @@ import math
 import os
 import sys
 import time
+from collections.abc import Iterator
+from typing import Any
 
 import torch
 import yaml
+from small_config import apply_small_overrides
 from torch.utils.data import DataLoader
-from transformers import AutoModelForCausalLM
 
 from ucsa.models.perception import TokenizerWrapper
 from ucsa.train import build_model, build_trainer
 from ucsa.training.dataset import DatasetConfig, TextDataset
+from ucsa.training.prefix import PrefixBatches
 from ucsa.utils.seed import set_seed
 
 
 def parse_args() -> argparse.Namespace:
+    """Parses the training command line."""
     p = argparse.ArgumentParser()
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--max-steps", type=int, default=12000)
@@ -62,14 +65,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--stage-2-end", type=int, default=4500)
     p.add_argument("--stage-3-end", type=int, default=6500)
     p.add_argument("--val-skip", type=int, default=10_000)
-    p.add_argument("--baseline-eval-batches", type=int, default=20)
-    p.add_argument(
-        "--baselines",
-        nargs="*",
-        default=["gpt2", "gpt2-medium"],
-        help="HuggingFace model ids evaluated zero-shot on the same val cursor",
-    )
-    p.add_argument("--skip-baselines", action="store_true")
     # SOTA stack toggles — ablations
     p.add_argument("--no-ema", dest="ema", action="store_false")
     p.add_argument("--ema-momentum", type=float, default=0.996)
@@ -135,20 +130,26 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-class _IterableOver(torch.utils.data.IterableDataset):
+class IterableOver(torch.utils.data.IterableDataset):
+    """Adapts a `TextDataset` to a torch `IterableDataset`."""
+
     def __init__(self, ds: TextDataset) -> None:
+        """Wraps `ds`."""
         self.ds = ds
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
+        """Iterates the wrapped dataset."""
         return iter(self.ds)
 
 
-def _infinite(loader: DataLoader):
+def infinite(loader: DataLoader) -> Iterator[Any]:
+    """Cycles `loader` forever."""
     while True:
         yield from loader
 
 
-def _current_lr(trainer) -> float:
+def current_lr(trainer: Any) -> float:
+    """Returns the trainer's current learning rate."""
     sched = trainer.scheduler
     if hasattr(sched, "get_last_lr"):
         return sched.get_last_lr()[0]
@@ -158,11 +159,14 @@ def _current_lr(trainer) -> float:
 
 
 @torch.no_grad()
-def _eval(trainer, loader: DataLoader, max_batches: int) -> dict[str, float]:
+def evaluate_model(
+    trainer: Any, loader: DataLoader, max_batches: int
+) -> dict[str, float]:
+    """Returns mean validation loss and perplexity over `max_batches`."""
     trainer.model.eval()
     total, count = 0.0, 0
     it = iter(loader)
-    for _i in range(max_batches):
+    for _ in range(max_batches):
         try:
             inputs, targets = next(it)
         except StopIteration:
@@ -179,41 +183,8 @@ def _eval(trainer, loader: DataLoader, max_batches: int) -> dict[str, float]:
     return {"loss": avg, "perplexity": math.exp(avg)}
 
 
-@torch.no_grad()
-def _eval_hf_baseline(model_id, val_iter, max_batches, device):
-    print(f"    loading {model_id}...", flush=True)
-    model = AutoModelForCausalLM.from_pretrained(model_id).to(device).eval()
-    n_params = sum(p.numel() for p in model.parameters())
-    total, count = 0.0, 0
-    for _i in range(max_batches):
-        try:
-            inputs, targets = next(val_iter)
-        except StopIteration:
-            break
-        inputs = inputs.to(device)
-        targets = targets.to(device)
-        out = model(input_ids=inputs)
-        logits = out.logits
-        if logits.shape[1] != targets.shape[1]:
-            seq = min(logits.shape[1], targets.shape[1])
-            logits = logits[:, -seq:, :]
-            targets = targets[:, -seq:]
-        loss = torch.nn.functional.cross_entropy(
-            logits.reshape(-1, logits.shape[-1]),
-            targets.reshape(-1),
-        )
-        total += float(loss.item())
-        count += 1
-    del model
-    if hasattr(device, "type") and device.type == "mps":
-        torch.mps.empty_cache()
-    if count == 0:
-        return {"loss": 0.0, "perplexity": 0.0, "params": n_params}
-    avg = total / count
-    return {"loss": avg, "perplexity": math.exp(avg), "params": n_params}
-
-
 def main() -> None:
+    """Trains the original UCSA and writes a JSON report."""
     args = parse_args()
     set_seed(args.seed, deterministic=True)
 
@@ -230,18 +201,7 @@ def main() -> None:
     with open("ucsa/configs/default.yaml") as f:
         cfg = yaml.safe_load(f)
 
-    cfg["reasoning_iterations"] = 4
-    cfg["model"]["hidden_size"] = 384
-    cfg["model"]["num_layers"] = 6
-    cfg["model"]["num_q_heads"] = 8
-    cfg["model"]["num_kv_heads"] = 4
-    cfg["model"]["intermediate_size"] = 1024
-    cfg["model"]["vocab_size"] = 50257
-    cfg["model"]["max_seq_len"] = 1024
-    cfg["model"]["num_concepts"] = 16
-    cfg["model"]["attention_dropout"] = 0.1
-    cfg["model"]["residual_dropout"] = 0.1
-    cfg["model"]["ffn_dropout"] = 0.1
+    apply_small_overrides(cfg)
 
     # Ablation toggles that all map into the config
     cfg["model"]["jepa_mode"] = "lewm" if args.lewm else "ijepa"
@@ -291,8 +251,12 @@ def main() -> None:
     train_ds = TextDataset(ucsa_tokenizer, ds_cfg)
     val_ds = TextDataset(ucsa_tokenizer, ds_cfg)
     val_ds.dataset = val_ds.dataset.skip(args.val_skip)
-    train_loader = DataLoader(_IterableOver(train_ds), batch_size=None)
-    val_loader = DataLoader(_IterableOver(val_ds), batch_size=None)
+    train_loader = DataLoader(
+        IterableOver(PrefixBatches(train_ds)), batch_size=None
+    )
+    val_loader = DataLoader(
+        IterableOver(PrefixBatches(val_ds)), batch_size=None
+    )
 
     model = build_model(cfg)
     n_ucsa_params = sum(p.numel() for p in model.parameters())
@@ -354,7 +318,7 @@ def main() -> None:
     best_step = -1
     start = time.time()
 
-    for step, batch in enumerate(_infinite(train_loader)):
+    for step, batch in enumerate(infinite(train_loader)):
         if step >= args.max_steps:
             break
         snap = trainer.train_step(batch)
@@ -365,7 +329,7 @@ def main() -> None:
             el = time.time() - start
             window = min(cfg["training"]["log_every_n_steps"], len(losses))
             avg = sum(losses[-window:]) / window
-            lr = _current_lr(trainer)
+            lr = current_lr(trainer)
             stage = trainer.curriculum.state.current_stage.display_name
             extras = (
                 f"jp={snap.get('jepa_prediction', 0):.4f} "
@@ -395,7 +359,7 @@ def main() -> None:
         # ``scripts/run_ablations.py`` already passes. Taking a modulo by it
         # raised ZeroDivisionError on the first step instead.
         if args.eval_every > 0 and step > 0 and step % args.eval_every == 0:
-            vm = _eval(trainer, val_loader, args.eval_batches)
+            vm = evaluate_model(trainer, val_loader, args.eval_batches)
             if vm["perplexity"] < best_val_ppl:
                 best_val_ppl = vm["perplexity"]
                 best_step = step
@@ -415,49 +379,7 @@ def main() -> None:
         os.path.join(args.ckpt_dir, "ucsa-final.safetensors")
     )
     elapsed = time.time() - start
-    final_ucsa = _eval(trainer, val_loader, args.eval_batches)
-    rows: list[dict] = []
-    if not args.skip_baselines:
-        device = trainer.device
-        rows.append(
-            {
-                "name": "UCSA-small (this run)",
-                "params": n_ucsa_params,
-                "val_ppl": final_ucsa["perplexity"],
-            }
-        )
-        bench_ds = TextDataset(
-            ucsa_tokenizer,
-            DatasetConfig(
-                sequence_length=cfg["dataset"]["sequence_length"],
-                primary_dataset=cfg["dataset"]["primary_dataset"],
-                primary_split=cfg["dataset"]["primary_split"],
-                streaming=True,
-                pack_sequences=True,
-            ),
-        )
-        bench_ds.dataset = bench_ds.dataset.skip(args.val_skip)
-        bench_loader = DataLoader(_IterableOver(bench_ds), batch_size=None)
-        bench_iter = iter(bench_loader)
-        for baseline in args.baselines:
-            try:
-                metrics = _eval_hf_baseline(
-                    baseline,
-                    bench_iter,
-                    args.baseline_eval_batches,
-                    device,
-                )
-                rows.append(
-                    {
-                        "name": baseline,
-                        "params": metrics["params"],
-                        "val_ppl": metrics["perplexity"],
-                    }
-                )
-            except Exception as exc:
-                print(f"    {baseline} failed: {exc}", flush=True)
-                rows.append({"name": baseline, "params": 0, "val_ppl": None})
-
+    final_ucsa = evaluate_model(trainer, val_loader, args.eval_batches)
     report = {
         "model": "ucsa-small",
         "seed": args.seed,
@@ -470,7 +392,6 @@ def main() -> None:
         "best_val_ppl_step": best_step,
         "n_ucsa_params": n_ucsa_params,
         "elapsed_seconds": elapsed,
-        "baselines": rows,
     }
     os.makedirs(os.path.dirname(args.out_json) or ".", exist_ok=True)
     with open(args.out_json, "w") as f:
