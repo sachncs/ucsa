@@ -10,16 +10,16 @@ import json
 import os
 
 from scripts.build_paper_tables import (
-    _agg,
-    _load_jsons,
+    aggregate,
     build_ablation_table,
     build_bank_probe_table,
     build_eval_table,
     build_main_table,
+    load_jsons,
 )
 
 
-def _write(tmp_path, name, payload):
+def write_json(tmp_path, name, payload):
     p = os.path.join(str(tmp_path), name)
     with open(p, "w") as f:
         json.dump(payload, f)
@@ -33,7 +33,7 @@ def test_load_jsons_matches_a_prefix(tmp_path):
     (tmp_path / "ucsa-no-ema-seed42.json").write_text('{"best_val_ppl": 28.0}')
     (tmp_path / "baseline.json").write_text('{"final_val_ppl": 28.5}')
     (tmp_path / "eval-ucsa-small.json").write_text('{"ucsa_avg_acc": 0.32}')
-    matches = _load_jsons(str(tmp_path), r"^ucsa-(?!baseline).*-seed\d+\.json$")
+    matches = load_jsons(str(tmp_path), r"^ucsa-(?!baseline).*-seed\d+\.json$")
     assert len(matches) == 2
     assert {m["name"] for m in matches} == {
         "ucsa-full-seed42.json",
@@ -43,7 +43,7 @@ def test_load_jsons_matches_a_prefix(tmp_path):
 
 def test_agg_single_value():
     rows = [{"data": {"best_val_ppl": 24.5}}]
-    mean, sd, n = _agg(rows, "best_val_ppl")
+    mean, sd, n = aggregate(rows, "best_val_ppl")
     assert mean == 24.5
     assert sd == 0.0
     assert n == 1
@@ -54,7 +54,7 @@ def test_agg_multi_seed():
         {"data": {"best_val_ppl": 24.0}},
         {"data": {"best_val_ppl": 26.0}},
     ]
-    mean, sd, n = _agg(rows, "best_val_ppl")
+    mean, sd, n = aggregate(rows, "best_val_ppl")
     assert mean == 25.0
     assert sd > 0.0
     assert n == 2
