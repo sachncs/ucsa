@@ -187,12 +187,9 @@ class Memory:
         if k <= 0:
             return []
 
-        tokens_to_write = candidate.tokens[:k].to(
-            device=long_term.device, dtype=long_term.dtype
-        )
+        tokens_to_write = candidate.tokens[:k].to(device=long_term.device)
         importance_to_write = candidate.importance[:k].to(
-            device=long_term.device,
-            dtype=self.cstate.metadata("long_term", "importance").dtype,
+            device=long_term.device
         )
         empty = self.__empty_long_term_indices(limit=k)
         empty_indices = torch.tensor(empty, dtype=torch.long)
