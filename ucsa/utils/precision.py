@@ -21,6 +21,9 @@ ENVIRONMENT_VARIABLE = "UCSA_DTYPE"
 
 DTYPE = SUPPORTED[os.environ.get(ENVIRONMENT_VARIABLE, "float32")]
 
+# The numpy dtype matching `DTYPE`, for host-side analysis code.
+NUMPY_DTYPE = torch.zeros(0, dtype=DTYPE).numpy().dtype
+
 # AdamW's epsilon must be representable: 1e-8 underflows to zero in float16.
 ADAM_EPS = 1e-8 if torch.float32 == DTYPE else 1e-4
 
