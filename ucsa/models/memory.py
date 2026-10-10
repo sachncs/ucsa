@@ -193,7 +193,7 @@ class Memory:
             device=long_term.device,
             dtype=self.cstate.metadata("long_term", "importance").dtype,
         )
-        empty = self._empty_long_term_indices(limit=k)
+        empty = self.__empty_long_term_indices(limit=k)
         empty_indices = torch.tensor(empty, dtype=torch.long)
         if len(empty) < k:
             # Recycle the lowest-retention slots to make room.
@@ -210,7 +210,7 @@ class Memory:
         self.cstate.update_retention()
         return [int(i) for i in empty_indices]
 
-    def _empty_long_term_indices(self, limit: int) -> list[int]:
+    def __empty_long_term_indices(self, limit: int) -> list[int]:
         """Return up to ``limit`` long-term slots with zero usage."""
         usage = self.cstate.metadata("long_term", "usage")
         empty = torch.nonzero(usage == 0, as_tuple=False).squeeze(-1)
