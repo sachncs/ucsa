@@ -27,7 +27,7 @@ import torch
 from torch import Tensor, nn
 
 
-class EMATargetEncoder(nn.Module):
+class TargetEncoder(nn.Module):
     """Hard EMA target encoder. Buffers contain the EMA-updated copy.
 
     Args:
@@ -68,4 +68,4 @@ class EMATargetEncoder(nn.Module):
         return outputs
 
 
-__all__ = ["EMATargetEncoder"]
+__all__ = ["TargetEncoder"]
