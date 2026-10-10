@@ -12,15 +12,15 @@ touch the network.
 """
 
 import argparse
+import concurrent.futures
 import os
 import time
-from collections.abc import Iterator
 
 import datasets
 import huggingface_hub
 import transformers
 
-from ucsa.training import shards
+from ucsa.training import corpus, shards
 
 REPO = "cambridge-climb/BabyLM"
 SOURCES = (
@@ -36,94 +36,47 @@ SOURCES = (
     "wikipedia",
 )
 SPLITS = {"train": "100M", "val": "dev", "test": "test"}
-LINES_PER_DOCUMENT = 32
 
 
-def documents(path: str) -> Iterator[str]:
-    """Yields pseudo-documents: runs of consecutive non-empty lines.
-
-    The corpus is a stream of utterances and sentences without document
-    boundaries, so consecutive lines are grouped; the end-of-text token then
-    separates groups, not sentences.
-
-    Args:
-      path: A corpus text file.
-
-    Yields:
-      Up to `LINES_PER_DOCUMENT` lines joined by newlines.
-    """
-    block: list[str] = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            block.append(line)
-            if len(block) == LINES_PER_DOCUMENT:
-                yield "\n".join(block)
-                block = []
-    if block:
-        yield "\n".join(block)
-
-
-def tokenized(
-    texts: Iterator[str], tokenizer: transformers.PreTrainedTokenizerBase
-) -> Iterator[list[int]]:
-    """Yields token-id lists for texts, tokenised in batches of 256.
-
-    Args:
-      texts: Document texts.
-      tokenizer: Tokenizer to apply.
-
-    Yields:
-      One list of token ids per text.
-    """
-    batch: list[str] = []
-    for text in texts:
-        batch.append(text)
-        if len(batch) == 256:
-            yield from tokenizer(batch, add_special_tokens=False)["input_ids"]
-            batch = []
-    if batch:
-        yield from tokenizer(batch, add_special_tokens=False)["input_ids"]
-
-
-def corpus_files(split: str) -> Iterator[str]:
+def download(split: str) -> list[str]:
     """Downloads (or finds in the cache) the files of one corpus split.
 
     Args:
       split: Folder under `clean/`: `100M`, `dev` or `test`.
 
-    Yields:
-      Local paths, one per source.
+    Returns:
+      Local paths, one per source, in `SOURCES` order.
     """
-    for source in SOURCES:
-        yield huggingface_hub.hf_hub_download(
+
+    def fetch(source: str) -> str:
+        return huggingface_hub.hf_hub_download(
             REPO, f"clean/{split}/{source}.txt", repo_type="dataset"
         )
+
+    with concurrent.futures.ThreadPoolExecutor(len(SOURCES)) as pool:
+        return list(pool.map(fetch, SOURCES))
 
 
 def main() -> None:
     """Parses arguments and writes the shards."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", default="data")
+    parser.add_argument("--workers", type=int, default=None)
+    parser.add_argument("--force", action="store_true")
     parser.add_argument("--skip-wikitext", action="store_true")
     args = parser.parse_args()
 
-    tokenizer = transformers.AutoTokenizer.from_pretrained("gpt2")
     os.makedirs(args.out, exist_ok=True)
     started = time.time()
     for name, split in SPLITS.items():
-
-        def texts(split: str = split) -> Iterator[str]:
-            for path in corpus_files(split):
-                yield from documents(path)
-
         path = os.path.join(args.out, f"{name}.bin")
-        written = shards.write_shard(tokenized(texts(), tokenizer), path)
+        tokens, built = corpus.build(
+            download(split), path, workers=args.workers, force=args.force
+        )
         print(
-            f"{name}: {written:,} tokens -> {path} "
-            f"({time.time() - started:.0f}s)",
+            f"{name}: {tokens:,} tokens -> {path} "
+            f"({'built' if built else 'already current'}, "
+            f"{time.time() - started:.0f}s)",
             flush=True,
         )
     if not args.skip_wikitext:
@@ -131,6 +84,7 @@ def main() -> None:
             "Salesforce/wikitext", "wikitext-103-raw-v1", split="test"
         )
         text = "".join(row["text"] for row in wiki)
+        tokenizer = transformers.AutoTokenizer.from_pretrained("gpt2")
         path = os.path.join(args.out, "wikitext_test.bin")
         written = shards.write_shard(
             [tokenizer(text, add_special_tokens=False)["input_ids"]], path
