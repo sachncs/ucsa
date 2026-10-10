@@ -7,7 +7,7 @@ import torch
 from torch import Tensor, nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from ucsa.training.evaluation import EvaluationLoop
+from ucsa.training import evaluation
 
 
 class ToyModel(nn.Module):
@@ -67,36 +67,36 @@ def dataloader() -> DataLoader:
 
 
 class TestEvaluationState:
-    """Tests for :class:`EvaluationState`."""
+    """Tests for :class:`evaluation.State`."""
 
     def test_defaults(self) -> None:
         """Default state is zeroed."""
-        from ucsa.training.evaluation import EvaluationState
+        from ucsa.training import evaluation
 
-        state = EvaluationState()
+        state = evaluation.State()
         assert state.steps == 0
         assert state.last_loss == 0.0
 
 
 class TestEvaluationLoopConstruction:
-    """Tests for :class:`EvaluationLoop` construction."""
+    """Tests for :class:`evaluation.Loop` construction."""
 
     def test_default_device_is_cuda_or_cpu(self, model: ToyModel) -> None:
         """Default device is CUDA when available, else CPU."""
         loss_fn = BoundARLoss(model)
-        loop = EvaluationLoop(model, loss_fn)
+        loop = evaluation.Loop(model, loss_fn)
         assert loop.device.type in ("cuda", "cpu")
 
 
 class TestEvaluationLoopEvaluate:
-    """Tests for :meth:`EvaluationLoop.evaluate`."""
+    """Tests for :meth:`evaluation.Loop.evaluate`."""
 
     def test_evaluate_returns_loss_and_perplexity(
         self, model: ToyModel, dataloader: DataLoader
     ) -> None:
         """``evaluate`` returns ``loss`` and ``perplexity`` keys."""
         loss_fn = BoundARLoss(model)
-        loop = EvaluationLoop(model, loss_fn)
+        loop = evaluation.Loop(model, loss_fn)
         result = loop.evaluate(dataloader, max_batches=3)
         assert "loss" in result
         assert "perplexity" in result
@@ -108,7 +108,7 @@ class TestEvaluationLoopEvaluate:
     ) -> None:
         """No gradient is retained after evaluation."""
         loss_fn = BoundARLoss(model)
-        loop = EvaluationLoop(model, loss_fn)
+        loop = evaluation.Loop(model, loss_fn)
         for param in model.parameters():
             param.grad = None
         loop.evaluate(dataloader, max_batches=2)
@@ -120,7 +120,7 @@ class TestEvaluationLoopEvaluate:
     ) -> None:
         """``max_batches`` caps the number of evaluated batches."""
         loss_fn = BoundARLoss(model)
-        loop = EvaluationLoop(model, loss_fn)
+        loop = evaluation.Loop(model, loss_fn)
         loop.evaluate(dataloader, max_batches=2)
         assert loop.state.steps == 2
 
@@ -129,7 +129,7 @@ class TestEvaluationLoopEvaluate:
     ) -> None:
         """The loop's state is updated after evaluation."""
         loss_fn = BoundARLoss(model)
-        loop = EvaluationLoop(model, loss_fn)
+        loop = evaluation.Loop(model, loss_fn)
         loop.evaluate(dataloader, max_batches=2)
         assert loop.state.steps == 2
         assert loop.state.last_loss > 0.0
@@ -140,7 +140,7 @@ class TestEvaluationLoopEvaluate:
     ) -> None:
         """The model returns to ``train`` mode after evaluation."""
         loss_fn = BoundARLoss(model)
-        loop = EvaluationLoop(model, loss_fn)
+        loop = evaluation.Loop(model, loss_fn)
         model.train()
         loop.evaluate(dataloader, max_batches=1)
         assert model.training
@@ -148,7 +148,7 @@ class TestEvaluationLoopEvaluate:
     def test_evaluate_empty_dataloader(self, model: ToyModel) -> None:
         """An empty dataloader leaves the state unchanged."""
         loss_fn = BoundARLoss(model)
-        loop = EvaluationLoop(model, loss_fn)
+        loop = evaluation.Loop(model, loss_fn)
         empty_loader = DataLoader(
             TensorDataset(torch.empty(0, 4), torch.empty(0, 4))
         )
@@ -157,23 +157,23 @@ class TestEvaluationLoopEvaluate:
 
 
 class TestShouldEvaluate:
-    """Tests for :meth:`EvaluationLoop.should_evaluate`."""
+    """Tests for :meth:`evaluation.Loop.should_evaluate`."""
 
     def test_evaluates_at_interval(self, model: ToyModel) -> None:
         """``should_evaluate`` returns ``True`` at multiples of the interval."""
         loss_fn = BoundARLoss(model)
-        loop = EvaluationLoop(model, loss_fn)
+        loop = evaluation.Loop(model, loss_fn)
         assert loop.should_evaluate(100, every_n_steps=10)
         assert loop.should_evaluate(0, every_n_steps=10) is False
 
     def test_zero_interval_disables(self, model: ToyModel) -> None:
         """``every_n_steps=0`` disables evaluation."""
         loss_fn = BoundARLoss(model)
-        loop = EvaluationLoop(model, loss_fn)
+        loop = evaluation.Loop(model, loss_fn)
         assert loop.should_evaluate(100, every_n_steps=0) is False
 
     def test_non_multiple_does_not_evaluate(self, model: ToyModel) -> None:
         """A non-multiple step does not trigger evaluation."""
         loss_fn = BoundARLoss(model)
-        loop = EvaluationLoop(model, loss_fn)
+        loop = evaluation.Loop(model, loss_fn)
         assert loop.should_evaluate(7, every_n_steps=10) is False
