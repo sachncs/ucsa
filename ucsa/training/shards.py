@@ -7,10 +7,10 @@ batch is a pure function of `(seed, step)`, and a resumed run continues the
 data stream exactly.
 """
 
-import hashlib
+import contextlib
 import os
-import zlib
 from collections.abc import Iterable, Iterator
+from typing import BinaryIO
 
 import numpy as np
 import torch
@@ -19,101 +19,44 @@ EOS_ID = 50256
 DTYPE = np.uint16
 
 
-def filter_documents(
-    token_lists: Iterable[list[int]],
-    min_tokens: int = 32,
-    prefix_len: int = 128,
-    stats: dict[str, int] | None = None,
-    seen: set[bytes] | None = None,
-) -> Iterator[list[int]]:
-    """Drops short and duplicate documents.
+@contextlib.contextmanager
+def atomic(path: str) -> Iterator[BinaryIO]:
+    """Opens a file that replaces `path` only if the block completes.
 
-    A document is a duplicate when its first `prefix_len` tokens were already
-    seen, whatever follows. That removes repeated boilerplate, mirrored pages
-    and templated series, which otherwise leak between training and
-    validation and inflate the apparent quality of memorisation. It also
-    drops a distinct document that happens to share a long common opening.
+    A reader that has `path` memory-mapped keeps its old, intact copy instead
+    of seeing a truncated file, and a crash while writing leaves the previous
+    file untouched.
 
     Args:
-      token_lists: Token-id lists, one per document.
-      min_tokens: Documents shorter than this are dropped.
-      prefix_len: Number of leading tokens that identify a document.
-      stats: If given, updated in place with `seen`, `kept`, `short` and
-        `duplicate` counts.
-      seen: Fingerprints already seen. Pass the same set to several calls so
-        a document written to one shard is never written to another.
+      path: Final file name.
 
     Yields:
-      The documents that survive both filters, in order.
+      A binary file object for a temporary sibling of `path`.
     """
-    counts = stats if stats is not None else {}
-    for key in ("seen", "kept", "short", "duplicate"):
-        counts.setdefault(key, 0)
-    seen_hashes = set() if seen is None else seen
-    for ids in token_lists:
-        counts["seen"] += 1
-        if len(ids) < min_tokens:
-            counts["short"] += 1
-            continue
-        head = np.asarray(ids[:prefix_len], dtype=DTYPE).tobytes()
-        digest = hashlib.blake2b(head, digest_size=8).digest()
-        if digest in seen_hashes:
-            counts["duplicate"] += 1
-            continue
-        seen_hashes.add(digest)
-        counts["kept"] += 1
-        yield ids
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    temporary = path + ".tmp"
+    try:
+        with open(temporary, "wb") as out:
+            yield out
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
 
 
-def compression_ratio(text: str) -> float:
-    """Returns compressed size over raw size under zlib level 6.
-
-    Natural prose sits near 0.4. Boilerplate and repeated lists compress far
-    below that; garbled or machine-generated text compresses far less.
+def write_array(tokens: np.ndarray, path: str) -> int:
+    """Writes token ids to a shard atomically.
 
     Args:
-      text: Document text.
+      tokens: One-dimensional array of ids, end-of-text ids included.
+      path: Output file.
 
     Returns:
-      `len(zlib(text)) / len(text)` in bytes, or 1.0 for empty text.
+      The number of tokens written.
     """
-    raw = text.encode("utf-8")
-    if not raw:
-        return 1.0
-    return len(zlib.compress(raw, 6)) / len(raw)
-
-
-def filter_by_compressibility(
-    texts: Iterable[str],
-    low: float,
-    high: float,
-    stats: dict[str, int] | None = None,
-) -> Iterator[str]:
-    """Keeps documents whose compression ratio lies in `[low, high]`.
-
-    Args:
-      texts: Document texts.
-      low: Minimum ratio; below it a document is too repetitive.
-      high: Maximum ratio; above it a document is too random.
-      stats: If given, updated in place with `seen`, `kept`, `too_repetitive`
-        and `too_random` counts.
-
-    Yields:
-      The documents that pass.
-    """
-    counts = stats if stats is not None else {}
-    for key in ("seen", "kept", "too_repetitive", "too_random"):
-        counts.setdefault(key, 0)
-    for text in texts:
-        counts["seen"] += 1
-        ratio = compression_ratio(text)
-        if ratio < low:
-            counts["too_repetitive"] += 1
-        elif ratio > high:
-            counts["too_random"] += 1
-        else:
-            counts["kept"] += 1
-            yield text
+    with atomic(path) as out:
+        out.write(np.ascontiguousarray(tokens, dtype=DTYPE).tobytes())
+    return int(tokens.size)
 
 
 def write_shard(
@@ -121,34 +64,22 @@ def write_shard(
 ) -> int:
     """Writes documents to a shard, separated by the end-of-text id.
 
-    The file appears all at once: tokens go to a temporary file that replaces
-    `path` only when complete. A reader that has `path` memory-mapped keeps
-    its old, intact copy instead of seeing a truncated file, and a crash while
-    writing leaves the previous shard untouched.
-
     Args:
       token_lists: Iterable of token-id lists, one per document.
-      path: Output file.
+      path: Output file, replaced atomically (see `atomic`).
       limit: Stop after at least this many tokens; None writes everything.
 
     Returns:
       The number of tokens written.
     """
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     written = 0
-    temporary = path + ".tmp"
-    try:
-        with open(temporary, "wb") as out:
-            for ids in token_lists:
-                block = np.asarray([*ids, EOS_ID], dtype=DTYPE)
-                out.write(block.tobytes())
-                written += block.size
-                if limit is not None and written >= limit:
-                    break
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.remove(temporary)
+    with atomic(path) as out:
+        for ids in token_lists:
+            block = np.asarray([*ids, EOS_ID], dtype=DTYPE)
+            out.write(block.tobytes())
+            written += block.size
+            if limit is not None and written >= limit:
+                break
     return written
 
 
