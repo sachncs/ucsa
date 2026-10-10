@@ -16,6 +16,7 @@ STRICT_FILES: tuple[str, ...] = (
     "ucsa/training/engine.py",
     "ucsa/training/shards.py",
     "ucsa/training/scoring.py",
+    "ucsa/training/presets.py",
     "ucsa/training/eval_harness.py",
     "ucsa/training/tuning.py",
     "ucsa/training/reference.py",
@@ -54,5 +55,7 @@ STRICT_FILES: tuple[str, ...] = (
     "tests/test_reference.py",
     "tests/test_shards.py",
     "tests/test_scoring.py",
+    "tests/test_presets.py",
+    "tests/helpers.py",
     "tests/test_eval_harness.py",
 )
