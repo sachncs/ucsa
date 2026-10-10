@@ -157,7 +157,7 @@ co-activation. Retrieval projects relevant concept nodes back into
 memory tokens, which the memory service injects into `working` at
 the start of the next reasoning pass.
 
-Implementation: `ucsa/models/graph_service.py`.
+Implementation: `ucsa/models/graph.py` (`Graph`, `Cluster`, and pluggable `Metric`s: cosine and Euclidean ship, others register with `graph.register`).
 
 ## JEPA
 

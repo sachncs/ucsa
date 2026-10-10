@@ -152,15 +152,32 @@ pruning on a background thread.
 | --- | --- |
 | `MemoryService` | Queue-based async worker. |
 
-## `ucsa.models.graph_service` — concept graph
+## `ucsa.models.graph` — concept graph
 
-Cosine k-means clustering of long-term memory embeddings, with
-edges for co-activation and retrieval by concept.
+K-means clustering of long-term memory embeddings under a pluggable distance
+metric, with edges for co-activation and retrieval by concept.
 
 | Symbol | Purpose |
 | --- | --- |
-| `CosineClusterer` | Pure-torch cosine k-means. |
-| `GraphService` | Builds concepts, projects relevant nodes back into memory tokens. |
+| `Metric` | Abstract distance/similarity/centre definition; subclass to add one. |
+| `Cosine`, `Euclidean` | Built-in metrics. |
+| `register(name)` | Class decorator that makes a metric selectable by name. |
+| `resolve(spec)` | Turns a name or instance into a `Metric`. |
+| `Cluster` | Deterministic k-means under any metric; `fit(points)` returns a `Clustering`. |
+| `Concept`, `Edge`, `Memory` | Graph data: a cluster, a co-activation link, the whole graph. |
+| `Graph` | `build(state)`, `retrieve`, `retrieve_tokens` and `inject` into working memory. |
+
+Adding a metric:
+
+```python
+@graph.register("manhattan")
+class Manhattan(graph.Metric):
+    def distance(self, points, centers): ...
+    def similarity(self, a, b): ...
+    def center(self, members): ...
+
+graph.Graph(num_concepts=8, metric="manhattan")
+```
 
 ## `ucsa.models.verification` — candidate scoring
 

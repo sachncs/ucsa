@@ -106,7 +106,7 @@ def main() -> None:
         heads=heads,
         memory=None,
         memory_service=None,
-        graph_service=None,
+        graph=None,
         verifier=None,
     )
 
