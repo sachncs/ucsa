@@ -1,9 +1,9 @@
 """Names are either public or fully private; never single-underscore.
 
 A single leading underscore is a convention that the language does not
-enforce, so it is neither public nor private. Code in `STRICT_FILES` must use
-a public name, or a double-underscore name (mangled inside a class).
-A bare `_` is allowed as the conventional throwaway.
+enforce, so it is neither public nor private. Every source file must use a
+public name, or a double-underscore name (mangled inside a class). A bare `_`
+is allowed as the conventional throwaway.
 """
 
 import ast
@@ -11,8 +11,6 @@ import pathlib
 import re
 
 import pytest
-
-from tests import strict_files
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SEMI_PRIVATE = re.compile(r"^_[A-Za-z0-9]")
@@ -50,12 +48,6 @@ def semi_private_names(source: str) -> list[tuple[int, str]]:
 def test_detector_flags_semi_private_and_allows_the_rest():
     src = "def _a(): pass\nclass B:\n    def __c(self): pass\nx = _\n"
     assert [n for _, n in semi_private_names(src)] == ["_a"]
-
-
-@pytest.mark.parametrize("path", strict_files.STRICT_FILES)
-def test_no_semi_private_names(path):
-    source = (ROOT / path).read_text()
-    assert semi_private_names(source) == []
 
 
 def repository_sources() -> list[pathlib.Path]:
