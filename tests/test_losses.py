@@ -170,7 +170,7 @@ class TestRouterLoadBalancingLoss:
         assert router_logits.grad is not None
 
 
-class TestUCSACombinedLoss:
+class TestCombined:
     """Tests for :class:`losses.Combined`."""
 
     def test_ar_only(self) -> None:
