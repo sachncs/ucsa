@@ -71,7 +71,6 @@ def parse_args() -> argparse.Namespace:
         default="runs/ablations",
         help="Per-ablation JSON files land here.",
     )
-    p.add_argument("--skip-baselines", action="store_true")
     p.add_argument(
         "--tags",
         nargs="*",
@@ -109,8 +108,6 @@ def main() -> None:
         "--stage-3-end",
         "2400",
     ]
-    if args.skip_baselines:
-        cmd_base.append("--skip-baselines")
 
     selected = ABLATIONS
     if args.tags:
