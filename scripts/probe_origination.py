@@ -40,7 +40,7 @@ from ucsa.models.origination import (
     intent_collapse_report,
 )
 from ucsa.train import build_model
-from ucsa.training.ema import EMATargetEncoder
+from ucsa.training import ema
 from ucsa.utils.checkpoint import load_state_dict_compat
 from ucsa.utils.seed import set_seed
 
@@ -114,7 +114,7 @@ def descent_sweep(
     Returns:
         One row per ``K``.
     """
-    encoder = EMATargetEncoder(model, momentum=0.99)
+    encoder = ema.TargetEncoder(model, momentum=0.99)
     rows: list[dict[str, object]] = []
     for k in steps:
         reports = [
@@ -267,7 +267,7 @@ def main() -> None:
                 pairs,
                 intent_steps=k,
                 learning_rate=args.intent_learning_rate,
-                target_encoder=EMATargetEncoder(model, momentum=0.99),
+                target_encoder=ema.TargetEncoder(model, momentum=0.99),
             )
         )
 
