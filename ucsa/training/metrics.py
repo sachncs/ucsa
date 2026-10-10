@@ -52,7 +52,7 @@ import torch
 from torch import Tensor
 
 
-class SummaryWriterLike(Protocol):
+class Writer(Protocol):
     """The one method the metrics registry needs from a TB writer."""
 
     def add_scalar(self, tag: str, value: float, step: int) -> None:
@@ -60,7 +60,7 @@ class SummaryWriterLike(Protocol):
 
 
 @dataclass
-class MetricState:
+class State:
     """internal: holds the running state of a single metric."""
 
     running_sum: float = 0.0
@@ -70,7 +70,7 @@ class MetricState:
     started_at: float = field(default_factory=time.time)
 
 
-class MetricsRegistry:
+class Registry:
     """Registry of named metrics with running statistics."""
 
     def __init__(self, names: Sequence[str]) -> None:
@@ -80,14 +80,12 @@ class MetricsRegistry:
             names: Names of the metrics to track.
         """
         self.names: tuple[str, ...] = tuple(names)
-        self.states: dict[str, MetricState] = {
-            name: MetricState() for name in self.names
-        }
+        self.states: dict[str, State] = {name: State() for name in self.names}
 
     def reset(self) -> None:
         """Reset every metric's running sum, count, and history."""
         for name in self.names:
-            self.states[name] = MetricState()
+            self.states[name] = State()
 
     def update(self, name: str, value: float) -> None:
         """Update a metric with a new value.
@@ -126,7 +124,7 @@ class MetricsRegistry:
         """Return a snapshot of every metric's running average."""
         return {name: self.value(name) for name in self.names}
 
-    def tensorboard_log(self, writer: SummaryWriterLike, step: int) -> None:
+    def tensorboard_log(self, writer: Writer, step: int) -> None:
         """Log every metric to a TensorBoard writer.
 
         Args:
@@ -315,8 +313,8 @@ def intent_read_share(intent_read: Tensor, working_read: Tensor) -> float:
 
 
 __all__ = [
-    "MetricState",
-    "MetricsRegistry",
+    "State",
+    "Registry",
     "attention_entropy",
     "expert_utilization",
     "gpu_memory_bytes",
@@ -358,9 +356,9 @@ DEFAULT_METRIC_NAMES: tuple[str, ...] = (
 )
 
 
-def build_default_registry() -> MetricsRegistry:
-    """internal: build a :class:`MetricsRegistry` with the default metric set."""
-    return MetricsRegistry(DEFAULT_METRIC_NAMES)
+def build_default_registry() -> Registry:
+    """internal: build a :class:`Registry` with the default metric set."""
+    return Registry(DEFAULT_METRIC_NAMES)
 
 
 def flatten_metrics(metrics: Mapping[str, float]) -> dict[str, float]:
