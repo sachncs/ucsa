@@ -76,7 +76,7 @@ The ones that define the research questions:
 python scripts/prepare_data.py --out data          # tokenise once, dedupe
 python scripts/dry_run.py --preset small           # dtype audit, memory, speed
 python scripts/train_r.py --preset small --out-dir ckpts/r-small
-python scripts/eval.py --recurrent-ckpt ckpts/r-small/final.pt
+python scripts/eval.py --ckpt ckpts/r-small/final.pt
 python scripts/compress.py --ckpt ckpts/r-small/final.pt   # real file sizes
 python scripts/probe_state.py --ckpt ckpts/r-small/final.pt \
     --control ckpts/r-nostate/final.pt             # what the state buys

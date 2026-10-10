@@ -68,7 +68,7 @@ run resumes from its last checkpoint and continues the data stream exactly.
 ## 4. Evaluate
 
 ```bash
-.venv/bin/python scripts/eval.py --recurrent-ckpt ckpts/r-small/final.pt
+.venv/bin/python scripts/eval.py --ckpt ckpts/r-small/final.pt
 .venv/bin/python scripts/compress.py --ckpt ckpts/r-small/final.pt
 .venv/bin/python scripts/probe_state.py --ckpt ckpts/r-small/final.pt \
     --control ckpts/r-nostate/final.pt

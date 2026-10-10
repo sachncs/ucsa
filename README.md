@@ -61,7 +61,7 @@ pytest -q                                            # ~870 tests
 .venv/bin/python scripts/train_r.py --preset small --out-dir ckpts/r-small
 
 # Zero-shot benchmarks vs published models, perplexity, bits per byte
-.venv/bin/python scripts/eval.py --recurrent-ckpt ckpts/r-small/final.pt
+.venv/bin/python scripts/eval.py --ckpt ckpts/r-small/final.pt
 
 # Real lossless compression with the model, verified by decoding
 .venv/bin/python scripts/compress.py --ckpt ckpts/r-small/final.pt
