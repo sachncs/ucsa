@@ -4,16 +4,16 @@
 
 - :class:`~ucsa.models.perception.Perception` -- text/code in,
   observation tokens out.
-- :class:`~ucsa.models.state.PersistentCognitiveState` -- the
+- :class:`~ucsa.models.cognitive.State` -- the
   seven-bank persistent state.
-- :class:`~ucsa.models.transition_operator.StateTransitionOperator`
+- :class:`~ucsa.models.transition.Operator`
   -- the abstract computation engine.
-- :class:`~ucsa.models.reasoning_loop.ReasoningLoop` -- N iterations of
+- :class:`~ucsa.models.reasoning.Loop` -- N iterations of
   the operator per forward pass.
-- :class:`~ucsa.models.projection_heads.ProjectionHeads` -- four
+- :class:`~ucsa.models.projection.Heads` -- four
   independent heads reading from working memory.
-- :class:`~ucsa.models.memory.Memory` -- hierarchical memory facade.
-- :class:`~ucsa.models.memory_service.MemoryService` -- background
+- :class:`~ucsa.models.tiers.Memory` -- hierarchical memory facade.
+- :class:`~ucsa.models.curation.Curator` -- background
   memory worker.
 - :class:`~ucsa.models.graph.Graph` -- background graph
   memory.
@@ -32,27 +32,26 @@ from typing import Any
 import torch
 from torch import Tensor, nn
 
-from ucsa.models import graph as concept_graph
-from ucsa.models.head_config import (
-    build_head_config_from_cfg,
+from ucsa.models import (
+    cognitive,
+    curation,
+    graph as concept_graph,
+    head_config,
+    moe as moe_lib,
+    perception as perception_lib,
+    projection,
+    reasoning,
+    transformer,
+    transition,
+    verification,
 )
-from ucsa.models.memory import Memory
-from ucsa.models.memory_service import MemoryService
-from ucsa.models.moe import MoEConfig
-from ucsa.models.perception import Perception, PerceptionConfig
-from ucsa.models.projection_heads import ProjectionHeads
-from ucsa.models.reasoning_loop import ReasoningLoop, ReasoningLoopConfig
-from ucsa.models.state import PCSConfig, PersistentCognitiveState
-from ucsa.models.transformer_operator import (
-    TransformerOperator,
-    TransformerOperatorConfig,
-)
-from ucsa.models.transition_operator import StateTransitionOperator
-from ucsa.models.verification import HeuristicVerifier, Verifier
+from ucsa.models.perception import Perception
+from ucsa.models.tiers import Memory
+from ucsa.models.verification import Verifier
 
 
 @dataclass
-class UCSAConfig:
+class Config:
     """Top-level configuration for :class:`UCSA`.
 
     Attributes:
@@ -107,7 +106,7 @@ class UCSAConfig:
     attention_dropout: float = 0.0
     residual_dropout: float = 0.0
     ffn_dropout: float = 0.0
-    moe: MoEConfig | None = None
+    moe: moe_lib.Config | None = None
     differentiable_state_carry: bool = True
     observation_mix: float = 1.0
     observation_mix_decay: float = 1.0
@@ -140,18 +139,18 @@ class UCSA(nn.Module):
 
     def __init__(
         self,
-        config: UCSAConfig | None = None,
-        operator: StateTransitionOperator | None = None,
+        config: Config | None = None,
+        operator: transition.Operator | None = None,
         perception: Perception | None = None,
-        heads: ProjectionHeads | None = None,
+        heads: projection.Heads | None = None,
         verifier: Verifier | None = None,
-        memory_service: MemoryService | None = None,
+        memory_service: curation.Curator | None = None,
         graph: concept_graph.Graph | None = None,
     ) -> None:
         """Initialise the UCSA model.
 
         Args:
-            config: Optional :class:`UCSAConfig`.
+            config: Optional :class:`Config`.
             operator: Optional pre-built operator.
             perception: Optional pre-built perception module.
             heads: Optional pre-built projection heads.
@@ -161,21 +160,21 @@ class UCSA(nn.Module):
         """
         super().__init__()
         if config is None:
-            config = UCSAConfig()
+            config = Config()
         self.config = config
-        self.pcs = PersistentCognitiveState(
-            PCSConfig(hidden_size=config.hidden_size)
+        self.pcs = cognitive.State(
+            cognitive.Config(hidden_size=config.hidden_size)
         )
         self.perception = perception or Perception(
-            PerceptionConfig(
+            perception_lib.Config(
                 hidden_size=config.hidden_size,
                 vocab_size=config.vocab_size,
                 max_seq_len=config.max_seq_len,
             )
         )
         if operator is None:
-            operator = TransformerOperator(
-                TransformerOperatorConfig(
+            operator = transformer.Operator(
+                transformer.Config(
                     hidden_size=config.hidden_size,
                     num_layers=config.num_layers,
                     num_q_heads=config.num_q_heads,
@@ -194,14 +193,12 @@ class UCSA(nn.Module):
                 )
             )
         self.operator = operator
-        self.heads = heads or ProjectionHeads(
-            build_head_config_from_cfg(config)
-        )
+        self.heads = heads or projection.Heads(head_config.from_cfg(config))
         # The heads are built before the loop because the loop calls the
         # origination generator that lives on them.
-        self.reasoning_loop = ReasoningLoop(
+        self.reasoning_loop = reasoning.Loop(
             operator=self.operator,
-            config=ReasoningLoopConfig(
+            config=reasoning.Config(
                 num_iterations=config.reasoning_iterations,
                 # Needed for the JEPA aux loss. The intermediates are
                 # detached clones, so capturing them does not extend the
@@ -214,15 +211,15 @@ class UCSA(nn.Module):
             intent_update=self.heads.intent_update,
         )
         self.memory = Memory(self.pcs)
-        self.verifier = verifier or HeuristicVerifier()
-        self.memory_service = memory_service or MemoryService(
+        self.verifier = verifier or verification.Heuristic()
+        self.memory_service = memory_service or curation.Curator(
             self.memory, self.verifier
         )
         self.graph = graph or concept_graph.Graph(
             num_concepts=config.num_concepts
         )
         # ``memory_baseline`` is a non-trainable buffer that the trainer
-        # refreshes every N steps. The MemoryStabilityLoss uses it as
+        # refreshes every N steps. The losses.MemoryStability uses it as
         # the reference so the loss is meaningful (``MSE(long_term,
         # baseline)`` instead of trivially 0).
         self.register_buffer(
@@ -399,19 +396,19 @@ class UCSA(nn.Module):
         self.memory_service.stop()
 
 
-__all__ = ["UCSA", "UCSAConfig"]
+__all__ = ["UCSA", "Config"]
 
 
-def build_ucsa(cfg: Any) -> UCSA:
+def build(cfg: Any) -> UCSA:
     """Build a :class:`UCSA` model from a Hydra/OmegaConf config.
 
     Args:
-        cfg: Hydra/OmegaConf config, :class:`UCSAConfig`, or a plain dict.
+        cfg: Hydra/OmegaConf config, :class:`Config`, or a plain dict.
 
     Returns:
         An initialised :class:`UCSA`.
     """
-    if isinstance(cfg, UCSAConfig):
+    if isinstance(cfg, Config):
         return UCSA(cfg)
     try:
         from omegaconf import DictConfig, OmegaConf
@@ -423,13 +420,13 @@ def build_ucsa(cfg: Any) -> UCSA:
         cfg = merged
     if not isinstance(cfg, Mapping):
         raise TypeError(f"Unsupported config type: {type(cfg)}.")
-    moe_cfg: MoEConfig | None = None
+    moe_cfg: moe_lib.Config | None = None
     model_section = cfg.get("model", {}) if isinstance(cfg, Mapping) else {}
     moe_section = (
         model_section.get("moe") if isinstance(model_section, Mapping) else None
     )
     if isinstance(moe_section, Mapping):
-        moe_cfg = MoEConfig(
+        moe_cfg = moe_lib.Config(
             num_experts=int(moe_section.get("num_experts", 4)),
             top_k=int(moe_section.get("top_k", 2)),
             capacity_factor=float(moe_section.get("capacity_factor", 1.25)),
@@ -441,7 +438,7 @@ def build_ucsa(cfg: Any) -> UCSA:
     max_seq_len = int(model_section.get("max_seq_len", 1024))
     num_concepts = int(model_section.get("num_concepts", 16))
     return UCSA(
-        UCSAConfig(
+        Config(
             hidden_size=hidden_size,
             num_layers=int(model_section.get("num_layers", 4)),
             num_q_heads=int(model_section.get("num_q_heads", 4)),
@@ -485,7 +482,7 @@ def build_ucsa(cfg: Any) -> UCSA:
     )
 
 
-def build_ucsa_from_hydra(overrides: list[str] | None = None) -> UCSA:
+def build_from_hydra(overrides: list[str] | None = None) -> UCSA:
     """Build a :class:`UCSA` from the default Hydra config with overrides.
 
     Args:
@@ -499,10 +496,8 @@ def build_ucsa_from_hydra(overrides: list[str] | None = None) -> UCSA:
     try:
         from hydra import compose, initialize_config_dir
     except Exception as exc:  # pragma: no cover - environment-dependent
-        raise RuntimeError(
-            "Hydra is required for build_ucsa_from_hydra."
-        ) from exc
+        raise RuntimeError("Hydra is required for build_from_hydra.") from exc
     config_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     with initialize_config_dir(version_base=None, config_dir=config_dir):
         cfg = compose(config_name="config", overrides=overrides or [])
-    return build_ucsa(cfg)
+    return build(cfg)
