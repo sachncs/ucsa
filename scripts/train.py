@@ -198,7 +198,7 @@ def main() -> None:
     print(f"Seed: {args.seed}", flush=True)
     print(f"Output: {args.out_json}", flush=True)
 
-    with open("ucsa/configs/default.yaml") as f:
+    with open("ucsa/config.yaml") as f:
         cfg = yaml.safe_load(f)
 
     apply_small_overrides(cfg)

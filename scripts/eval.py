@@ -121,7 +121,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--recurrent-ckpt", default=None, help="UCSA-R .pt")
     parser.add_argument("--ucsa-ckpt", default=None, help="original UCSA")
-    parser.add_argument("--ucsa-config", default="ucsa/configs/default.yaml")
+    parser.add_argument("--ucsa-config", default="ucsa/config.yaml")
     parser.add_argument(
         "--tasks", nargs="*", default=list(eval_harness.TASK_REGISTRY)
     )

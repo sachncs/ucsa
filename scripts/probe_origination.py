@@ -49,7 +49,7 @@ def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="UCSA origination probe")
     parser.add_argument("--ckpt", default=None)
-    parser.add_argument("--ucsa-config", default="ucsa/configs/default.yaml")
+    parser.add_argument("--ucsa-config", default="ucsa/config.yaml")
     parser.add_argument("--out-json", default="runs/origination-probe.json")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num-inputs", type=int, default=8)

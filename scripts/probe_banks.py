@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--ckpt", required=True, help="Path to a UCSA safetensors checkpoint."
     )
-    p.add_argument("--ucsa-config", default="ucsa/configs/default.yaml")
+    p.add_argument("--ucsa-config", default="ucsa/config.yaml")
     p.add_argument("--out-json", default="runs/bank-probe.json")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--top-k", type=int, default=20)

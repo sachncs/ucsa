@@ -1137,7 +1137,7 @@ def main() -> None:
             f"500M weight cap. Pick a smaller target."
         )
 
-    with open("ucsa/configs/default.yaml") as f:
+    with open("ucsa/config.yaml") as f:
         cfg = yaml.safe_load(f)
     cfg["reasoning_iterations"] = 4
     cfg["model"]["hidden_size"] = 384
