@@ -21,6 +21,7 @@ from torch import nn
 from torch.nn import functional
 
 from ucsa.models import recurrent
+from ucsa.training import compression
 
 BatchIterator = Iterator[tuple[torch.Tensor, torch.Tensor]]
 Batches = Callable[[int], BatchIterator]
@@ -322,7 +323,10 @@ class WeightEma:
 
 @torch.no_grad()
 def evaluate(
-    model: recurrent.RecurrentUCSA, batches: BatchIterator, count: int
+    model: recurrent.RecurrentUCSA,
+    batches: BatchIterator,
+    count: int,
+    byte_lengths: torch.Tensor | None = None,
 ) -> dict[str, float]:
     """Measures perplexity over all positions and over the last 64.
 
@@ -333,15 +337,20 @@ def evaluate(
       model: Model to evaluate.
       batches: Validation batches.
       count: Maximum number of batches.
+      byte_lengths: Raw bytes per token id (`compression.token_byte_lengths`).
+        When given, bits per byte is reported as well.
 
     Returns:
-      `ppl_all` and `ppl_last64`; infinite if no batch was available.
+      `ppl_all` and `ppl_last64`, plus `bpb_all` and `bpb_last64` when
+      `byte_lengths` is given; infinite if no batch was available.
     """
     model.eval()
     device = next(model.parameters()).device
     nll_all = torch.zeros((), device=device)
     nll_tail = torch.zeros((), device=device)
     n_all = n_tail = 0
+    bytes_all = bytes_tail = 0
+    lengths = None if byte_lengths is None else byte_lengths.to(device)
     for n, (x, y) in enumerate(batches):
         if n >= count:
             break
@@ -357,13 +366,25 @@ def evaluate(
         nll_tail = nll_tail + tail.sum()
         n_all += loss.numel()
         n_tail += tail.numel()
+        if lengths is not None:
+            per_token = lengths[y]
+            bytes_all = bytes_all + per_token.sum()
+            bytes_tail = bytes_tail + per_token[:, -SCORED_TAIL:].sum()
     model.train()
     if n_all == 0:
         return {"ppl_all": math.inf, "ppl_last64": math.inf}
-    return {
+    metrics = {
         "ppl_all": math.exp(float(nll_all) / n_all),
         "ppl_last64": math.exp(float(nll_tail) / n_tail),
     }
+    if lengths is not None:
+        metrics["bpb_all"] = compression.bits_per_byte(
+            float(nll_all), int(bytes_all)
+        )
+        metrics["bpb_last64"] = compression.bits_per_byte(
+            float(nll_tail), int(bytes_tail)
+        )
+    return metrics
 
 
 def save_checkpoint(path: str, payload: dict[str, Any]) -> None:
@@ -423,6 +444,7 @@ def fit(
     val_batches: Batches | None = None,
     resume: bool = False,
     log: Callable[[str], None] = print,
+    byte_lengths: torch.Tensor | None = None,
 ) -> dict[str, Any]:
     """Trains `model` and returns the run record.
 
@@ -434,6 +456,7 @@ def fit(
       val_batches: Same, over held-out data.
       resume: Continue from `out_dir/latest.pt` when it exists.
       log: Sink for progress lines.
+      byte_lengths: Raw bytes per token id; enables bits-per-byte reporting.
 
     Returns:
       A dict with the configs, parameter count, final metrics and history.
@@ -540,14 +563,18 @@ def fit(
             ):
                 if averaged is not None:
                     averaged.swap(model)
-                metrics = evaluate(model, val_batches(0), config.eval_batches)
+                metrics = evaluate(
+                    model, val_batches(0), config.eval_batches, byte_lengths
+                )
                 if averaged is not None:
                     averaged.swap(model)
                 best = min(best, metrics["ppl_last64"])
                 history.append({"step": step, **metrics})
                 log(
                     f"  eval@{step}: ppl_last64={metrics['ppl_last64']:.1f} "
-                    f"ppl_all={metrics['ppl_all']:.1f} (best={best:.1f})"
+                    f"ppl_all={metrics['ppl_all']:.1f} "
+                    f"bpb={metrics.get('bpb_last64', float('nan')):.3f} "
+                    f"(best={best:.1f})"
                 )
             if config.ckpt_every and step % config.ckpt_every == 0:
                 save(f"step{step:07d}.pt")
@@ -560,7 +587,9 @@ def fit(
         averaged.swap(model)  # The averaged weights are the final model.
     final = {}
     if val_batches:
-        final = evaluate(model, val_batches(0), config.eval_batches)
+        final = evaluate(
+            model, val_batches(0), config.eval_batches, byte_lengths
+        )
     save("final.pt")
     record = {
         "model_config": model.config.to_dict(),
