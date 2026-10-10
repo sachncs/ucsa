@@ -164,6 +164,7 @@ def median(values: list[float]) -> float:
 def run(
     model: recurrent.Model,
     config: engine.Config,
+    batch: tuple[torch.Tensor, torch.Tensor],
     steps: int = 5,
     ignore_scalars: bool = False,
 ) -> Report:
@@ -179,6 +180,8 @@ def run(
         for a few steps, so build a throwaway instance.
       config: Training configuration; its batch size and sequence length set
         the shape that is measured.
+      batch: A real `(inputs, targets)` batch from the training shard, of
+        shape `(config.batch_size, config.seq_len)`; every step reuses it.
       steps: Timed steps (one warm-up step is added).
       ignore_scalars: See `Recorder`.
 
@@ -209,9 +212,7 @@ def run(
     model.to(device).train()
     optimizer = engine.build_optimizer(model, config)
     params = [p for p in model.parameters() if p.requires_grad]
-    vocab = model.config.vocab_size
-    x = torch.randint(0, vocab, (config.batch_size, config.seq_len)).to(device)
-    y = torch.roll(x, -1, 1)
+    x, y = (t.to(device) for t in batch)
 
     def step() -> tuple[float, float, float, bool, bool]:
         synchronize(device)
