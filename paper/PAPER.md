@@ -134,7 +134,7 @@ $\mathcal{N}(0, I)$.
 
 The chain is implemented in ``UCSA.forward`` (see
 ``jepa_multi_step`` in the output dict) and consumed by
-``JEPALoss.forward(multi_step_pairs=...)``.
+``losses.JEPA.forward(multi_step_pairs=...)``.
 
 ### 3.4. Input-reconstruction capacity bottleneck
 
@@ -269,9 +269,9 @@ plus `--intent-steps` and `--intent-learning-rate` on the CLI;
 
 | Component | status | file |
 |---|---|---|
-| Multi-step JEPA chain | built (4 hunk pred over 3 pairs) | `ucsa/models/ucsa.py::jepa_multi_step` |
+| Multi-step JEPA chain | built (4 hunk pred over 3 pairs) | `ucsa/models/architecture.py::jepa_multi_step` |
 | EMA target encoder | built, default momentum 0.996 | `ucsa/training/ema.py` |
-| LearnedVerifier alt objective | built; auto-picked when present | `ucsa/models/intent_descent.py::critic_objective` |
+| verification.Learned alt objective | built; auto-picked when present | `ucsa/models/intent_descent.py::critic_objective` |
 | Snapshot-restore between rollouts | built (PCS restored every step) | same file, `pcs_restore` calls |
 | Early stop (absolute / relative) | both implemented | `grad_norm_threshold`, `grad_norm_relative_threshold` |
 | `K=0` default | verified, zero state changed | `infer.py::generate` unchanged |
