@@ -151,8 +151,18 @@ def verdict_for(
     return "better" if gap < 0 else "worse"
 
 
-def summarise(out: str) -> str:
-    """Builds the Markdown comparison of every finished arm against base."""
+def summarise(out: str, noise_bits: float | None = None) -> str:
+    """Builds the Markdown comparison of every finished arm against base.
+
+    Args:
+      out: Folder of finished arm records.
+      noise_bits: Run-to-run standard deviation to use, in bits per token.
+        When None it is measured from the base replicates, which is only
+        reliable with at least three of them.
+
+    Returns:
+      The Markdown table.
+    """
     records = {}
     for fname in sorted(os.listdir(out)):
         if fname.endswith(".json") and fname != "summary.json":
@@ -160,11 +170,13 @@ def summarise(out: str) -> str:
                 rec = json.load(f)
             records[rec["name"]] = rec
     base = np.asarray(records["base"]["window_nll"])
-    noise = replicate_noise(records)
     scale = 1.0 / np.log(2.0)
+    noise = (
+        replicate_noise(records) if noise_bits is None else noise_bits / scale
+    )
+    source = "given" if noise_bits is not None else "std of base replicates"
     header = (
-        f"Run-to-run noise (std of base replicates): "
-        f"{noise * scale:.4f} bits/token."
+        f"Run-to-run noise ({source}): {noise * scale:.4f} bits/token."
         if noise is not None
         else "Run-to-run noise: not measured (need two base replicates)."
     )
@@ -209,6 +221,12 @@ def main() -> None:
     parser.add_argument("--only", nargs="*", help="run just these arms")
     parser.add_argument("--extra", nargs="*", default=[], help="k=v for all")
     parser.add_argument("--summary", action="store_true")
+    parser.add_argument(
+        "--noise-bits",
+        type=float,
+        default=None,
+        help="run-to-run std in bits/token (default: from base replicates)",
+    )
     args = parser.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -224,7 +242,7 @@ def main() -> None:
             record = run_arm(name, args, byte_lengths)
             with open(path, "w") as f:
                 json.dump(record, f)
-    table = summarise(args.out)
+    table = summarise(args.out, args.noise_bits)
     with open(os.path.join(args.out, "summary.md"), "w") as f:
         f.write(table + "\n")
     print(table)
