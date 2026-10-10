@@ -746,6 +746,52 @@ class RecurrentUCSA(nn.Module):
             target.mul_(momentum).add_(online.detach(), alpha=1.0 - momentum)
 
     @torch.no_grad()
+    def advance(self, state: torch.Tensor, chunk: torch.Tensor) -> torch.Tensor:
+        """Writes one full chunk into the state (the streaming update).
+
+        Args:
+          state: State before the chunk, `(batch, slots, dim)`.
+          chunk: Token ids of one full chunk, `(batch, chunk_size)`.
+
+        Returns:
+          The state after the chunk. Without `use_state` it is unchanged.
+        """
+        if not self.config.use_state:
+            return state
+        embedded = self.embed(chunk)
+        surprise = None
+        if self.config.surprise_gate:
+            _, surprise = self.__surprise(state, embedded.mean(1))
+        new_state, _ = self.updater(state, self.__encode(embedded), surprise)
+        return new_state
+
+    @torch.no_grad()
+    def next_logits(
+        self, state: torch.Tensor, current: torch.Tensor
+    ) -> torch.Tensor:
+        """Returns the next-token logits after a partial chunk.
+
+        This is the streaming counterpart of `forward`: with the state that
+        precedes the current chunk and the chunk's tokens so far, it gives the
+        logits `forward` would give at the last of those positions.
+
+        Args:
+          state: State before the current chunk, `(batch, slots, dim)`.
+          current: Tokens of the current chunk so far, `(batch, n)` with
+            `1 <= n <= chunk_size`.
+
+        Returns:
+          Logits of shape `(batch, vocab)`.
+        """
+        read = (
+            state
+            if self.config.use_state
+            else self.initial_state(current.shape[0])
+        )
+        hidden = self.__decode(self.embed(current), read)
+        return hidden[:, -1] @ self.embed.weight.T
+
+    @torch.no_grad()
     def generate(
         self,
         prompt: torch.Tensor,
@@ -769,23 +815,13 @@ class RecurrentUCSA(nn.Module):
         """
         self.eval()
         size = self.config.chunk_size
-        batch = prompt.shape[0]
-        state = self.initial_state(batch)
+        state = self.initial_state(prompt.shape[0])
         current = out = prompt
         for _ in range(max_new_tokens):
             while current.shape[1] > size:
                 head, current = current[:, :size], current[:, size:]
-                if self.config.use_state:
-                    embedded = self.embed(head)
-                    surprise = None
-                    if self.config.surprise_gate:
-                        _, surprise = self.__surprise(state, embedded.mean(1))
-                    state, _ = self.updater(
-                        state, self.__encode(embedded), surprise
-                    )
-            read = state if self.config.use_state else self.initial_state(batch)
-            hidden = self.__decode(self.embed(current), read)
-            logits = hidden[:, -1] @ self.embed.weight.T
+                state = self.advance(state, head)
+            logits = self.next_logits(state, current)
             if temperature <= 0:
                 nxt = logits.argmax(-1, keepdim=True)
             else:
