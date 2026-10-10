@@ -25,6 +25,8 @@ import math
 
 import numpy as np
 
+from ucsa.utils import precision
+
 ALPHA_GRID = np.exp(np.linspace(math.log(0.02), math.log(3.0), 400))
 
 
@@ -73,8 +75,8 @@ def fit(budgets: np.ndarray, losses: np.ndarray) -> Curve:
     Raises:
       ValueError: If there are fewer than three points or shapes differ.
     """
-    t = np.asarray(budgets, dtype=np.float64)
-    y = np.asarray(losses, dtype=np.float64)
+    t = np.asarray(budgets, dtype=precision.NUMPY_DTYPE)
+    y = np.asarray(losses, dtype=precision.NUMPY_DTYPE)
     if t.shape != y.shape or t.size < 3:
         raise ValueError("need at least three (budget, loss) points")
     best: Curve | None = None
@@ -139,8 +141,8 @@ def forecast(
       The `Forecast` at `target`.
     """
     rng = np.random.default_rng(seed)
-    t = np.asarray(budgets, dtype=np.float64)
-    y = np.asarray(losses, dtype=np.float64)
+    t = np.asarray(budgets, dtype=precision.NUMPY_DTYPE)
+    y = np.asarray(losses, dtype=precision.NUMPY_DTYPE)
     preds = [
         fit(t, y + rng.normal(0.0, noise, y.shape)).predict(target)
         for _ in range(resamples)
@@ -194,8 +196,8 @@ def paired_forecast_gap(
     rng = np.random.default_rng(seed)
 
     def refit(pair: tuple[np.ndarray, np.ndarray]) -> float:
-        t = np.asarray(pair[0], dtype=np.float64)
-        y = np.asarray(pair[1], dtype=np.float64)
+        t = np.asarray(pair[0], dtype=precision.NUMPY_DTYPE)
+        y = np.asarray(pair[1], dtype=precision.NUMPY_DTYPE)
         return fit(t, y + rng.normal(0.0, noise, y.shape)).predict(target)
 
     gaps = [refit(a) - refit(b) for _ in range(resamples)]
