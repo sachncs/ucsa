@@ -28,6 +28,7 @@ from typing import Any
 import torch
 
 from ucsa.models import cognitive, tiers, verification
+from ucsa.utils import precision
 
 LOGGER = logging.getLogger(__name__)
 
@@ -237,4 +238,4 @@ class Curator:
 
 def collect_signals(curator: Curator) -> torch.Tensor:
     """Returns the verification scores recorded so far, in order."""
-    return torch.tensor(curator.last_verification_signal, dtype=torch.float32)
+    return torch.tensor(curator.last_verification_signal, dtype=precision.DTYPE)
