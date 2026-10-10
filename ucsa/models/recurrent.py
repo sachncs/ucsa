@@ -36,7 +36,7 @@ from torch.utils import checkpoint as torch_checkpoint
 
 
 @dataclasses.dataclass(frozen=True)
-class RecurrentConfig:
+class Config:
     """Architecture knobs of UCSA-R, validated on construction.
 
     Attributes:
@@ -172,7 +172,7 @@ class RecurrentConfig:
         return sum(n for _, n in self.banks)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> RecurrentConfig:
+    def from_dict(cls, data: dict[str, Any]) -> Config:
         """Builds a config from a plain dict, rejecting unknown keys.
 
         Args:
@@ -343,9 +343,7 @@ class SwiGLU(nn.Module):
 class Block(nn.Module):
     """Self-attention, an optional state read, and a feed-forward layer."""
 
-    def __init__(
-        self, config: RecurrentConfig, causal: bool, read: bool
-    ) -> None:
+    def __init__(self, config: Config, causal: bool, read: bool) -> None:
         """Initialises the block.
 
         Args:
@@ -395,7 +393,7 @@ class StateUpdater(nn.Module):
     bank its own retention.
     """
 
-    def __init__(self, config: RecurrentConfig) -> None:
+    def __init__(self, config: Config) -> None:
         """Initialises the updater.
 
         Args:
@@ -452,10 +450,10 @@ class StateUpdater(nn.Module):
         return state + gate * (candidate - state), gate.mean(-1)
 
 
-class RecurrentUCSA(nn.Module):
+class Model(nn.Module):
     """Causal language model whose context is a persistent multi-bank state."""
 
-    def __init__(self, config: RecurrentConfig) -> None:
+    def __init__(self, config: Config) -> None:
         """Initialises the model.
 
         Args:
@@ -841,7 +839,7 @@ def count_parameters(model: nn.Module) -> int:
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
-def config_for_params(target: int, **overrides: Any) -> RecurrentConfig:
+def config_for_params(target: int, **overrides: Any) -> Config:
     """Picks width and depth so the model has about `target` parameters.
 
     Searches a small grid with the shape rules fixed (head_dim 64, SwiGLU of
@@ -849,15 +847,15 @@ def config_for_params(target: int, **overrides: Any) -> RecurrentConfig:
 
     Args:
       target: Desired parameter count.
-      **overrides: Extra `RecurrentConfig` fields held fixed during the search.
+      **overrides: Extra `Config` fields held fixed during the search.
 
     Returns:
       The config whose parameter count is closest to `target`.
     """
-    best: tuple[int, RecurrentConfig] | None = None
+    best: tuple[int, Config] | None = None
     for hidden in (128, 192, 256, 320, 384, 512, 640, 768, 1024):
         for layers in (2, 3, 4, 6, 8, 10, 12, 16):
-            config = RecurrentConfig(
+            config = Config(
                 hidden=hidden,
                 layers=layers,
                 heads=max(2, hidden // 64),
@@ -865,7 +863,7 @@ def config_for_params(target: int, **overrides: Any) -> RecurrentConfig:
                 **overrides,
             )
             with torch.device("meta"):  # Count without allocating.
-                size = count_parameters(RecurrentUCSA(config))
+                size = count_parameters(Model(config))
             if best is None or abs(size - target) < best[0]:
                 best = (abs(size - target), config)
     return best[1]
