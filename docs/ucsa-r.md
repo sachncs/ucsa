@@ -80,6 +80,7 @@ python scripts/eval.py --recurrent-ckpt ckpts/r-small/final.pt
 python scripts/compress.py --ckpt ckpts/r-small/final.pt   # real file sizes
 python scripts/probe_state.py --ckpt ckpts/r-small/final.pt \
     --control ckpts/r-nostate/final.pt             # what the state buys
+python scripts/probe_reset.py --ckpt ckpts/r-small/final.pt  # is its content used?
 ```
 
 Choosing a design that holds at full length (not just after 600 steps):
