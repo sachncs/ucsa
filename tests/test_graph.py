@@ -10,17 +10,14 @@ import time
 import pytest
 import torch
 
-from ucsa.models import graph
-from ucsa.models import state as pcs_state
+from ucsa.models import cognitive as pcs_state, graph
 
 HIDDEN = 16
 
 
 def make_state(points: torch.Tensor | None = None):
     """Returns a state whose long-term bank holds `points` (all marked used)."""
-    state = pcs_state.PersistentCognitiveState(
-        pcs_state.PCSConfig(hidden_size=HIDDEN)
-    )
+    state = pcs_state.State(pcs_state.Config(hidden_size=HIDDEN))
     if points is not None:
         with torch.no_grad():
             state.get_bank("long_term")[: len(points)] = points
