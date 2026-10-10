@@ -31,6 +31,8 @@ ARMS: dict[str, list[str]] = {
     "no-state": ["model.use_state=false"],
     "no-jepa": ["model.jepa_weight=0"],
     "surprise": ["model.surprise_gate=true"],
+    "read-gate": ["model.read_gate=true"],
+    "read-gate-surprise": ["model.read_gate=true", "model.surprise_gate=true"],
     "read-every-2": ["model.read_every=2"],
     "chunk-64": ["model.chunk_size=64"],
     "slot-dropout": ["model.slot_dropout=0.5"],
