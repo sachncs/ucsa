@@ -11,7 +11,13 @@ import argparse
 import json
 import math
 import os
+import sys
 from typing import Any
+
+sys.path.insert(0, os.path.dirname(__file__))
+import ladder  # noqa: E402
+
+from ucsa.training import scaling  # noqa: E402
 
 
 def load(path: str) -> dict[str, Any] | None:
@@ -110,6 +116,77 @@ def section_benchmarks(report: dict[str, Any] | None) -> str:
     return "\n".join(lines)
 
 
+def section_curve(record: dict[str, Any] | None) -> str:
+    """Renders held-out perplexity and bits per byte through training."""
+    if record is None:
+        return missing("record.json", "scripts/train_r.py")
+    rows = [h for h in record["history"] if "ppl_all" in h]
+    lines = ["| step | perplexity | bits per byte |", "|---|---|---|"]
+    for h in rows:
+        lines.append(
+            f"| {h['step']} | {h['ppl_all']:.1f} | "
+            f"{h.get('bpb_all', math.nan):.3f} |"
+        )
+    return "\n".join(lines)
+
+
+def section_forecast_check(
+    ladder_dirs: list[str],
+    arm: str,
+    record: dict[str, Any] | None,
+    noise_bits: float,
+) -> str:
+    """Compares a forecast made from short runs with the full-run outcome.
+
+    The forecast uses only the ladder rungs, which exist before the full run;
+    the outcome is the full run's final held-out loss.
+
+    Args:
+      ladder_dirs: Folders holding the ladder rungs of `arm`.
+      arm: Ladder arm that was later trained in full.
+      record: The full run's `record.json`.
+      noise_bits: Run-to-run noise, in bits per token.
+
+    Returns:
+      A Markdown paragraph and table, or a "not run" line.
+    """
+    steps, losses = ladder.load_points(ladder_dirs, arm)
+    if record is None or steps.size < 3:
+        return missing("ladder rungs / record.json", "scripts/ladder.py")
+    target = float(record["train_config"]["steps"])
+    noise = noise_bits * math.log(2.0)
+    fc = scaling.forecast(steps, losses, target, noise)
+    final = record["final"]
+    actual = math.log(final["ppl_all"])
+    inside = fc.low <= actual <= fc.high
+    return "\n".join(
+        [
+            f"Forecast for `{arm}` made from rungs "
+            f"{', '.join(str(int(x)) for x in steps)} (reach "
+            f"{fc.reach:.0f}x), before the {int(target)}-step run:",
+            "",
+            "| | loss (nats) | perplexity |",
+            "|---|---|---|",
+            f"| forecast | {fc.mean:.3f} [{fc.low:.3f}, {fc.high:.3f}] | "
+            f"{math.exp(fc.mean):.1f} [{math.exp(fc.low):.1f}, "
+            f"{math.exp(fc.high):.1f}] |",
+            f"| outcome | {actual:.3f} | {final['ppl_all']:.1f} |",
+            "",
+            "The outcome lies "
+            + ("inside" if inside else "OUTSIDE")
+            + " the forecast interval"
+            + (
+                ""
+                if inside
+                else f"; the forecast was too "
+                f"{'optimistic' if actual > fc.high else 'pessimistic'} by "
+                f"{abs(actual - fc.mean) / math.log(2.0):.2f} bits/token"
+            )
+            + ".",
+        ]
+    )
+
+
 def section_file(path: str, how: str) -> str:
     """Includes a Markdown table written by an experiment script."""
     if not os.path.exists(path):
@@ -138,13 +215,12 @@ def section_probe(report: dict[str, Any] | None) -> str:
     return "\n".join(lines)
 
 
-def build(runs: str, ladder: str, ablate: str) -> str:
+def build(runs: str, ladder_dir: str, ablate: str) -> str:
     """Assembles the whole document from the artifacts under `runs`."""
+    record = load(os.path.join(runs, "final-record.json"))
     parts = [
-        (
-            "Setup",
-            section_training(load(os.path.join(runs, "final-record.json"))),
-        ),
+        ("Setup", section_training(record)),
+        ("Held-out loss through training", section_curve(record)),
         (
             "Lossless compression",
             section_compression(load(os.path.join(runs, "compress.json"))),
@@ -160,10 +236,9 @@ def build(runs: str, ladder: str, ablate: str) -> str:
             ),
         ),
         (
-            "Design choices, forecast to the full run",
-            section_file(
-                os.path.join(ladder, "forecast.md"),
-                "scripts/ladder.py --analyze",
+            "Forecast against outcome",
+            section_forecast_check(
+                [ladder_dir, ablate], "lr-2.4e-3", record, 0.0145
             ),
         ),
         (
@@ -182,8 +257,8 @@ def main() -> None:
     """Parses arguments and writes the results document."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runs", default="runs")
-    parser.add_argument("--ladder", default="runs/ladder")
-    parser.add_argument("--ablate", default="runs/ablate-window")
+    parser.add_argument("--ladder", default="runs/ladder-gated")
+    parser.add_argument("--ablate", default="runs/ablate-gated")
     parser.add_argument("--out", default="paper/RESULTS.md")
     args = parser.parse_args()
     text = build(args.runs, args.ladder, args.ablate)
