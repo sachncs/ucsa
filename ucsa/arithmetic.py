@@ -29,7 +29,7 @@ that.
 
 import math
 import struct
-from typing import Protocol
+from typing import Any, Protocol
 
 import torch
 from torch.nn import functional
@@ -304,3 +304,42 @@ def ideal_bits(predictor: Predictor, tokens: list[int]) -> float:
         bits -= math.log2(count / int(cumulative[-1]))
         predictor.update(token)
     return bits
+
+
+def compress_text(
+    model: recurrent.Model, tokenizer: Any, text: str, start_token: int
+) -> bytes:
+    """Compresses text with a model, losslessly.
+
+    GPT-2 style byte-level tokenisation round-trips every string exactly, so
+    the model's token code is a code for the text itself.
+
+    Args:
+      model: A trained model.
+      tokenizer: Tokenizer with `encode` and `decode`.
+      text: Text to compress.
+      start_token: Token that stands before the first token.
+
+    Returns:
+      The compressed bytes.
+    """
+    ids = tokenizer.encode(text, add_special_tokens=False)
+    return compress(ModelPredictor(model, start_token), list(ids))
+
+
+def decompress_text(
+    model: recurrent.Model, tokenizer: Any, data: bytes, start_token: int
+) -> str:
+    """Recovers text compressed by `compress_text`.
+
+    Args:
+      model: The same model that compressed it.
+      tokenizer: The same tokenizer.
+      data: Compressed bytes.
+      start_token: The start token used when compressing.
+
+    Returns:
+      The original text.
+    """
+    ids = decompress(ModelPredictor(model, start_token), data)
+    return tokenizer.decode(ids, clean_up_tokenization_spaces=False)
