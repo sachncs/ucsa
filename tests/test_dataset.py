@@ -83,7 +83,7 @@ def make_fake_dataset(
     return FakeBackedDataset(tiny_wrapper(), config or tiny_config())
 
 
-class TestDatasetConfig:
+class TestConfig:
     """Tests for :class:`dataset.Config`."""
 
     def test_default_config_valid(self) -> None:
@@ -94,7 +94,7 @@ class TestDatasetConfig:
         assert config.fallback_chain == FALLBACK_DATASETS
 
 
-class TestTextDataset:
+class TestText:
     """Tests for :class:`dataset.Text`."""
 
     def test_construction_with_fake_data(self) -> None:
