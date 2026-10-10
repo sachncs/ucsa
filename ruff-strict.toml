@@ -18,3 +18,7 @@ convention = "google"
 [lint.per-file-ignores]
 "tests/*" = ["D", "ANN", "PT011"]
 "scripts/*" = ["T201"]
+
+[lint.isort]
+known-first-party = ["ucsa"]
+combine-as-imports = true
