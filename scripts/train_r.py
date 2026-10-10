@@ -55,7 +55,7 @@ def apply_overrides(
 
 def build_configs(
     args: argparse.Namespace,
-) -> tuple[recurrent.RecurrentConfig, engine.TrainConfig]:
+) -> tuple[recurrent.Config, engine.Config]:
     """Resolves preset, then auto-sizing (`--params`), then `--set`.
 
     Explicit `--set` always wins, so a sweep can pin any single field.
@@ -85,13 +85,13 @@ def build_configs(
     )
     merged["train"].update(seed=args.seed, out_dir=args.out_dir)
     return (
-        recurrent.RecurrentConfig.from_dict(merged["model"]),
-        engine.TrainConfig.from_dict(merged["train"]),
+        recurrent.Config.from_dict(merged["model"]),
+        engine.Config.from_dict(merged["train"]),
     )
 
 
 def batch_factories(
-    train_config: engine.TrainConfig, data_dir: str
+    train_config: engine.Config, data_dir: str
 ) -> tuple[engine.Batches, engine.Batches]:
     """Builds the train and validation batch sources from local shards.
 
@@ -102,8 +102,8 @@ def batch_factories(
     Returns:
       `(train, val)`; each maps batches already consumed to an iterator.
     """
-    train_shard = shards.TokenShard(os.path.join(data_dir, "train.bin"))
-    val_shard = shards.TokenShard(os.path.join(data_dir, "val.bin"))
+    train_shard = shards.Shard(os.path.join(data_dir, "train.bin"))
+    val_shard = shards.Shard(os.path.join(data_dir, "val.bin"))
 
     def train(skip: int) -> engine.BatchIterator:
         return train_shard.batches(
@@ -139,7 +139,7 @@ def main() -> None:
     args = parser.parse_args()
 
     model_config, train_config = build_configs(args)
-    model = recurrent.RecurrentUCSA(model_config)
+    model = recurrent.Model(model_config)
     count = recurrent.count_parameters(model)
     print(f"UCSA-R {args.preset}: {count:,} params", flush=True)
     print(json.dumps(model_config.to_dict()), flush=True)
