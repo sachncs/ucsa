@@ -212,9 +212,7 @@ class UCSA(nn.Module):
         )
         self.memory = Memory(self.pcs)
         self.verifier = verifier or verification.Heuristic()
-        self.curator = curator or curation.Curator(
-            self.memory, self.verifier
-        )
+        self.curator = curator or curation.Curator(self.memory, self.verifier)
         self.graph = graph or concept_graph.Graph(
             num_concepts=config.num_concepts
         )
