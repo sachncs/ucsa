@@ -65,7 +65,7 @@ def cumulative_counts(logits: torch.Tensor) -> torch.Tensor:
     vocab = logits.shape[-1]
     if vocab >= SCALE:
         raise ValueError("vocabulary too large for the count scale")
-    probs = functional.softmax(logits.detach().double().cpu(), dim=-1)
+    probs = functional.softmax(logits.detach().cpu(), dim=-1)
     counts = (probs * (SCALE - vocab)).floor().long() + 1
     return torch.cat([torch.zeros(1, dtype=torch.long), counts.cumsum(0)])
 
