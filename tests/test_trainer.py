@@ -119,7 +119,7 @@ class TestTargetAlignment:
         )
 
 
-class TestTrainerConfig:
+class TestConfig:
     """Tests for :class:`trainer_lib.Config`."""
 
     def test_default_values(self) -> None:
