@@ -20,7 +20,7 @@ from ucsa.training import engine
 
 @torch.no_grad()
 def window_nll(
-    model: recurrent.RecurrentUCSA,
+    model: recurrent.Model,
     batches: engine.BatchIterator,
     count: int,
     tail: int | None = None,
