@@ -15,11 +15,10 @@ import os
 import tempfile
 
 import torch
-import train_r
 import yaml
 
 from ucsa.models import recurrent
-from ucsa.training import engine, tuning
+from ucsa.training import engine, presets, tuning
 
 
 def main() -> None:
@@ -37,8 +36,7 @@ def main() -> None:
     parser.add_argument("--out", default="runs/tune.json")
     args = parser.parse_args()
 
-    with open(train_r.CONFIG_PATH) as f:
-        preset = yaml.safe_load(f)["recurrent"]["presets"][args.preset]
+    preset = presets.load(args.preset)
     space = tuning.DEFAULT_SPACE
     if args.space:
         with open(args.space) as f:
@@ -47,7 +45,7 @@ def main() -> None:
     def score(candidate: dict, steps: int) -> float:
         raw = {"model": dict(preset["model"]), "train": dict(preset["train"])}
         overrides = [f"{k}={json.dumps(v)}" for k, v in candidate.items()]
-        train_r.apply_overrides(raw, overrides)
+        presets.apply_overrides(raw, overrides)
         raw["train"].update(
             steps=steps,
             seed=args.seed,
@@ -59,7 +57,7 @@ def main() -> None:
         )
         model_config = recurrent.Config.from_dict(raw["model"])
         train_config = engine.Config.from_dict(raw["train"])
-        train, val = train_r.batch_factories(train_config, args.data)
+        train, val = presets.batch_factories(train_config, args.data)
         record = engine.fit(
             recurrent.Model(model_config),
             train_config,
