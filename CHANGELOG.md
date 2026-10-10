@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Defects found and fixed (each now has a regression test)
+
+- **The original UCSA could copy the token it was scored on.** Its working
+  slots read the whole input, so validation perplexity was 220 with the
+  answers visible and 13,611 with them hidden. Evaluation and training now
+  use a prefix-only protocol (`ucsa.training.prefix`), and the new model is
+  causal by construction.
+- **`scripts/eval.py` scored a randomly initialised model.** It built a
+  128-wide model while the checkpoint was 384-wide, and a non-strict load hid
+  the mismatch. Loading is strict and both scripts share one architecture
+  definition.
+- **The benchmark scorer fed the answer choice into the model's input** and
+  used prompts that differ from the published protocol. It now follows
+  lm-evaluation-harness (prompts, `acc` vs `acc_norm`, partial WinoGrande
+  scoring, full splits).
+- **The memory curator silently dropped every task submitted after a
+  restart** (its queue stayed bound to the first event loop), and kept three
+  copies of the same processing logic. It has one code path and is
+  restartable.
+- **Pruning recycled empty slots** (an unused slot has the lowest retention),
+  so a prune could do nothing while reporting success. It now considers only
+  occupied slots. Memory candidates containing NaN or infinity are rejected.
+- **Concept-graph construction crashed whenever fewer slots were used than
+  concepts.** Clustering now returns one id per point in every case.
+- **Rewriting a data shard truncated it under a reader that had it mapped.**
+  Shards are written atomically.
+- A hung data stream no longer hangs training: batches come from local
+  shards through a prefetch thread with a timeout.
+
+### Changed
+
+- New model **UCSA-R** (`ucsa.models.recurrent`): causal chunked state
+  recurrence with sliding-window attention over `[state | previous chunk |
+  current chunk]`, replacing both cross-attention uses. Measured against the
+  cross-attention version at 600 steps: 7.6% fewer parameters, held-out
+  perplexity 463 vs 576, equal speed, and 4x lower run-to-run noise.
+- One floating-point type for the whole library (`ucsa.utils.precision`): no
+  autocast, loss scaler or float-to-float cast. Enforced by a static test
+  over every source file and a runtime audit of every operator, which runs in
+  a dry run (`scripts/dry_run.py`) and never in training.
+- Modules are named by what they do (`graph`, `cognitive`, `tiers`,
+  `curation`, `projection`, `reasoning`, `transformer`, `architecture`) and
+  symbols no longer repeat their module name. The distance used for
+  clustering is a pluggable `Metric`.
+- A single `ucsa/config.yaml` replaces the config directory.
+- The from-scratch Transformer baseline was removed; results are compared
+  with published numbers (`paper/reference_results.json`).
+- Python 3.14 only.
+
+### Added
+
+- Bits per byte with zlib/LZMA anchors; a lossless arithmetic coder driven by
+  the model, whose round trip is an operational test of causality; chunk
+  profiles, long-context and rate-distortion probes; paired and
+  learning-curve statistics for choosing designs that hold at full length;
+  `scripts/report.py`, which generates the results document from artifacts.
+
 ### Added
 - `ucsa.models.intent_descent`: Phase D. `optimize_intent` runs K steps of
   gradient descent on the `intent` bank alone with every weight frozen,
