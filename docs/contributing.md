@@ -96,7 +96,6 @@ and excluded from the default `pytest -q` invocation.
     --max-steps 5 \
     --ckpt-every 0 \
     --eval-every 0 \
-    --skip-baselines \
     --seed 42
 ```
 
@@ -113,8 +112,8 @@ Should exit in under a minute and write `runs/ucsa-<tag>-seed42.json`.
 4. Run the lint, format, type-check, and test commands above.
 5. Push your branch and open a PR against `master`. Fill in the
    PR template (`.github/PULL_REQUEST_TEMPLATE.md`).
-6. Wait for CI. The `test` job runs on Python 3.11 and 3.12; the
-   `slow` job runs the localisation-claim test on Python 3.12.
+6. Wait for CI. The `test` job runs on Python 3.14; the
+   `slow` job runs the localisation-claim test on Python 3.14.
 7. Address review feedback. The reviewer may ask for additional
    tests, a docs update, or a clarification in the commit
    message.

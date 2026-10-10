@@ -247,7 +247,7 @@ Implementation: `ucsa/training/curriculum.py`.
   paired with a fixed-seed shuffle buffer; the `max_examples`
   cap selects a deterministic prefix. The seed is recorded on
   every `EvalResult`.
-- **pytest + ruff + black** run in CI on Python 3.11 and 3.12.
+- **pytest + ruff + black** run in CI on Python 3.14.
   Coverage is enforced at 80%.
 
 ## Why a state-centric architecture
