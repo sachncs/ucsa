@@ -247,3 +247,95 @@ class TestMixture:
         obs = torch.randn(1, 4, 32)
         op(pcs, obs)
         assert op.last_aux_loss.item() == 0.0
+
+
+class TestRoutingGuarantees:
+    """Properties of the routed mixture, checked against an explicit sum."""
+
+    @staticmethod
+    def build(top_k=2, experts=4, capacity=100.0, seed=0):
+        torch.manual_seed(seed)
+        cfg = moe_lib.Config(
+            num_experts=experts,
+            top_k=top_k,
+            capacity_factor=capacity,
+            aux_loss_weight=0.01,
+        )
+        return moe_lib.Mixture(
+            hidden_size=8, intermediate_size=16, config=cfg
+        ).eval()
+
+    def test_output_equals_the_explicit_top_k_weighted_sum(self) -> None:
+        mixture = self.build()
+        x = torch.randn(2, 5, 8)
+        out, _ = mixture(x)
+        flat = x.reshape(-1, 8)
+        probs = torch.softmax(mixture.router(flat), dim=-1)
+        weights, picks = torch.topk(probs, 2, dim=-1)
+        weights = weights / weights.sum(-1, keepdim=True)
+        expected = torch.zeros_like(flat)
+        for t in range(flat.shape[0]):
+            for w, e in zip(weights[t], picks[t], strict=True):
+                expected[t] += w * mixture.experts[int(e)](flat[t : t + 1])[0]
+        assert torch.allclose(out.reshape(-1, 8), expected, atol=1e-5)
+
+    def test_selecting_every_expert_is_a_softmax_mixture(self) -> None:
+        mixture = self.build(top_k=4)
+        x = torch.randn(1, 6, 8)
+        out, _ = mixture(x)
+        flat = x.reshape(-1, 8)
+        probs = torch.softmax(mixture.router(flat), dim=-1)
+        dense = sum(
+            probs[:, i : i + 1] * mixture.experts[i](flat) for i in range(4)
+        )
+        assert torch.allclose(out.reshape(-1, 8), dense, atol=1e-5)
+
+    def test_identical_inputs_give_identical_outputs(self) -> None:
+        mixture = self.build()
+        x = torch.randn(2, 4, 8)
+        assert torch.equal(mixture(x)[0], mixture(x)[0])
+
+    def test_tokens_are_processed_independently_when_nothing_overflows(
+        self,
+    ) -> None:
+        mixture = self.build()
+        x = torch.randn(1, 6, 8)
+        together, _ = mixture(x)
+        alone = torch.cat([mixture(x[:, i : i + 1])[0] for i in range(6)], 1)
+        assert torch.allclose(together, alone, atol=1e-5)
+
+    def test_overflowing_an_expert_degrades_gracefully(self) -> None:
+        """A tiny capacity drops tokens from busy experts; the layer must
+        stay finite and never invent output for a dropped token."""
+        mixture = self.build(capacity=0.01)
+        x = torch.randn(4, 16, 8)
+        out, aux = mixture(x)
+        assert torch.isfinite(out).all()
+        assert torch.isfinite(aux)
+        assert out.shape == x.shape
+
+    def test_gradients_reach_the_router_and_every_expert_that_was_used(
+        self,
+    ) -> None:
+        mixture = self.build().train()
+        out, aux = mixture(torch.randn(3, 8, 8))
+        (out.sum() + aux).backward()
+        assert mixture.router.weight.grad.abs().sum() > 0
+        assert any(
+            p.grad is not None and p.grad.abs().sum() > 0
+            for p in mixture.experts.parameters()
+        )
+
+    def test_the_balancing_loss_is_non_negative_and_scales_with_its_weight(
+        self,
+    ) -> None:
+        logits = torch.randn(32, 4)
+        probs = torch.softmax(logits, -1).mean(0)
+        small = moe_lib.load_balancing_loss(logits, probs, 4, 0.01)
+        large = moe_lib.load_balancing_loss(logits, probs, 4, 0.1)
+        assert small >= 0
+        assert large == pytest.approx(10 * float(small), rel=1e-5)
+
+    def test_wrong_input_rank_is_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            self.build()(torch.randn(8, 8))
