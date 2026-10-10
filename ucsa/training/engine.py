@@ -321,6 +321,7 @@ def evaluate(
     batches: BatchIterator,
     count: int,
     byte_lengths: torch.Tensor | None = None,
+    active_slots: int | None = None,
 ) -> dict[str, float]:
     """Measures perplexity over all positions and over the last 64.
 
@@ -333,6 +334,7 @@ def evaluate(
       count: Maximum number of batches.
       byte_lengths: Raw bytes per token id (`compression.token_byte_lengths`).
         When given, bits per byte is reported as well.
+      active_slots: Read only this many leading state slots (None reads all).
 
     Returns:
       `ppl_all` and `ppl_last64`, plus `bpb_all` and `bpb_last64` when
@@ -349,7 +351,7 @@ def evaluate(
         if n >= count:
             break
         x, y = x.to(device), y.to(device)
-        logits = model(x)["logits"]
+        logits = model(x, active_slots=active_slots)["logits"]
         loss = functional.cross_entropy(
             logits.reshape(-1, logits.shape[-1]),
             y.reshape(-1),
