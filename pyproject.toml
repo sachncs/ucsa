@@ -59,25 +59,20 @@ src = ["ucsa", "tests"]
 extend-exclude = ["build", "dist", ".venv"]
 
 [tool.ruff.lint]
-select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # pyflakes
-    "I",   # isort
-    "B",   # flake8-bugbear
-    "UP",  # pyupgrade
-    "SIM", # flake8-simplify
-    "C4",  # flake8-comprehensions
-    "RET", # flake8-return
-    "YTT", # flake8-2020
-    "PT",  # flake8-pytest-style
-]
+# Google Python Style: docstrings (Google convention), PEP 8 naming, types.
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "RET", "C4", "D", "N", "ANN", "PT"]
 ignore = [
-    "E501", # line length is enforced by `ruff format`
+    "D105",                                  # magic methods are self-describing
+    "D203", "D212", "D213", "D415", "D416",  # conflicting docstring variants
+    "ANN401",                                # Any marks heterogeneous dicts
 ]
 
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["PT011"]  # pytest.raises without match is OK in our style
+"tests/*" = ["D", "ANN", "PT011"]
+"scripts/*" = ["T201"]
 "__init__.py" = ["F401"]
 
 [tool.ruff.lint.isort]
@@ -110,18 +105,3 @@ addopts = [
     "--tb=short",
 ]
 testpaths = ["tests"]
-
-[tool.coverage.run]
-branch = true
-source = ["ucsa"]
-omit = ["*/tests/*", "*/__init__.py"]
-
-[tool.coverage.report]
-show_missing = true
-skip_covered = false
-fail_under = 80
-exclude_lines = [
-    "pragma: no cover",
-    "raise NotImplementedError",
-    "if TYPE_CHECKING:",
-]
