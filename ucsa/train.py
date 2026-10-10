@@ -18,11 +18,15 @@ from typing import Any
 import torch
 from torch import Tensor
 
-from ucsa.models.losses import UCSACombinedLoss
-from ucsa.training.curriculum import Curriculum, CurriculumSchedule
-from ucsa.training.dataset import DatasetConfig, TextDataset
+from ucsa.models import losses
+from ucsa.training import (
+    curriculum as curriculum_lib,
+    dataset as dataset_lib,
+    trainer as trainer_lib,
+)
+from ucsa.training.curriculum import Curriculum
 from ucsa.training.metrics import build_default_registry
-from ucsa.training.trainer import Trainer, TrainerConfig
+from ucsa.training.trainer import Trainer
 from ucsa.utils.logging import (
     LoggerConfig,
     build_logger,
@@ -38,10 +42,10 @@ LOGGER = logging.getLogger(__name__)
 def build_model(cfg: Any) -> torch.nn.Module:
     """Construct the UCSA top-level model from the config.
 
-    The full UCSA model lives in :mod:`ucsa.models.ucsa`. For the smoke
-    path we expose a tiny stand-in via :func:`ucsa.models.ucsa.build_ucsa`.
+    The full UCSA model lives in :mod:`ucsa.models.architecture`. For the smoke
+    path we expose a tiny stand-in via :func:`ucsa.models.architecture.build`.
     """
-    from ucsa.models.ucsa import build_ucsa
+    from ucsa.models import architecture
 
     try:
         from omegaconf import DictConfig, OmegaConf
@@ -50,27 +54,27 @@ def build_model(cfg: Any) -> torch.nn.Module:
     if DictConfig is not None and isinstance(cfg, DictConfig):
         merged = OmegaConf.to_container(cfg, resolve=True)
         assert isinstance(merged, dict)
-        return build_ucsa(merged)
-    return build_ucsa(cfg)
+        return architecture.build(merged)
+    return architecture.build(cfg)
 
 
-def build_dataset(cfg: Any) -> TextDataset:
+def build_dataset(cfg: Any) -> dataset_lib.Text:
     """Construct the training dataset from the config."""
-    from ucsa.models.perception import TokenizerWrapper
+    from ucsa.models import perception
 
     cfg_dict = config_to_dict(cfg)
-    tokenizer = TokenizerWrapper(
+    tokenizer = perception.Tokenizer(
         tokenizer_name=cfg_dict["tokenizer"]["name"],
         max_seq_len=cfg_dict["dataset"]["sequence_length"],
     )
-    dataset_config = DatasetConfig(
+    dataset_config = dataset_lib.Config(
         sequence_length=cfg_dict["dataset"]["sequence_length"],
         primary_dataset=cfg_dict["dataset"]["primary_dataset"],
         primary_split=cfg_dict["dataset"]["primary_split"],
         streaming=cfg_dict["dataset"]["streaming"],
         pack_sequences=cfg_dict["dataset"]["pack_sequences"],
     )
-    return TextDataset(tokenizer, dataset_config)
+    return dataset_lib.Text(tokenizer, dataset_config)
 
 
 def config_to_dict(cfg: Any) -> dict[str, Any]:
@@ -111,14 +115,14 @@ def build_trainer(
     jepa_mode = model_section.get("jepa_mode", "ijepa")
     jepa_alpha = float(model_section.get("jepa_alpha", 0.5))
     gaussian_reg_weight = float(model_section.get("gaussian_reg_weight", 0.1))
-    loss_fn = UCSACombinedLoss(
+    loss_fn = losses.Combined(
         jepa_mode=jepa_mode,
         jepa_alpha=jepa_alpha,
         gaussian_reg_weight=gaussian_reg_weight,
     )
     optimizer = build_optimizer(model, cfg)
     training = cfg_dict["training"]
-    trainer_config = TrainerConfig(
+    trainer_config = trainer_lib.Config(
         learning_rate=training["learning_rate"],
         weight_decay=training["weight_decay"],
         beta1=training["beta1"],
@@ -136,7 +140,7 @@ def build_trainer(
     )
     curriculum_dict = cfg_dict["curriculum"]
     curriculum = Curriculum(
-        CurriculumSchedule(
+        curriculum_lib.Schedule(
             stage_1_end=curriculum_dict["stage_1_end"],
             stage_2_end=curriculum_dict["stage_2_end"],
             stage_3_end=curriculum_dict["stage_3_end"],
@@ -193,7 +197,7 @@ def run_training(cfg: Any) -> dict[str, Any]:
     return final_snapshot
 
 
-def make_dataloader(dataset: TextDataset, cfg: Any) -> Any:
+def make_dataloader(dataset: dataset_lib.Text, cfg: Any) -> Any:
     """Wrap the dataset in a lightweight DataLoader."""
     from torch.utils.data import DataLoader
 
