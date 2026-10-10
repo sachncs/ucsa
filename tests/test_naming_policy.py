@@ -56,3 +56,19 @@ def test_detector_flags_semi_private_and_allows_the_rest():
 def test_no_semi_private_names(path):
     source = (ROOT / path).read_text()
     assert semi_private_names(source) == []
+
+
+def repository_sources() -> list[pathlib.Path]:
+    return sorted(
+        p
+        for folder in ("ucsa", "scripts", "tests")
+        for p in (ROOT / folder).rglob("*.py")
+        if "__pycache__" not in p.parts
+    )
+
+
+@pytest.mark.parametrize(
+    "path", repository_sources(), ids=lambda p: str(p.relative_to(ROOT))
+)
+def test_the_whole_repository_has_no_semi_private_names(path):
+    assert semi_private_names(path.read_text()) == [], path
