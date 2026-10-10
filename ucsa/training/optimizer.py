@@ -20,7 +20,7 @@ import torch
 from torch import Tensor
 
 
-def _newton_schulz_5(G: Tensor, steps: int = 5) -> Tensor:
+def newton_schulz_5(G: Tensor, steps: int = 5) -> Tensor:
     """Five-iteration Newton-Schulz orthogonalisation.
 
     Maps a square-ish matrix toward U @ V.T (its closest orthogonal
@@ -97,7 +97,7 @@ class Muon(torch.optim.Optimizer):
                 if g.ndim >= 2:
                     # Scale by ``sqrt(max(rows, cols) / cols)`` so the
                     # update RMS is approximately invariant to aspect ratio.
-                    update = _newton_schulz_5(buf, group["ns_steps"])
+                    update = newton_schulz_5(buf, group["ns_steps"])
                     update = (
                         update
                         * max(
@@ -114,4 +114,4 @@ class Muon(torch.optim.Optimizer):
         return loss
 
 
-__all__ = ["Muon", "_newton_schulz_5"]
+__all__ = ["Muon", "newton_schulz_5"]
