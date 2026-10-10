@@ -7,6 +7,7 @@ batch is a pure function of `(seed, step)`, and a resumed run continues the
 data stream exactly.
 """
 
+import hashlib
 import os
 from collections.abc import Iterable, Iterator
 
@@ -15,6 +16,48 @@ import torch
 
 EOS_ID = 50256
 DTYPE = np.uint16
+
+
+def filter_documents(
+    token_lists: Iterable[list[int]],
+    min_tokens: int = 32,
+    prefix_len: int = 128,
+    stats: dict[str, int] | None = None,
+) -> Iterator[list[int]]:
+    """Drops short and duplicate documents.
+
+    A document is a duplicate when its first `prefix_len` tokens (and its
+    length class) were already seen. That removes repeated boilerplate and
+    mirrored pages, which otherwise leak between training and validation and
+    inflate the apparent quality of memorisation.
+
+    Args:
+      token_lists: Token-id lists, one per document.
+      min_tokens: Documents shorter than this are dropped.
+      prefix_len: Number of leading tokens that identify a document.
+      stats: If given, updated in place with `seen`, `kept`, `short` and
+        `duplicate` counts.
+
+    Yields:
+      The documents that survive both filters, in order.
+    """
+    counts = stats if stats is not None else {}
+    for key in ("seen", "kept", "short", "duplicate"):
+        counts.setdefault(key, 0)
+    seen_hashes: set[bytes] = set()
+    for ids in token_lists:
+        counts["seen"] += 1
+        if len(ids) < min_tokens:
+            counts["short"] += 1
+            continue
+        head = np.asarray(ids[:prefix_len], dtype=DTYPE).tobytes()
+        digest = hashlib.blake2b(head, digest_size=8).digest()
+        if digest in seen_hashes:
+            counts["duplicate"] += 1
+            continue
+        seen_hashes.add(digest)
+        counts["kept"] += 1
+        yield ids
 
 
 def write_shard(
