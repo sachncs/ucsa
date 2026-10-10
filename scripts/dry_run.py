@@ -20,6 +20,7 @@ import train_r
 
 from ucsa import dryrun
 from ucsa.models import recurrent
+from ucsa.training import shards
 
 
 def main() -> None:
@@ -29,6 +30,7 @@ def main() -> None:
     parser.add_argument("--set", nargs="*", help="section.key=value")
     parser.add_argument("--params", type=int, default=0)
     parser.add_argument("--steps", type=int, default=5)
+    parser.add_argument("--data", default="data")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out-json", default="runs/dry-run.json")
     parser.add_argument(
@@ -40,9 +42,18 @@ def main() -> None:
     args.out_dir = "ckpts/dry-run"
 
     model_config, train_config = train_r.build_configs(args)
+    shard = shards.Shard(os.path.join(args.data, train_config.train_shard))
+    batch = next(
+        shard.batches(
+            train_config.batch_size,
+            train_config.seq_len,
+            seed=train_config.seed,
+        )
+    )
     report = dryrun.run(
         recurrent.Model(model_config),
         train_config,
+        batch,
         steps=args.steps,
         ignore_scalars=args.ignore_scalars,
     )
