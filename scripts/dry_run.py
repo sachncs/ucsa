@@ -16,18 +16,18 @@ import json
 import os
 import sys
 
-import train_r
-
 from ucsa import dryrun
 from ucsa.models import recurrent
-from ucsa.training import shards
+from ucsa.training import presets, shards
 
 
 def main() -> None:
     """Parses arguments, dry-runs, prints and writes the report."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--preset", default="small")
-    parser.add_argument("--set", nargs="*", help="section.key=value")
+    parser.add_argument(
+        "--set", nargs="*", default=[], help="section.key=value"
+    )
     parser.add_argument("--params", type=int, default=0)
     parser.add_argument("--steps", type=int, default=5)
     parser.add_argument("--data", default="data")
@@ -39,9 +39,13 @@ def main() -> None:
         help="skip 0-dim tensors (AdamW's float32 step counter in fp16)",
     )
     args = parser.parse_args()
-    args.out_dir = "ckpts/dry-run"
 
-    model_config, train_config = train_r.build_configs(args)
+    try:
+        model_config, train_config = presets.build_configs(
+            args.preset, args.set, args.params, args.seed, "ckpts/dry-run"
+        )
+    except ValueError as error:
+        sys.exit(str(error))
     shard = shards.Shard(os.path.join(args.data, train_config.train_shard))
     batch = next(
         shard.batches(
