@@ -48,6 +48,7 @@ STRICT_FILES: tuple[str, ...] = (
     "tests/test_reproduce.py",
     "tests/test_ladder.py",
     "tests/test_ablate.py",
+    "tests/test_cli.py",
     "tests/test_engine.py",
     "tests/test_tuning.py",
     "tests/test_prefix_protocol.py",
