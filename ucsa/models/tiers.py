@@ -11,13 +11,13 @@ Episode            Per-request context that survives the request lifetime.
 Long-term          Accepted knowledge retained across many requests.
 ================== =====================================================
 
-This module wraps :class:`PersistentCognitiveState` and exposes the
+This module wraps :class:`cognitive.State` and exposes the
 semantic operations of the hierarchy (propose candidate, accept into
 long-term, snapshot to episode, recycle low-retention slots).
 
 Memory updates NEVER occur inside transition blocks. They happen
 explicitly via the methods here, typically driven by the background
-:class:`ucsa.models.memory_service.MemoryService` worker.
+:class:`ucsa.models.curation.Curator` worker.
 """
 
 from __future__ import annotations
@@ -27,11 +27,11 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
-from ucsa.models.state import PersistentCognitiveState
+from ucsa.models import cognitive
 
 
 @dataclass(frozen=True)
-class MemoryUpdate:
+class Update:
     """A candidate memory proposed for the long-term bank.
 
     Attributes:
@@ -49,12 +49,12 @@ class MemoryUpdate:
     def __post_init__(self) -> None:
         if self.tokens.dim() != 2:
             raise ValueError(
-                f"MemoryUpdate tokens must be 2D, got shape "
+                f"Update tokens must be 2D, got shape "
                 f"{tuple(self.tokens.shape)}."
             )
         if self.tokens.shape[0] != self.importance.shape[0]:
             raise ValueError(
-                f"MemoryUpdate tokens ({self.tokens.shape[0]}) and "
+                f"Update tokens ({self.tokens.shape[0]}) and "
                 f"importance ({self.importance.shape[0]}) must agree on "
                 f"the token count."
             )
@@ -65,7 +65,7 @@ class MemoryUpdate:
 
 
 class Memory:
-    """Hierarchical memory facade over :class:`PersistentCognitiveState`.
+    """Hierarchical memory facade over :class:`cognitive.State`.
 
     The Memory class exposes semantic operations (snapshot, propose, accept,
     recycle) but delegates bank storage and retention math to the PCS.
@@ -73,7 +73,7 @@ class Memory:
 
     def __init__(
         self,
-        cstate: PersistentCognitiveState,
+        cstate: cognitive.State,
         long_term_capacity: int | None = None,
     ) -> None:
         """Initialise the memory facade.
@@ -131,7 +131,7 @@ class Memory:
         working_slice: Tensor | None = None,
         importance: Tensor | None = None,
         confidence: float = 1.0,
-    ) -> MemoryUpdate:
+    ) -> Update:
         """Propose a memory update derived from working memory.
 
         Args:
@@ -142,13 +142,13 @@ class Memory:
             confidence: Confidence in the proposal.
 
         Returns:
-            A :class:`MemoryUpdate` candidate.
+            A :class:`Update` candidate.
         """
         if working_slice is None:
             working_slice = self.cstate.get_bank("working")
         if importance is None:
             importance = torch.ones(working_slice.shape[0])
-        return MemoryUpdate(
+        return Update(
             tokens=working_slice.detach().clone(),
             importance=importance.detach().clone(),
             confidence=confidence,
@@ -157,7 +157,7 @@ class Memory:
 
     def accept_into_long_term(
         self,
-        candidate: MemoryUpdate,
+        candidate: Update,
         max_slots: int | None = None,
     ) -> list[int]:
         """Accept a candidate into the long-term bank.
@@ -347,4 +347,4 @@ class Memory:
         return [int(i) for i in indices.tolist()]
 
 
-__all__ = ["Memory", "MemoryUpdate"]
+__all__ = ["Memory", "Update"]
