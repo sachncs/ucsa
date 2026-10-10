@@ -406,7 +406,7 @@ export const CONTRIB_STEPS = [
     num: '05',
     title: 'Smoke test',
     desc: 'Five training steps. Exits in under a minute on CPU. Catches wiring regressions.',
-    cmd: 'scripts/train.py --max-steps 5 --skip-baselines',
+    cmd: 'scripts/train.py --max-steps 5',
   },
   {
     num: '06',
