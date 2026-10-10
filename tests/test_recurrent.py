@@ -1,12 +1,8 @@
 import pytest
 import torch
 
-from ucsa.models.recurrent import (
-    RecurrentConfig,
-    RecurrentUCSA,
-    config_for_params,
-    count_parameters,
-)
+from ucsa.models import recurrent
+from ucsa.models.recurrent import config_for_params, count_parameters
 
 
 def tiny(**kw):
@@ -21,12 +17,12 @@ def tiny(**kw):
         bank_write_bias=(("working", 0.0), ("long_term", -2.0)),
     )
     base.update(kw)
-    return RecurrentConfig(**base)
+    return recurrent.Config(**base)
 
 
 def make(**kw):
     torch.manual_seed(0)
-    return RecurrentUCSA(tiny(**kw)).eval()
+    return recurrent.Model(tiny(**kw)).eval()
 
 
 def test_logits_cover_every_position():
@@ -125,14 +121,14 @@ def test_config_rejects_bad_values_and_unknown_keys():
     with pytest.raises(ValueError):
         tiny(write_top_k=99)
     with pytest.raises(ValueError):
-        RecurrentConfig.from_dict({"hiden": 4})
+        recurrent.Config.from_dict({"hiden": 4})
     cfg = tiny()
-    assert RecurrentConfig.from_dict(cfg.to_dict()) == cfg
+    assert recurrent.Config.from_dict(cfg.to_dict()) == cfg
 
 
 def test_config_for_params_hits_target():
     cfg = config_for_params(63_000_000)
-    n = count_parameters(RecurrentUCSA(cfg))
+    n = count_parameters(recurrent.Model(cfg))
     assert abs(n - 63_000_000) / 63_000_000 < 0.15
 
 
