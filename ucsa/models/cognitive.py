@@ -469,6 +469,7 @@ class State(nn.Module):
         name: str,
         k: int,
         replacement: Tensor | None = None,
+        used_only: bool = False,
     ) -> Tensor:
         """Recycle the ``k`` lowest-retention slots in ``name``.
 
@@ -480,6 +481,10 @@ class State(nn.Module):
             k: Number of slots to recycle.
             replacement: Optional replacement tensor of shape
                 ``(k, hidden_size)``. If ``None``, slots are zeroed.
+            used_only: Only slots that hold something (usage above zero) are
+                candidates. An unused slot has the lowest retention of all,
+                so without this a prune would recycle empty slots and leave
+                the occupied ones untouched.
 
         Returns:
             Long tensor of recycled slot indices.
@@ -492,10 +497,17 @@ class State(nn.Module):
             raise KeyError(f"Unknown bank '{name}'.")
         spec = self.bank_specs[name]
         retention = self.metadata(name, "retention")
-        k_eff = min(k, spec.num_tokens)
+        if used_only:
+            pool = torch.nonzero(
+                self.metadata(name, "usage") > 0, as_tuple=False
+            ).squeeze(-1)
+        else:
+            pool = torch.arange(spec.num_tokens)
+        k_eff = min(k, pool.numel())
         if k_eff <= 0:
             return torch.empty(0, dtype=torch.long)
-        _, indices = torch.topk(retention, k_eff, largest=False)
+        order = torch.topk(retention[pool], k_eff, largest=False).indices
+        indices = pool[order]
 
         target = self.get_bank(name)
         if replacement is None:
