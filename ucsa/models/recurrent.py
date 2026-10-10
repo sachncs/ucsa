@@ -143,8 +143,9 @@ class Config:
             ),
             (lambda: self.chunk_size >= 2, "chunk_size must be >= 2"),
             (
-                lambda: self.window is None
-                or 0 <= self.window <= self.chunk_size,
+                lambda: (
+                    self.window is None or 0 <= self.window <= self.chunk_size
+                ),
                 "window must be None or in [0, chunk_size]",
             ),
             (lambda: self.encoder_layers >= 1, "encoder_layers must be >= 1"),
@@ -161,8 +162,9 @@ class Config:
                 "banks must have positive sizes",
             ),
             (
-                lambda: len({name for name, _ in self.banks})
-                == len(self.banks),
+                lambda: (
+                    len({name for name, _ in self.banks}) == len(self.banks)
+                ),
                 "bank names must be unique",
             ),
             (lambda: self.read_every >= 1, "read_every must be >= 1"),
@@ -177,8 +179,9 @@ class Config:
             ),
             (lambda: self.min_slots >= 1, "min_slots must be >= 1"),
             (
-                lambda: self.slot_dropout == 0.0
-                or self.min_slots <= self.num_slots,
+                lambda: (
+                    self.slot_dropout == 0.0 or self.min_slots <= self.num_slots
+                ),
                 "min_slots must be <= num_slots when slot_dropout is on",
             ),
             (lambda: self.jepa_weight >= 0.0, "jepa_weight must be >= 0"),
@@ -1045,8 +1048,9 @@ class Model(nn.Module):
                     kth = logits.topk(top_k, -1).values[:, -1:]
                     logits = logits.masked_fill(logits < kth, -math.inf)
                 nxt = torch.multinomial(logits.softmax(-1), 1)
-            current, out = torch.cat([current, nxt], 1), torch.cat(
-                [out, nxt], 1
+            current, out = (
+                torch.cat([current, nxt], 1),
+                torch.cat([out, nxt], 1),
             )
         return out
 
