@@ -12,6 +12,8 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor, nn
 
+from ucsa.utils import precision
+
 
 @dataclass(frozen=True)
 class Config:
@@ -76,9 +78,11 @@ def load_balancing_loss(
     num_tokens = router_logits.shape[0]
     scaled_prob = router_prob_per_expert * num_tokens
     with torch.no_grad():
-        expert_mask = torch.nn.functional.one_hot(
-            router_logits.argmax(dim=-1), num_classes=num_experts
-        ).float()
+        expert_mask = precision.to_dtype(
+            torch.nn.functional.one_hot(
+                router_logits.argmax(dim=-1), num_classes=num_experts
+            )
+        )
     tokens_per_expert = expert_mask.sum(dim=0)
     loss = (tokens_per_expert * scaled_prob).sum()
     loss = loss / (num_tokens * num_experts)
