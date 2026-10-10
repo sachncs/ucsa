@@ -15,6 +15,7 @@ import json
 import os
 import time
 
+import numpy as np
 import torch
 import train_r
 import transformers
@@ -100,6 +101,56 @@ def run_arm(
     return record
 
 
+def replicate_noise(records: dict[str, dict]) -> float | None:
+    """Measures run-to-run noise from arms that repeat the base configuration.
+
+    Training on this hardware is not bitwise deterministic, so even an
+    identical configuration and seed differ between runs. The spread of the
+    base replicates (`base`, `base-seed43`, ...) is the noise any single-run
+    comparison must beat.
+
+    Args:
+      records: Finished arm records by name.
+
+    Returns:
+      Standard deviation of the mean held-out loss across replicates, in nats
+      per token, or None with fewer than two replicates.
+    """
+    means = [
+        float(np.mean(rec["window_nll"]))
+        for name, rec in records.items()
+        if name.startswith("base")
+    ]
+    return float(np.std(means, ddof=1)) if len(means) >= 2 else None
+
+
+def verdict_for(
+    gap: float, significant: bool, noise: float | None, factor: float = 2.0
+) -> str:
+    """Decides whether a gap is a real difference.
+
+    The paired interval only measures evaluation-window noise. A gap is
+    called better or worse only when it also exceeds `factor` times the
+    run-to-run noise.
+
+    Args:
+      gap: Mean per-token loss gap to base (negative is better).
+      significant: Whether the paired interval excludes zero.
+      noise: Run-to-run standard deviation, or None if unmeasured.
+      factor: How many noise standard deviations a gap must exceed.
+
+    Returns:
+      `better`, `worse`, `within run-to-run noise` or `noise not measured`.
+    """
+    if not significant:
+        return "no significant difference"
+    if noise is None:
+        return "noise not measured"
+    if abs(gap) < factor * noise:
+        return "within run-to-run noise"
+    return "better" if gap < 0 else "worse"
+
+
 def summarise(out: str) -> str:
     """Builds the Markdown comparison of every finished arm against base."""
     records = {}
@@ -108,10 +159,18 @@ def summarise(out: str) -> str:
             with open(os.path.join(out, fname)) as f:
                 rec = json.load(f)
             records[rec["name"]] = rec
-    import numpy as np
-
     base = np.asarray(records["base"]["window_nll"])
+    noise = replicate_noise(records)
+    scale = 1.0 / np.log(2.0)
+    header = (
+        f"Run-to-run noise (std of base replicates): "
+        f"{noise * scale:.4f} bits/token."
+        if noise is not None
+        else "Run-to-run noise: not measured (need two base replicates)."
+    )
     lines = [
+        header,
+        "",
         "| arm | params | tok/s | ppl | bits/byte | gap vs base (bits/token) "
         "[95% CI] | verdict |",
         "|---|---|---|---|---|---|---|",
@@ -123,16 +182,11 @@ def summarise(out: str) -> str:
             gap, verdict = "-", "reference"
         else:
             r = diagnostics.paired_bootstrap(arm, base)
-            scale = 1.0 / np.log(2.0)
             gap = (
                 f"{r.mean_gap * scale:+.4f} "
                 f"[{r.low * scale:+.4f}, {r.high * scale:+.4f}]"
             )
-            verdict = (
-                "better"
-                if r.significant and r.mean_gap < 0
-                else "worse" if r.significant else "no significant difference"
-            )
+            verdict = verdict_for(r.mean_gap, r.significant, noise)
         lines.append(
             f"| {name} | {rec['params'] / 1e6:.1f}M | "
             f"{rec.get('tokens_per_second', 0):.0f} | "
