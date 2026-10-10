@@ -6,12 +6,11 @@ import pytest
 import torch
 from datasets import Dataset
 
-from ucsa.models.perception import TokenizerWrapper
+from ucsa.models import perception
+from ucsa.training import dataset
 from ucsa.training.dataset import (
     FALLBACK_DATASETS,
     PRIMARY_DATASET,
-    DatasetConfig,
-    TextDataset,
     dataset_tokenizer,
     supported_datasets,
 )
@@ -36,17 +35,17 @@ class FakeTokenizer:
         return [(ord(c) % self.vocab_size) for c in text]
 
 
-def tiny_wrapper() -> TokenizerWrapper:
-    """Return a TokenizerWrapper backed by FakeTokenizer."""
+def tiny_wrapper() -> perception.Tokenizer:
+    """Return a perception.Tokenizer backed by FakeTokenizer."""
     fake = FakeTokenizer()
-    wrapper = TokenizerWrapper.__new__(TokenizerWrapper)
+    wrapper = perception.Tokenizer.__new__(perception.Tokenizer)
     wrapper.tokenizer = fake
     wrapper.max_seq_len = 64
     wrapper.vocab_size = fake.vocab_size
     return wrapper
 
 
-def tiny_config(**overrides: object) -> DatasetConfig:
+def tiny_config(**overrides: object) -> dataset.Config:
     """Return a tiny dataset config."""
     defaults: dict[str, object] = {
         "sequence_length": 32,
@@ -54,16 +53,16 @@ def tiny_config(**overrides: object) -> DatasetConfig:
         "pack_sequences": False,
     }
     defaults.update(overrides)
-    return DatasetConfig(**defaults)  # type: ignore[arg-type]
+    return dataset.Config(**defaults)  # type: ignore[arg-type]
 
 
 def make_fake_dataset(
     texts: list[str] | None = None,
-    config: DatasetConfig | None = None,
-) -> TextDataset:
-    """Build a TextDataset against an in-memory fake dataset."""
+    config: dataset.Config | None = None,
+) -> dataset.Text:
+    """Build a dataset.Text against an in-memory fake dataset."""
 
-    class FakeBackedDataset(TextDataset):
+    class FakeBackedDataset(dataset.Text):
         def initialise_dataset(self_inner) -> object:  # type: ignore[override]
             data = {
                 "text": (
@@ -85,18 +84,18 @@ def make_fake_dataset(
 
 
 class TestDatasetConfig:
-    """Tests for :class:`DatasetConfig`."""
+    """Tests for :class:`dataset.Config`."""
 
     def test_default_config_valid(self) -> None:
         """Defaults construct without error."""
-        config = DatasetConfig()
+        config = dataset.Config()
         assert config.sequence_length > 0
         assert config.primary_dataset == PRIMARY_DATASET
         assert config.fallback_chain == FALLBACK_DATASETS
 
 
 class TestTextDataset:
-    """Tests for :class:`TextDataset`."""
+    """Tests for :class:`dataset.Text`."""
 
     def test_construction_with_fake_data(self) -> None:
         """A fake-backed dataset constructs without hitting the network."""
@@ -106,7 +105,7 @@ class TestTextDataset:
     def test_text_field_detection(self) -> None:
         """Text-field detection finds a known field name."""
 
-        class CustomFieldDataset(TextDataset):
+        class CustomFieldDataset(dataset.Text):
             def initialise_dataset(self_inner) -> object:  # type: ignore[override]
                 return Dataset.from_dict({"content": ["sample text"]})
 
@@ -171,7 +170,7 @@ class TestTextDataset:
     def test_no_text_field_raises(self) -> None:
         """Dataset raises when no recognisable text field is found."""
 
-        class NoTextFieldDataset(TextDataset):
+        class NoTextFieldDataset(dataset.Text):
             def initialise_dataset(self_inner) -> object:  # type: ignore[override]
                 return Dataset.from_dict({"other": ["x"]})
 
@@ -208,7 +207,7 @@ class TestDatasetTokenizerHelper:
     """Tests for the :func:`dataset_tokenizer` test helper."""
 
     def test_helper_returns_dataset(self) -> None:
-        """``dataset_tokenizer`` builds a TextDataset."""
+        """``dataset_tokenizer`` builds a dataset.Text."""
         fake = FakeTokenizer()
         ds = dataset_tokenizer(fake, sequence_length=8)
         for inputs, _ in ds:
