@@ -72,3 +72,27 @@ def test_the_summary_table_applies_the_noise_rule(tmp_path):
     assert "within run-to-run noise" in rows["tiny-gain"]
     assert "better" in rows["real-gain"]
     assert "Run-to-run noise" in text
+
+
+def test_a_given_noise_overrides_an_underdetermined_estimate(tmp_path):
+    base = np.full(50, 6.0)
+    for name, losses in {
+        "base": base,
+        "base-seed43": base + 0.0005,  # two replicates that happen to agree
+        "arm": base - 0.04,
+    }.items():
+        (tmp_path / f"{name}.json").write_text(json.dumps(record(name, losses)))
+    trusting = ablate.summarise(str(tmp_path))
+    careful = ablate.summarise(str(tmp_path), noise_bits=0.0145)
+
+    def arm(text):
+        return next(
+            line
+            for line in text.splitlines()
+            if line.startswith("| arm |")
+            and line.split("|")[2].strip().endswith("M")
+        )
+
+    assert "better" in arm(trusting)  # fooled by the lucky pair
+    assert "within run-to-run noise" in arm(careful)
+    assert "given" in careful
