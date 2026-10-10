@@ -97,10 +97,10 @@ training run, the smoke command above is the path. See
 
 | Contribution | Citation slot | Where it lives |
 | --- | --- | --- |
-| Seven-bank PCS with retention scoring + recycle policy | §3.1 | `ucsa/models/state.py` |
-| Multi-step JEPA chain + EMA-tracked targets | §3.3 | `ucsa/models/ucsa.py` (`jepa_multi_step`) + `ucsa/training/trainer.py` |
+| Seven-bank PCS with retention scoring + recycle policy | §3.1 | `ucsa/models/cognitive.py` |
+| Multi-step JEPA chain + EMA-tracked targets | §3.3 | `ucsa/models/architecture.py` (`jepa_multi_step`) + `ucsa/training/trainer.py` |
 | Hard-EMA target encoder inside UCSA | §3.5 | `ucsa/training/ema.py` |
-| Input-reconstruction capacity bottleneck | §3.4 | `ucsa/models/projection_heads.py` |
+| Input-reconstruction capacity bottleneck | §3.4 | `ucsa/models/projection.py` |
 | Endogenous origination: `intent` bank + per-slot attribution | §3.6 | `ucsa/models/origination.py`, `ucsa/models/intent_descent.py` |
 | Matched-compute baseline + standard-LM eval harness | §4 | `scripts/train_baseline.py`, `scripts/eval.py` |
 
