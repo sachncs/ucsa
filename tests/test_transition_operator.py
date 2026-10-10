@@ -1,4 +1,4 @@
-"""Tests for :mod:`ucsa.models.transition_operator`."""
+"""Tests for :mod:`ucsa.models.transition`."""
 
 from __future__ import annotations
 
@@ -6,11 +6,10 @@ import pytest
 import torch
 from torch import Tensor
 
-from ucsa.models.state import PCSConfig, PersistentCognitiveState
-from ucsa.models.transition_operator import StateTransitionOperator
+from ucsa.models import cognitive, transition
 
 
-class IdentityOperator(StateTransitionOperator):
+class IdentityOperator(transition.Operator):
     """Test operator that returns the PCS unchanged.
 
     Used to verify the ABC contract without exercising real attention.
@@ -30,9 +29,9 @@ class IdentityOperator(StateTransitionOperator):
 
     def forward(
         self,
-        cstate: PersistentCognitiveState,
+        cstate: cognitive.State,
         observation: Tensor,
-    ) -> PersistentCognitiveState:
+    ) -> cognitive.State:
         """Return the PCS unchanged."""
         self.forward_called += 1
         return cstate
@@ -46,7 +45,7 @@ class IdentityOperator(StateTransitionOperator):
         self.reset_called += 1
 
 
-class RecordingOperator(StateTransitionOperator):
+class RecordingOperator(transition.Operator):
     """Test operator that records every (cstate, observation) pair.
 
     The operator returns the PCS unchanged but exposes the call history for
@@ -56,7 +55,7 @@ class RecordingOperator(StateTransitionOperator):
     def __init__(self) -> None:
         """Initialise the recording operator."""
         super().__init__()
-        self.cstate_history: list[PersistentCognitiveState] = []
+        self.cstate_history: list[cognitive.State] = []
         self.observation_history: list[Tensor] = []
 
     @property
@@ -66,9 +65,9 @@ class RecordingOperator(StateTransitionOperator):
 
     def forward(
         self,
-        cstate: PersistentCognitiveState,
+        cstate: cognitive.State,
         observation: Tensor,
-    ) -> PersistentCognitiveState:
+    ) -> cognitive.State:
         """Record the inputs and return the PCS unchanged."""
         self.cstate_history.append(cstate)
         self.observation_history.append(observation)
@@ -82,17 +81,17 @@ class RecordingOperator(StateTransitionOperator):
 
 
 class TestStateTransitionOperatorABC:
-    """Tests for the StateTransitionOperator ABC contract."""
+    """Tests for the transition.Operator ABC contract."""
 
     @pytest.fixture
-    def state(self) -> PersistentCognitiveState:
+    def state(self) -> cognitive.State:
         """Provide a fresh PCS."""
-        return PersistentCognitiveState(PCSConfig(hidden_size=16))
+        return cognitive.State(cognitive.Config(hidden_size=16))
 
     def test_abstract_methods_must_be_implemented(self) -> None:
         """A subclass missing abstract methods cannot be instantiated."""
 
-        class IncompleteOperator(StateTransitionOperator):
+        class IncompleteOperator(transition.Operator):
             @property
             def name(self) -> str:
                 return "incomplete"
@@ -103,7 +102,7 @@ class TestStateTransitionOperatorABC:
     def test_dummy_operator_is_module(self) -> None:
         """A subclass is also a :class:`torch.nn.Module`."""
         op = IdentityOperator()
-        assert isinstance(op, StateTransitionOperator)
+        assert isinstance(op, transition.Operator)
         assert isinstance(op, torch.nn.Module)
 
     def test_initialize_is_called_explicitly(self) -> None:
@@ -120,18 +119,14 @@ class TestStateTransitionOperatorABC:
         op.reset()
         assert op.reset_called == 1
 
-    def test_forward_returns_cstate(
-        self, state: PersistentCognitiveState
-    ) -> None:
+    def test_forward_returns_cstate(self, state: cognitive.State) -> None:
         """``forward`` returns the updated PCS."""
         op = IdentityOperator()
         observation = torch.randn(1, 4, 16)
         result = op(state, observation)
         assert result is state
 
-    def test_forward_records_call(
-        self, state: PersistentCognitiveState
-    ) -> None:
+    def test_forward_records_call(self, state: cognitive.State) -> None:
         """``RecordingOperator`` captures every (cstate, observation)."""
         op = RecordingOperator()
         observation = torch.randn(1, 4, 16)
