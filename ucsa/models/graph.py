@@ -504,7 +504,5 @@ class Graph:
         if count == 0:
             return 0
         with torch.no_grad():
-            working[:count] = tokens[:count].to(
-                device=working.device, dtype=working.dtype
-            )
+            working[:count] = tokens[:count].to(device=working.device)
         return count
