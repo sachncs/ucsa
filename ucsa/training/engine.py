@@ -149,7 +149,15 @@ class Config:
 
 
 def pick_device() -> torch.device:
-    """Returns the best available accelerator, else the CPU."""
+    """Returns the device to run on.
+
+    The `UCSA_DEVICE` environment variable (`cpu`, `mps`, `cuda`) overrides
+    the choice, e.g. to develop on the CPU while the accelerator trains.
+    Otherwise the best available accelerator, else the CPU.
+    """
+    forced = os.environ.get("UCSA_DEVICE")
+    if forced:
+        return torch.device(forced)
     if torch.backends.mps.is_available():
         return torch.device("mps")
     if torch.cuda.is_available():
