@@ -72,22 +72,30 @@ def main() -> None:
     tokenizer = transformers.AutoTokenizer.from_pretrained("gpt2")
     os.makedirs(args.out, exist_ok=True)
     stream = datasets.load_dataset(args.dataset, split="train", streaming=True)
-    texts = (row["text"] for row in stream)
-    zstats: dict[str, int] = {}
-    if args.zratio:
-        texts = shards.filter_by_compressibility(
-            texts, args.zratio[0], args.zratio[1], zstats
-        )
-    docs = tokenized_documents(texts, tokenizer)
+    raw = iter(row["text"] for row in stream)
     stats: dict[str, int] = {}
-    if not args.no_dedup:
-        docs = shards.filter_documents(docs, args.min_tokens, stats=stats)
+    zstats: dict[str, int] = {}
+    seen: set[bytes] = set()  # shared, so no document lands in two shards
+
+    def documents(texts: Iterator[str]) -> Iterator[list[int]]:
+        docs = tokenized_documents(texts, tokenizer)
+        if args.no_dedup:
+            return docs
+        return shards.filter_documents(
+            docs, args.min_tokens, stats=stats, seen=seen
+        )
 
     started = time.time()
-    for name, limit in (("val", args.val_tokens), ("train", args.train_tokens)):
+    plan = (("val", args.val_tokens, False), ("train", args.train_tokens, True))
+    for name, limit, filtered in plan:
+        texts = raw
+        if filtered and args.zratio:  # only training data is filtered
+            texts = shards.filter_by_compressibility(
+                raw, args.zratio[0], args.zratio[1], zstats
+            )
         suffix = f"-{args.tag}" if args.tag and name == "train" else ""
         path = os.path.join(args.out, f"{name}{suffix}.bin")
-        written = shards.write_shard(docs, path, limit)
+        written = shards.write_shard(documents(texts), path, limit)
         print(
             f"{name}: {written:,} tokens -> {path} "
             f"({time.time() - started:.0f}s)",
