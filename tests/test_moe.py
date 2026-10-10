@@ -22,7 +22,7 @@ def tiny_config(**overrides: object) -> moe_lib.Config:
     return moe_lib.Config(**defaults)  # type: ignore[arg-type]
 
 
-class TestMoEConfig:
+class TestConfig:
     """Tests for :class:`moe_lib.Config`."""
 
     def test_default_config_valid(self) -> None:
@@ -91,7 +91,7 @@ def zero_parameters(tensor: Tensor) -> None:
         tensor.zero_()
 
 
-class TestMixtureOfExperts:
+class TestMixture:
     """Tests for :class:`moe_lib.Mixture`."""
 
     @pytest.fixture
