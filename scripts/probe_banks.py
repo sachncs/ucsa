@@ -26,7 +26,7 @@ import torch.nn.functional as F
 import yaml
 from safetensors.torch import load_file
 
-from ucsa.models.state import BANK_NAMES
+from ucsa.models.cognitive import BANK_NAMES
 from ucsa.train import build_model
 from ucsa.utils.checkpoint import load_state_dict_compat
 from ucsa.utils.seed import set_seed
