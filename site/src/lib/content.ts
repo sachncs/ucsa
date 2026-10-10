@@ -137,14 +137,14 @@ export const BANKS: ReadonlyArray<{
   {
     name: 'intent',
     tokens: '16 tok',
-    role: 'Origination signal. Held out of the operator stream by design — the OriginationHead reads intent and working memory and produces the next iteration’s input. Per-slot attribution is well-posed because there is one path, not many.',
+    role: 'Origination signal. Held out of the operator stream by design — the projection.Origination reads intent and working memory and produces the next iteration’s input. Per-slot attribution is well-posed because there is one path, not many.',
     color: 'var(--bank-intent)',
     full: true,
     meta: {
       role: 'origination',
       path: 'held out · origination',
       tokens: 'shape (16, hidden)',
-      service: 'OriginationHead + IntentUpdate',
+      service: 'projection.Origination + IntentUpdate',
     },
   },
 ];
@@ -154,14 +154,14 @@ export const ARCH_CARDS = [
     n: '01',
     name: 'PCS — Persistent Cognitive State',
     desc: 'Seven differentiable token banks. Every read and write in the system is a slice of this state.',
-    tag: 'ucsa/models/state.py',
+    tag: 'ucsa/models/cognitive.py',
     span: 'wide' as const,
   },
   {
     n: '02',
     name: 'Operator — state transition F',
     desc: 'The only computation engine. Maps (Cₜ, Oₜ) → Cₜ₊₁. Reference impl is a pre-norm Transformer with GQA, MoE, and memory-index cross-attention.',
-    tag: 'ucsa/models/transformer_operator.py',
+    tag: 'ucsa/models/transformer.py',
     span: 'wide' as const,
   },
   {
@@ -175,14 +175,14 @@ export const ARCH_CARDS = [
     n: '04',
     name: 'Memory service',
     desc: 'Background worker. Verifies, consolidates, and prunes long-term memory. Inference never blocks on memory.',
-    tag: 'memory_service.py',
+    tag: 'curation.py',
     span: 'half' as const,
   },
   {
     n: '05',
     name: 'Projection heads',
     desc: 'Four heads — language, planning, tool, memory — plus the input-reconstruction and origination heads.',
-    tag: 'projection_heads.py',
+    tag: 'projection.py',
     span: 'half' as const,
   },
   {
