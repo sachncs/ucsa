@@ -61,12 +61,13 @@ def section_compression(report: dict[str, Any] | None) -> str:
     if report is None:
         return missing("compress.json", "scripts/compress.py")
     anchors = report["anchors_bits_per_byte"]
+    verdict = "verified lossless" if report["lossless_round_trip"] else "FAILED"
     return "\n".join(
         [
             "| compressor | bits per byte |",
             "|---|---|",
             f"| UCSA-R + arithmetic coding "
-            f"({'verified lossless' if report['lossless_round_trip'] else 'FAILED'})"
+            f"({verdict})"
             f" | {report['ucsa_bits_per_byte']:.3f} |",
             f"| zlib (level 9) | {anchors['zlib']:.3f} |",
             f"| LZMA (preset 9) | {anchors['lzma']:.3f} |",
@@ -132,9 +133,8 @@ def section_probe(report: dict[str, Any] | None) -> str:
         "|---|---|---|",
     ]
     for row in report["rate_distortion"]:
-        lines.append(
-            f"| {int(row['slots'])} | {row['state_bits']:.0f} | {row['bpb']:.4f} |"
-        )
+        slots, bits = int(row["slots"]), row["state_bits"]
+        lines.append(f"| {slots} | {bits:.0f} | {row['bpb']:.4f} |")
     return "\n".join(lines)
 
 
