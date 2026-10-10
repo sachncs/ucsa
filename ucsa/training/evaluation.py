@@ -20,7 +20,7 @@ from ucsa.training.metrics import (
 
 
 @dataclass
-class EvaluationState:
+class State:
     """internal: mutable state for the evaluation loop."""
 
     steps: int = 0
@@ -30,7 +30,7 @@ class EvaluationState:
     last_perplexity: float = 0.0
 
 
-class EvaluationLoop:
+class Loop:
     """Run periodic evaluation over a dataloader."""
 
     def __init__(
@@ -55,7 +55,7 @@ class EvaluationLoop:
                 "cuda" if torch.cuda.is_available() else "cpu"
             )
         self.device = device
-        self.state = EvaluationState()
+        self.state = State()
 
     def move_batch(self, batch: tuple[Tensor, Tensor]) -> tuple[Tensor, Tensor]:
         """Move a batch to the configured device."""
@@ -109,12 +109,12 @@ class EvaluationLoop:
         return step > 0 and step % every_n_steps == 0
 
 
-__all__ = ["EvaluationLoop", "EvaluationState"]
+__all__ = ["Loop", "State"]
 
 
-def make_default_evaluation_loop(
+def default_loop(
     model: nn.Module,
     loss_fn: Callable[[Tensor, Tensor], tuple[Tensor, dict[str, float]]],
-) -> EvaluationLoop:
-    """internal: build an :class:`EvaluationLoop` with default settings."""
-    return EvaluationLoop(model=model, loss_fn=loss_fn)
+) -> Loop:
+    """internal: build an :class:`Loop` with default settings."""
+    return Loop(model=model, loss_fn=loss_fn)
