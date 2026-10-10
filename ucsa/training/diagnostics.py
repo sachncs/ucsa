@@ -16,6 +16,7 @@ from torch.nn import functional
 
 from ucsa.models import recurrent
 from ucsa.training import engine
+from ucsa.utils import precision
 
 
 @torch.no_grad()
@@ -43,7 +44,7 @@ def window_nll(
         if n >= count:
             break
         x, y = x.to(device), y.to(device)
-        logits = model(x)["logits"].float()
+        logits = model(x)["logits"]
         loss = functional.cross_entropy(
             logits.reshape(-1, logits.shape[-1]),
             y.reshape(-1),
@@ -53,7 +54,11 @@ def window_nll(
             loss = loss[:, -tail:]
         rows.append(loss.mean(dim=1).cpu())
     model.train()
-    return torch.cat(rows).numpy() if rows else np.zeros(0)
+    return (
+        torch.cat(rows).numpy()
+        if rows
+        else torch.zeros(0, dtype=precision.DTYPE).numpy()
+    )
 
 
 @dataclasses.dataclass(frozen=True)
