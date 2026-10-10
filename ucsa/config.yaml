@@ -1,112 +1,23 @@
-# UCSA configuration: one file, two models.
+# UCSA-R configuration: the single file.
 #
-# Top-level sections (model, heads, training, ...) configure the original
-# slot-based UCSA. The `recurrent` section holds the UCSA-R presets: select
-# one with `scripts/train_r.py --preset <name>` and override any field with
-# `--set model.chunk_size=64 train.lr=3e-4`.
-seed: 42
-reasoning_iterations: 4
-
-model:
-  hidden_size: 128
-  num_layers: 4
-  num_q_heads: 4
-  num_kv_heads: 2
-  intermediate_size: 256
-  sliding_window: 4096
-  vocab_size: 50257
-  max_seq_len: 1024
-  num_concepts: 16
-  attention_dropout: 0.0
-  residual_dropout: 0.0
-  ffn_dropout: 0.0
-  # TC-JEPA (arXiv 2605.03245): sparse cross-attention text conditioner
-  text_conditioner_top_k: 4
-  text_conditioner_scale: 0.1
-  # JEPA loss mode: "ijepa" (cosine + L1) or "lewm" (single SmoothL1 + Gaussian reg)
-  jepa_mode: ijepa
-  jepa_alpha: 0.5
-  gaussian_reg_weight: 0.1
-  moe:
-    num_experts: 4
-    top_k: 2
-    capacity_factor: 1.25
-    aux_loss_weight: 0.01
-
-heads:
-  vocab_size: 50257
-  num_plan_tokens: 64
-  num_tools: 32
-  memory_query_dim: 64
-
-tokenizer:
-  name: gpt2
-
-dataset:
-  sequence_length: 1024
-  primary_dataset: HuggingFaceFW/fineweb-edu
-  primary_split: train
-  streaming: true
-  pack_sequences: true
-
-training:
-  learning_rate: 0.0003
-  weight_decay: 0.1
-  beta1: 0.9
-  beta2: 0.95
-  grad_clip_norm: 1.0
-  warmup_steps: 100
-  max_steps: 10000
-  batch_size: 4
-  log_every_n_steps: 10
-  eval_every_n_steps: 0
-  checkpoint_every_n_steps: 0
-  gradient_checkpointing: false
-  compile_model: false
-  # Hard-EMA target encoder for JEPA stability (LeWM / I-JEPA style).
-  # Set to 0.0 to disable. Around 0.996 is the standard I-JEPA default;
-  # for very short schedules a lower value (e.g. 0.99) is more responsive.
-  ema_momentum: 0.0
-  ema_update_every: 1
-
-curriculum:
-  stage_1_end: 1000
-  stage_2_end: 5000
-  stage_3_end: 20000
-
-memory:
-  long_term_capacity: 128
-  co_activation_threshold: 0.5
-
-verification:
-  name: heuristic
-  acceptance_threshold: 0.5
-  learned_hidden_size: 128
-
-logging:
-  log_dir: runs/ucsa
-  use_tensorboard: true
-  use_wandb: false
-  wandb_project: ucsa
-
-inference:
-  max_new_tokens: 64
-  temperature: 1.0
-  top_k: 50
-
-recurrent:
-  presets:
-    tiny:     # CPU smoke tests
-      model: {hidden: 64, layers: 2, heads: 4, ffn_dim: 128, chunk_size: 32,
-              banks: {working: 8, long_term: 4}, bank_write_bias: {working: 0.0, long_term: -2.0}}
-      train: {steps: 50, seq_len: 128, warmup_steps: 5, eval_every: 25, eval_batches: 2, log_every: 10}
-    small:    # ~19M params: compute-optimal for ~100M tokens
-      # read_gate: 0.06-0.09 bits/token better than no gate; jepa_weight 0:
-      # JEPA gave no gain beyond noise; lr 2.4e-3 chosen by the ladder crossover.
-      model: {hidden: 256, layers: 6, heads: 4, ffn_dim: 704, chunk_size: 128,
-              read_gate: true, jepa_weight: 0.0}
-      train: {steps: 12000, seq_len: 1024, lr: 2.4e-3}
-    base:
-      model: {hidden: 768, layers: 12, heads: 12, ffn_dim: 2048, chunk_size: 128,
-              banks: {working: 32, long_term: 16, intent: 16}}
-      train: {steps: 30000, seq_len: 1024, lr: 4.0e-4, grad_accum: 4}
+# A preset is a `model` section (fields of `recurrent.Config`) and a `train`
+# section (fields of `engine.Config`). Select one with
+# `scripts/train_r.py --preset <name>` and override any field with
+# `--set model.chunk_size=64 train.lr=3e-4`. Unknown fields are rejected.
+presets:
+  tiny:       # CPU smoke tests
+    model: {hidden: 64, layers: 2, heads: 4, ffn_dim: 128, chunk_size: 32,
+            banks: {working: 8, long_term: 4},
+            bank_write_bias: {working: 0.0, long_term: -2.0}}
+    train: {steps: 50, seq_len: 128, warmup_steps: 5, eval_every: 25,
+            eval_batches: 2, log_every: 10}
+  small:      # ~19M parameters: compute-optimal for ~100M tokens
+    # read_gate: 0.06-0.09 bits/token better than no gate; jepa_weight 0: JEPA
+    # gave no gain beyond noise; lr 2.4e-3 chosen by the ladder crossover.
+    model: {hidden: 256, layers: 6, heads: 4, ffn_dim: 704, chunk_size: 128,
+            read_gate: true, jepa_weight: 0.0}
+    train: {steps: 12000, seq_len: 1024, lr: 2.4e-3}
+  base:
+    model: {hidden: 768, layers: 12, heads: 12, ffn_dim: 2048, chunk_size: 128,
+            banks: {working: 32, long_term: 16, intent: 16}}
+    train: {steps: 30000, seq_len: 1024, lr: 4.0e-4, grad_accum: 4}
