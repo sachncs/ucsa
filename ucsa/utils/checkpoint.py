@@ -118,10 +118,8 @@ def adapt_legacy_state_dict(
             continue
         merged = target.detach().clone()
         n_old_banks = tensor.shape[0] - 1
-        merged[:n_old_banks] = tensor[:n_old_banks].to(
-            device=merged.device, dtype=merged.dtype
-        )
-        merged[-1] = tensor[-1].to(device=merged.device, dtype=merged.dtype)
+        merged[:n_old_banks] = tensor[:n_old_banks].to(device=merged.device)
+        merged[-1] = tensor[-1].to(device=merged.device)
         adapted[name] = merged
         notes.append(
             f"{name}: grew {tuple(tensor.shape)} -> {tuple(target.shape)}; "
