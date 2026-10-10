@@ -264,3 +264,39 @@ def test_streaming_logits_match_teacher_forced_logits(use_state, surprise):
             state = m.advance(state, x[:, pos - size : pos])
         logits = m.next_logits(state, x[:, start : pos + 1])[0]
         assert torch.allclose(logits, full[pos], atol=1e-4), pos
+
+
+def test_closed_read_gate_makes_the_logits_independent_of_the_state():
+    """With every read scale at zero the state cannot influence a logit, so
+    the model equals its own state-disabled twin sharing the same weights."""
+    gated_model = make(read_gate=True).eval()
+    twin = make(read_gate=True, use_state=False).eval()
+    twin.load_state_dict(gated_model.state_dict(), strict=False)
+    x = torch.randint(0, 64, (2, 40))
+    assert torch.allclose(
+        gated_model(x)["logits"], twin(x)["logits"], atol=1e-5
+    )
+
+
+def test_read_scales_start_at_zero_and_learn():
+    m = make(read_gate=True).train()
+    scales = [b.read_scale for b in m.blocks if b.read_scale is not None]
+    assert scales and all(float(s) == 0.0 for s in scales)
+    x = torch.randint(0, 64, (2, 32))
+    loss, _ = m.compute_loss(x, torch.roll(x, -1, 1))
+    loss.backward()
+    assert all(s.grad is not None and s.grad.abs().sum() > 0 for s in scales)
+
+
+def test_once_the_scale_opens_the_state_matters():
+    m = make(read_gate=True).eval()
+    x = torch.randint(0, 64, (1, 24))
+    y = x.clone()
+    y[0, :8] = (y[0, :8] + 1) % 64
+    before = (m(x)["logits"] - m(y)["logits"]).abs()[0, 8:].max()
+    with torch.no_grad():
+        for b in m.blocks:
+            b.read_scale.fill_(1.0)
+    after = (m(x)["logits"] - m(y)["logits"]).abs()[0, 8:].max()
+    assert before < 1e-6  # closed gate: earlier chunks are invisible
+    assert after > 1e-6  # open gate: they influence later chunks
