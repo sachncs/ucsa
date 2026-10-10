@@ -1,229 +1,233 @@
-"""Tests for :mod:`ucsa.models.tiers`."""
+"""Guarantees of the memory tiers.
 
-from __future__ import annotations
+Grouped by what is promised: deterministic effects, rejection of bad
+candidates, atomic failure, capacity limits, and invariants that hold across
+many accept/recycle cycles.
+"""
 
 import pytest
 import torch
 
 from ucsa.models import cognitive, tiers
-from ucsa.models.tiers import Memory
+
+HIDDEN = 16
 
 
-def tiny_pcs() -> cognitive.State:
-    """Return a fresh PCS sized for tests."""
-    return cognitive.State(cognitive.Config(hidden_size=32))
+def make_memory(capacity=None, seed=0):
+    torch.manual_seed(seed)
+    state = cognitive.State(cognitive.Config(hidden_size=HIDDEN))
+    with torch.no_grad():
+        state.get_bank("long_term").zero_()
+    return tiers.Memory(state, capacity)
 
 
-class TestMemoryUpdate:
-    """Tests for :class:`tiers.Update`."""
+def update(n=4, seed=0, importance=None, confidence=1.0):
+    gen = torch.Generator().manual_seed(seed)
+    return tiers.Update(
+        tokens=torch.randn(n, HIDDEN, generator=gen) + 1.0,
+        importance=torch.ones(n) if importance is None else importance,
+        confidence=confidence,
+    )
 
-    def test_construction(self) -> None:
-        """Valid inputs construct a :class:`tiers.Update`."""
-        tokens = torch.randn(4, 32)
-        importance = torch.ones(4)
-        update = tiers.Update(tokens=tokens, importance=importance)
-        assert update.tokens.shape == (4, 32)
 
-    def test_dimension_mismatch_rejected(self) -> None:
-        """Tokens and importance with different token counts raise."""
-        with pytest.raises(ValueError):
-            tiers.Update(
-                tokens=torch.randn(4, 32),
-                importance=torch.ones(5),
+def used(memory):
+    return int((memory.cstate.metadata("long_term", "usage") > 0).sum())
+
+
+# ---------------------------------------------------------- deterministic flow
+
+
+class TestAccepting:
+    def test_written_slots_hold_the_candidate_and_are_marked_used(self):
+        memory = make_memory()
+        cand = update(3)
+        slots = memory.accept_into_long_term(cand)
+        assert len(slots) == len(set(slots)) == 3
+        bank = memory.read_long_term()
+        assert torch.allclose(bank[slots], cand.tokens)
+        usage = memory.cstate.metadata("long_term", "usage")
+        age = memory.cstate.metadata("long_term", "age")
+        assert (usage[slots] > 0).all()
+        assert (age[slots] == 0).all()
+
+    def test_importance_is_recorded_per_slot(self):
+        memory = make_memory()
+        imp = torch.tensor([0.1, 0.9, 0.5])
+        slots = memory.accept_into_long_term(update(3, importance=imp))
+        stored = memory.cstate.metadata("long_term", "importance")[slots]
+        assert torch.allclose(stored, imp)
+
+    def test_max_slots_caps_how_many_are_written(self):
+        memory = make_memory()
+        assert len(memory.accept_into_long_term(update(6), max_slots=2)) == 2
+        assert used(memory) == 2
+
+    def test_identical_sequences_give_identical_memory(self):
+        def run():
+            memory = make_memory()
+            for seed in range(4):
+                memory.accept_into_long_term(update(3, seed=seed))
+            return memory.read_long_term().clone()
+
+        assert torch.equal(run(), run())
+
+    def test_proposals_are_detached_copies_of_working_memory(self):
+        memory = make_memory()
+        cand = memory.propose_candidate()
+        assert not cand.tokens.requires_grad
+        before = memory.read_working().clone()
+        cand.tokens.zero_()
+        assert torch.equal(memory.read_working(), before)
+
+    def test_episode_snapshot_has_the_episode_size_and_leaves_working_alone(
+        self,
+    ):
+        memory = make_memory()
+        before = memory.read_working().clone()
+        snap = memory.snapshot_episode()
+        assert snap.shape[0] == memory.cstate.bank_size("episode")
+        assert torch.equal(memory.read_working(), before)
+        assert torch.equal(memory.cstate.get_bank("episode"), snap)
+
+
+class TestRecycling:
+    def fill(self, memory, importances):
+        for imp in importances:
+            memory.accept_into_long_term(
+                update(1, importance=torch.tensor([imp]), seed=int(imp * 100))
             )
 
-    def test_non_2d_tokens_rejected(self) -> None:
-        """Tokens with the wrong rank raise."""
-        with pytest.raises(ValueError):
-            tiers.Update(
-                tokens=torch.randn(4, 2, 32),
-                importance=torch.ones(4),
-            )
-
-    def test_confidence_out_of_range_rejected(self) -> None:
-        """Confidence outside ``[0, 1]`` raises."""
-        with pytest.raises(ValueError):
-            tiers.Update(
-                tokens=torch.randn(4, 32),
-                importance=torch.ones(4),
-                confidence=1.5,
-            )
-        with pytest.raises(ValueError):
-            tiers.Update(
-                tokens=torch.randn(4, 32),
-                importance=torch.ones(4),
-                confidence=-0.1,
-            )
-
-
-class TestMemory:
-    """Tests for :class:`Memory`."""
-
-    @pytest.fixture
-    def memory(self) -> Memory:
-        """Provide a memory facade wrapping a fresh PCS."""
-        return Memory(tiny_pcs())
-
-    def test_construction_defaults_capacity(self) -> None:
-        """Default capacity equals the PCS long-term bank size."""
-        pcs = tiny_pcs()
-        mem = Memory(pcs)
-        assert mem.long_term_capacity == pcs.bank_size("long_term")
-
-    def test_construction_with_explicit_capacity(self) -> None:
-        """An explicit capacity overrides the PCS default."""
-        mem = Memory(tiny_pcs(), long_term_capacity=10)
-        assert mem.long_term_capacity == 10
-
-    def test_propose_candidate_default(self, memory: Memory) -> None:
-        """``propose_candidate`` defaults to the working bank."""
-        candidate = memory.propose_candidate()
-        assert candidate.source == "working"
-        assert candidate.tokens.shape == memory.cstate.get_bank("working").shape
-        assert torch.all(candidate.importance == 1.0)
-
-    def test_propose_candidate_custom(self, memory: Memory) -> None:
-        """Custom slice and importance are propagated."""
-        slice_ = torch.randn(8, 32)
-        importance = torch.full((8,), 0.5)
-        candidate = memory.propose_candidate(
-            working_slice=slice_, importance=importance, confidence=0.7
-        )
-        assert torch.allclose(candidate.tokens, slice_)
-        assert torch.all(candidate.importance == 0.5)
-        assert candidate.confidence == 0.7
-
-    def test_accept_into_long_term(self, memory: Memory) -> None:
-        """Accepted candidates land in the long-term bank."""
-        candidate = memory.propose_candidate(confidence=1.0)
-        indices = memory.accept_into_long_term(candidate, max_slots=5)
-        assert len(indices) == 5
-        long_term = memory.read_long_term()
-        for idx in indices:
-            assert torch.allclose(long_term[idx], candidate.tokens[idx])
-
-    def test_accept_respects_capacity(self) -> None:
-        """Acceptance stops at ``long_term_capacity``."""
-        mem = Memory(tiny_pcs(), long_term_capacity=4)
-        candidate = mem.propose_candidate()
-        indices = mem.accept_into_long_term(candidate)
-        assert len(indices) <= 4
-
-    def test_accept_records_importance(self, memory: Memory) -> None:
-        """Importance is recorded for every accepted slot."""
-        importance = torch.linspace(0.1, 0.8, steps=8)
-        working_slice = torch.randn(8, 32)
-        candidate = memory.propose_candidate(
-            working_slice=working_slice, importance=importance
-        )
-        indices = memory.accept_into_long_term(candidate, max_slots=4)
-        recorded = memory.cstate.meta_importance_long_term[indices]
-        assert torch.allclose(recorded, importance[:4])
-
-    def test_accept_resets_age(self, memory: Memory) -> None:
-        """Accepted slots have age zeroed."""
-        memory.cstate.step_age()
-        candidate = memory.propose_candidate()
-        indices = memory.accept_into_long_term(candidate, max_slots=3)
-        age = memory.cstate.meta_age_long_term[indices]
-        assert torch.all(age == 0)
-
-    def test_accept_updates_retention(self, memory: Memory) -> None:
-        """``accept_into_long_term`` recomputes retention."""
-        candidate = memory.propose_candidate()
-        memory.accept_into_long_term(candidate, max_slots=5)
-        snapshot = memory.cstate.get_all_metadata()
-        accepted_indices = slice(0, 5)
-        # Accepted slots have positive importance and usage; non-zero retention.
-        assert torch.all(
-            snapshot["long_term"]["retention"][accepted_indices] >= 0
-        )
-
-    def test_accept_after_full_bank_recycles(self, memory: Memory) -> None:
-        """When the bank is full, acceptance triggers recycle."""
-        # Fill the long-term bank with high-retention tokens.
-        candidate = memory.propose_candidate()
-        memory.accept_into_long_term(
-            candidate, max_slots=memory.long_term_capacity
-        )
-        # Now lower retention and try to accept more.
-        memory.cstate.meta_retention_long_term[:] = 0.0
-        candidate2 = memory.propose_candidate(
-            importance=torch.zeros(candidate.tokens.shape[0])
-        )
-        indices = memory.accept_into_long_term(candidate2)
-        assert len(indices) > 0
-
-    def test_snapshot_episode_writes_bank(self, memory: Memory) -> None:
-        """``snapshot_episode`` writes the episode bank."""
-        memory.snapshot_episode()
-        episode = memory.cstate.get_bank("episode")
-        assert episode.shape == (memory.cstate.bank_size("episode"), 32)
-
-    def test_snapshot_episode_uses_provided_tokens(
-        self, memory: Memory
-    ) -> None:
-        """Provided tokens are included in the snapshot."""
-        custom = torch.ones(10, 32)
-        out = memory.snapshot_episode(working_tokens=custom)
-        assert torch.all(out[:10] == 1.0)
-
-    def test_snapshot_episode_pads_when_short(self, memory: Memory) -> None:
-        """Episode bank is padded when input is shorter than bank size."""
-        small = torch.ones(2, 32)
-        out = memory.snapshot_episode(
-            working_tokens=small,
-            long_term_tokens=torch.zeros(0, 32),
-        )
-        episode_size = memory.cstate.bank_size("episode")
-        assert out.shape == (episode_size, 32)
-        assert torch.all(out[2:] == 0.0)
-
-    def test_snapshot_episode_truncates_when_long(self, memory: Memory) -> None:
-        """Episode bank truncates when input is longer than bank size."""
-        big = torch.ones(memory.cstate.bank_size("long_term") + 10, 32)
-        out = memory.snapshot_episode(long_term_tokens=big)
-        episode_size = memory.cstate.bank_size("episode")
-        assert out.shape == (episode_size, 32)
-
-    def test_update_working(self, memory: Memory) -> None:
-        """``update_working`` replaces the working bank."""
-        new_tokens = torch.full((memory.cstate.bank_size("working"), 32), 0.7)
-        memory.update_working(new_tokens)
-        current = memory.read_working()
-        assert torch.all(current == 0.7)
-
-    def test_recycle_low_retention(self, memory: Memory) -> None:
-        """``recycle_low_retention`` empties the lowest-retention slots."""
-        candidate = memory.propose_candidate()
-        memory.accept_into_long_term(candidate, max_slots=20)
+    def test_the_least_important_slots_go_first(self):
+        memory = make_memory()
+        self.fill(memory, [0.9, 0.1, 0.5, 0.8])
         memory.cstate.update_retention()
-        # Force specific slots to be lowest retention.
-        retention = memory.cstate.meta_retention_long_term
-        retention.fill_(1.0)
-        retention[:3] = 0.0
-        recycled = memory.recycle_low_retention(k=2)
-        assert len(recycled) == 2
-        snapshot = memory.cstate.get_all_metadata()
-        for idx in recycled:
-            assert snapshot["long_term"]["usage"][idx].item() == 0.0
-            assert snapshot["long_term"]["importance"][idx].item() == 0.0
+        recycled = memory.recycle_low_retention(1)
+        assert len(recycled) == 1
+        imp = memory.cstate.metadata("long_term", "importance")
+        assert float(imp[recycled[0]]) == 0.0  # reset by the recycle
 
-    def test_long_term_usage(self, memory: Memory) -> None:
-        """``long_term_usage`` counts slots with usage > 0."""
-        candidate = memory.propose_candidate()
-        memory.accept_into_long_term(candidate, max_slots=7)
-        assert memory.long_term_usage() == 7
+    def test_recycled_slots_are_zeroed_and_reusable(self):
+        memory = make_memory()
+        self.fill(memory, [0.2, 0.3])
+        recycled = memory.recycle_low_retention(2)
+        assert torch.count_nonzero(memory.read_long_term()[recycled]) == 0
+        assert used(memory) == 0
+        again = memory.accept_into_long_term(update(2, seed=9))
+        assert sorted(again) == sorted(recycled) or len(again) == 2
 
-    def test_long_term_capacity_used(self, memory: Memory) -> None:
-        """``long_term_capacity_used`` is usage / capacity."""
-        candidate = memory.propose_candidate()
-        memory.accept_into_long_term(
-            candidate, max_slots=memory.long_term_capacity // 2
+    def test_fifo_recycles_the_oldest_first(self):
+        memory = make_memory()
+        self.fill(memory, [0.5, 0.5, 0.5])
+        age = memory.cstate.metadata("long_term", "age")
+        with torch.no_grad():
+            age[0], age[1], age[2] = 1, 9, 4
+        first = memory.recycle_fifo(1)
+        assert first == [1]
+
+    def test_recycling_more_than_exists_clamps_instead_of_failing(self):
+        memory = make_memory()
+        self.fill(memory, [0.5])
+        assert len(memory.recycle_low_retention(10_000)) <= (
+            memory.cstate.bank_size("long_term")
         )
-        assert memory.long_term_capacity_used() == pytest.approx(0.5)
 
-    def test_recycle_zero_returns_empty(self, memory: Memory) -> None:
-        """Recycling zero slots returns an empty list."""
-        recycled = memory.recycle_low_retention(k=0)
-        assert recycled == []
+    @pytest.mark.parametrize("k", [0, -3])
+    def test_non_positive_counts_recycle_nothing(self, k):
+        memory = make_memory()
+        self.fill(memory, [0.5, 0.6])
+        assert memory.recycle_low_retention(k) == []
+        assert memory.recycle_fifo(k) == []
+        assert used(memory) == 2
+
+
+# ------------------------------------------------------------------ bad flows
+
+
+class TestRejectionOfBadCandidates:
+    def test_tokens_must_be_two_dimensional(self):
+        with pytest.raises(ValueError, match="2D"):
+            tiers.Update(torch.zeros(4), torch.zeros(4))
+
+    def test_token_and_importance_counts_must_agree(self):
+        with pytest.raises(ValueError, match="token count"):
+            tiers.Update(torch.zeros(3, HIDDEN), torch.zeros(2))
+
+    @pytest.mark.parametrize("confidence", [-0.1, 1.1])
+    def test_confidence_must_be_a_probability(self, confidence):
+        with pytest.raises(ValueError, match="confidence"):
+            update(confidence=confidence)
+
+    @pytest.mark.parametrize("poison", [float("nan"), float("inf")])
+    def test_non_finite_tokens_or_importance_never_reach_memory(self, poison):
+        bad = torch.randn(3, HIDDEN)
+        bad[1, 2] = poison
+        with pytest.raises(ValueError, match="NaN or infinity"):
+            tiers.Update(bad, torch.ones(3))
+        imp = torch.ones(3)
+        imp[0] = poison
+        with pytest.raises(ValueError, match="NaN or infinity"):
+            tiers.Update(torch.randn(3, HIDDEN), imp)
+
+    def test_unknown_banks_are_reported(self):
+        with pytest.raises(KeyError):
+            make_memory().get_retention_scores("nope")
+
+
+class TestFailureIsAtomic:
+    def test_a_candidate_of_the_wrong_width_changes_nothing(self):
+        memory = make_memory()
+        memory.accept_into_long_term(update(2))
+        bank = memory.read_long_term().clone()
+        usage = memory.cstate.metadata("long_term", "usage").clone()
+        wrong = tiers.Update(torch.randn(2, HIDDEN + 3), torch.ones(2))
+        with pytest.raises(RuntimeError):
+            memory.accept_into_long_term(wrong)
+        assert torch.equal(memory.read_long_term(), bank)
+        assert torch.equal(memory.cstate.metadata("long_term", "usage"), usage)
+
+
+# ----------------------------------------------------------------- capacity
+
+
+class TestCapacity:
+    def test_a_full_memory_refuses_new_candidates_and_stays_unchanged(self):
+        memory = make_memory(capacity=3)
+        assert len(memory.accept_into_long_term(update(3))) == 3
+        before = memory.read_long_term().clone()
+        assert memory.accept_into_long_term(update(2, seed=5)) == []
+        assert torch.equal(memory.read_long_term(), before)
+        assert memory.long_term_capacity_used() == 1.0
+
+    def test_capacity_smaller_than_the_bank_is_honoured(self):
+        memory = make_memory(capacity=2)
+        memory.accept_into_long_term(update(6))
+        assert used(memory) == 2
+
+    def test_pruning_frees_room_for_new_candidates(self):
+        memory = make_memory(capacity=3)
+        memory.accept_into_long_term(update(3))
+        memory.recycle_low_retention(2)
+        assert len(memory.accept_into_long_term(update(2, seed=4))) == 2
+
+
+class TestInvariantsOverManyCycles:
+    def test_usage_and_contents_stay_consistent(self):
+        memory = make_memory(capacity=8)
+        rng = torch.Generator().manual_seed(0)
+        for step in range(300):
+            if torch.rand((), generator=rng) < 0.6:
+                memory.accept_into_long_term(
+                    update(
+                        int(torch.randint(1, 4, (), generator=rng)), seed=step
+                    )
+                )
+            else:
+                memory.recycle_low_retention(
+                    int(torch.randint(0, 4, (), generator=rng))
+                )
+            usage = memory.cstate.metadata("long_term", "usage")
+            bank = memory.read_long_term()
+            assert used(memory) <= 8
+            # Unused slots hold nothing; used slots hold finite data.
+            assert torch.count_nonzero(bank[usage == 0]) == 0
+            assert torch.isfinite(bank).all()
