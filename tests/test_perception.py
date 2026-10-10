@@ -72,7 +72,7 @@ class TestPerceptionConfig:
             perception_lib.Config(modalities=())
 
 
-class TestTokenizerWrapper:
+class TestTokenizer:
     """Tests for :class:`perception_lib.Tokenizer`."""
 
     def test_constructs_with_injected_tokenizer(self) -> None:
