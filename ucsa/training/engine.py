@@ -58,6 +58,7 @@ class Config:
       weight_ema_every: Steps between EMA updates (the decay is raised to
         this power, so the averaging horizon is unchanged but the per-step
         cost drops).
+      train_shard: File name of the training shard inside the data folder.
       prefetch: Batches the data thread keeps ready.
       max_bad_steps: Consecutive non-finite steps tolerated before aborting.
       out_dir: Directory for checkpoints and the run record.
@@ -82,6 +83,7 @@ class Config:
     seed: int = 42
     weight_ema: float = 0.0
     weight_ema_every: int = 4
+    train_shard: str = "train.bin"
     prefetch: int = 4
     max_bad_steps: int = 20
     out_dir: str = "ckpts/r"
