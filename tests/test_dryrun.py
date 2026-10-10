@@ -30,6 +30,13 @@ def tiny_model():
     )
 
 
+def token_batch(batch_size=2, seq_len=32, vocab=64):
+    """A fixed token batch: a fixture, not data the results depend on."""
+    ids = torch.arange(batch_size * (seq_len + 1)) % vocab
+    ids = ids.view(batch_size, seq_len + 1)
+    return ids[:, :-1], ids[:, 1:]
+
+
 def test_a_uniform_module_has_no_offenders():
     precision.configure()
     assert dryrun.off_dtype_parameters(nn.Linear(3, 3)) == []
@@ -74,7 +81,7 @@ def test_recorder_catches_a_hidden_upcast():
 
 def test_dry_run_reports_a_clean_healthy_model():
     cfg = engine.Config(steps=1, batch_size=2, seq_len=32)
-    report = dryrun.run(tiny_model(), cfg, steps=2)
+    report = dryrun.run(tiny_model(), cfg, token_batch(), steps=2)
     assert report.clean
     assert report.offenders == []
     assert report.dtypes_seen == [str(precision.DTYPE)]
@@ -99,7 +106,10 @@ def test_dry_run_rejects_a_mixed_dtype_model_without_running_it(monkeypatch):
         dryrun.Recorder, "__enter__", lambda self: launched.append(1)
     )
     report = dryrun.run(
-        model, engine.Config(steps=1, batch_size=2, seq_len=32), steps=1
+        model,
+        engine.Config(steps=1, batch_size=2, seq_len=32),
+        token_batch(),
+        steps=1,
     )
     assert not report.clean
     assert any("state0" in line for line in report.off_dtype_tensors)
@@ -118,6 +128,9 @@ def test_the_timed_passes_run_without_the_hook(monkeypatch):
 
     monkeypatch.setattr(dryrun.Recorder, "__enter__", counting_enter)
     dryrun.run(
-        tiny_model(), engine.Config(steps=1, batch_size=2, seq_len=32), steps=3
+        tiny_model(),
+        engine.Config(steps=1, batch_size=2, seq_len=32),
+        token_batch(),
+        steps=3,
     )
     assert installs == [1]
