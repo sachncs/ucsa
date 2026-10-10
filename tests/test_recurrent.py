@@ -176,3 +176,74 @@ def test_slot_dropout_config_is_validated():
         tiny(slot_dropout=1.5)
     with pytest.raises(ValueError):
         tiny(min_slots=99)
+
+
+def gated(**kw):
+    return make(surprise_gate=True, **kw)
+
+
+def test_surprise_gate_starts_identical_to_the_baseline():
+    base, with_gate = make(), gated()
+    with_gate.load_state_dict(base.state_dict(), strict=False)
+    x = torch.randint(0, 64, (2, 40))
+    assert torch.equal(with_gate.updater.surprise_gain, torch.zeros(6, 1))
+    assert torch.allclose(base(x)["logits"], with_gate(x)["logits"], atol=1e-6)
+
+
+def test_higher_surprise_writes_more_once_gain_is_positive():
+    m = gated().eval()
+    with torch.no_grad():
+        m.updater.surprise_gain.fill_(2.0)
+    state = m.initial_state(1)
+    chunk = torch.randn(1, 8, 64)
+    _, calm = m.updater(state, chunk, torch.tensor([0.0]))
+    _, shocked = m.updater(state, chunk, torch.tensor([1.5]))
+    assert shocked.mean() > calm.mean()
+
+
+def test_zero_gain_ignores_surprise_entirely():
+    m = gated().eval()
+    state = m.initial_state(1)
+    chunk = torch.randn(1, 8, 64)
+    a, _ = m.updater(state, chunk, torch.tensor([0.0]))
+    b, _ = m.updater(state, chunk, torch.tensor([1.9]))
+    assert torch.equal(a, b)
+
+
+def test_surprise_gain_receives_gradient_from_the_language_loss():
+    m = gated().train()
+    with torch.no_grad():
+        m.updater.surprise_gain.fill_(0.5)
+    x = torch.randint(0, 64, (2, 32))
+    loss, _ = m.compute_loss(x, torch.roll(x, -1, 1))
+    loss.backward()
+    assert m.updater.surprise_gain.grad is not None
+    assert m.updater.surprise_gain.grad.abs().sum() > 0
+
+
+def test_surprise_gated_model_is_still_strictly_causal():
+    m = gated().eval()
+    with torch.no_grad():
+        m.updater.surprise_gain.fill_(1.0)
+    x = torch.randint(0, 64, (1, 40))
+    base = m(x)["logits"]
+    for p in (3, 9, 25):
+        y = x.clone()
+        y[0, p] = (y[0, p] + 1) % 64
+        diff = (m(y)["logits"] - base).abs().amax(-1)[0]
+        assert diff[:p].max().item() < 1e-5, f"leak at p={p}"
+
+
+def test_surprise_gate_requires_the_predictor_to_be_trained():
+    with pytest.raises(ValueError, match="jepa_weight"):
+        tiny(surprise_gate=True, jepa_weight=0.0)
+
+
+def test_generation_with_surprise_gate_streams_across_chunks():
+    m = gated()
+    with torch.no_grad():
+        m.updater.surprise_gain.fill_(1.0)
+    prompt = torch.randint(0, 64, (1, 5))
+    out = m.generate(prompt, 20, temperature=0.0)
+    assert out.shape == (1, 25)
+    assert torch.equal(out, m.generate(prompt, 20, temperature=0.0))
