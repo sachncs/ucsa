@@ -28,6 +28,7 @@ import torch
 from torch import Tensor
 
 from ucsa.models import cognitive
+from ucsa.utils import precision
 
 
 @dataclass(frozen=True)
@@ -286,7 +287,7 @@ class Memory:
         age = self.cstate.metadata("long_term", "age")
         num_tokens = age.shape[0]
         k_eff = min(k, num_tokens)
-        _, indices = torch.topk(age.float(), k_eff, largest=True)
+        _, indices = torch.topk(precision.to_dtype(age), k_eff, largest=True)
         target = self.cstate.get_bank("long_term")
         replacement = torch.zeros(
             k_eff,
