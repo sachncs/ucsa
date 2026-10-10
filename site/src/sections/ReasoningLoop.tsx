@@ -2,7 +2,7 @@ import { useReveal } from '../lib/useReveal';
 import { TIMELINE_STEPS } from '../lib/content';
 import { BASE_URL } from '../lib/base';
 
-export function ReasoningLoop() {
+export function reasoning.Loop() {
   const ref = useReveal<HTMLDivElement>();
   return (
     <section className="section section--alt" id="reasoning">

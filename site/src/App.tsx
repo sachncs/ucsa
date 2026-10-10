@@ -4,7 +4,7 @@ import { Hero } from './sections/Hero';
 import { Concept } from './sections/Concept';
 import { Architecture } from './sections/Architecture';
 import { Banks } from './sections/Banks';
-import { ReasoningLoop } from './sections/ReasoningLoop';
+import { reasoning.Loop } from './sections/reasoning.Loop';
 import { Proof } from './sections/Proof';
 import { Quickstart } from './sections/Quickstart';
 import { Docs } from './sections/Docs';
@@ -22,7 +22,7 @@ export default function App() {
         <Concept />
         <Architecture />
         <Banks />
-        <ReasoningLoop />
+        <reasoning.Loop />
         <Proof />
         <Quickstart />
         <Docs />
