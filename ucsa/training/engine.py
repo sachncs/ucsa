@@ -28,6 +28,9 @@ Batches = Callable[[int], BatchIterator]
 # Positions scored for the headline perplexity: the last 64 of each window.
 SCORED_TAIL = 64
 
+# Supported compute precisions and their autocast dtypes (None = full).
+PRECISIONS = {"fp32": None, "fp16": torch.float16, "bf16": torch.bfloat16}
+
 
 @dataclasses.dataclass(frozen=True)
 class TrainConfig:
@@ -51,6 +54,13 @@ class TrainConfig:
       keep_ckpts: Numbered checkpoints to keep.
       log_every: Steps between log lines.
       seed: Seed for Python and torch RNGs and data order.
+      precision: Compute precision, `fp32`, `fp16` or `bf16`. 16-bit modes use
+        autocast with fp32 master weights; fp16 adds a dynamic loss scaler.
+      weight_ema: Decay of an exponential moving average of the weights that
+        is used for evaluation and the final model; 0 disables it.
+      weight_ema_every: Steps between EMA updates (the decay is raised to
+        this power, so the averaging horizon is unchanged but the per-step
+        cost drops).
       prefetch: Batches the data thread keeps ready.
       max_bad_steps: Consecutive non-finite steps tolerated before aborting.
       out_dir: Directory for checkpoints and the run record.
@@ -73,6 +83,9 @@ class TrainConfig:
     keep_ckpts: int = 2
     log_every: int = 100
     seed: int = 42
+    precision: str = "fp32"
+    weight_ema: float = 0.0
+    weight_ema_every: int = 4
     prefetch: int = 4
     max_bad_steps: int = 20
     out_dir: str = "ckpts/r"
@@ -89,6 +102,10 @@ class TrainConfig:
             raise ValueError("min_lr_ratio must be in [0, 1]")
         if self.prefetch < 1:
             raise ValueError("prefetch must be >= 1")
+        if self.precision not in PRECISIONS:
+            raise ValueError(f"precision must be one of {sorted(PRECISIONS)}")
+        if not 0.0 <= self.weight_ema < 1.0 or self.weight_ema_every < 1:
+            raise ValueError("weight_ema must be in [0, 1), every >= 1")
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainConfig:
@@ -252,6 +269,57 @@ class Prefetcher:
         self.stop.set()
 
 
+class WeightEma:
+    """Exponential moving average of a model's trainable weights.
+
+    Averaged weights generalise better than the last iterate, which matters
+    most for small models trained on little data. The shadow copy is kept in
+    fp32 and updated every few steps to keep the per-step cost low.
+    """
+
+    def __init__(self, model: nn.Module, decay: float, every: int) -> None:
+        """Copies the current weights.
+
+        Args:
+          model: Model to track.
+          decay: Per-step decay in `[0, 1)`.
+          every: Steps between updates.
+        """
+        self.decay = decay**every
+        self.every = every
+        self.shadow = {
+            name: p.detach().clone().float()
+            for name, p in model.named_parameters()
+            if p.requires_grad
+        }
+
+    @torch.no_grad()
+    def update(self, model: nn.Module, step: int) -> None:
+        """Folds the live weights in, on every `every`-th step."""
+        if step % self.every:
+            return
+        for name, param in model.named_parameters():
+            if name in self.shadow:
+                self.shadow[name].mul_(self.decay).add_(
+                    param.detach().float(), alpha=1.0 - self.decay
+                )
+
+    @torch.no_grad()
+    def swap(self, model: nn.Module) -> None:
+        """Exchanges the live weights with the averaged ones.
+
+        Calling it twice restores the original state.
+
+        Args:
+          model: Model whose weights are exchanged.
+        """
+        for name, param in model.named_parameters():
+            if name in self.shadow:
+                live = param.detach().clone()
+                param.copy_(self.shadow[name].to(param.dtype))
+                self.shadow[name] = live.float()
+
+
 @torch.no_grad()
 def evaluate(
     model: recurrent.RecurrentUCSA, batches: BatchIterator, count: int
@@ -380,6 +448,13 @@ def fit(
     optimizer = build_optimizer(model, config)
     params = [p for p in model.parameters() if p.requires_grad]
     os.makedirs(config.out_dir, exist_ok=True)
+    dtype = PRECISIONS[config.precision]
+    scaler = torch.amp.GradScaler(device.type, enabled=dtype == torch.float16)
+    averaged = (
+        WeightEma(model, config.weight_ema, config.weight_ema_every)
+        if config.weight_ema
+        else None
+    )
 
     step, best, history, bad = 0, math.inf, [], 0
     latest = os.path.join(config.out_dir, "latest.pt")
@@ -387,6 +462,8 @@ def fit(
         blob = torch.load(latest, map_location="cpu", weights_only=False)
         model.load_state_dict(blob["model"], strict=True)
         optimizer.load_state_dict(blob["optimizer"])
+        if averaged is not None and "ema" in blob:
+            averaged.shadow = {k: v.to(device) for k, v in blob["ema"].items()}
         step, best, history = blob["step"], blob["best"], blob["history"]
         log(f"resumed from step {step}")
     stream = Prefetcher(
@@ -399,6 +476,7 @@ def fit(
             {
                 "model": model.state_dict(),
                 "optimizer": optimizer.state_dict(),
+                "ema": averaged.shadow if averaged is not None else None,
                 "step": step,
                 "best": best,
                 "history": history,
@@ -419,22 +497,31 @@ def fit(
             for _ in range(config.grad_accum):
                 x, y = next(stream)
                 x, y = x.to(device), y.to(device)
-                loss, _ = model.compute_loss(x, y)
-                (loss / config.grad_accum).backward()
+                with torch.autocast(
+                    device.type, dtype=dtype, enabled=dtype is not None
+                ):
+                    loss, _ = model.compute_loss(x, y)
+                scaler.scale(loss / config.grad_accum).backward()
                 step_loss = step_loss + loss.detach() / config.grad_accum
                 tokens += x.numel()
+            scaler.unscale_(optimizer)
             norm = clip_grad_norm(params, config.grad_clip)
             if not bool(torch.isfinite(norm)):  # The only host sync per step.
+                scaler.step(optimizer)  # Skips; lets the scaler back off.
+                scaler.update()
                 bad += 1
                 log(f"  step={step} non-finite gradient: skipped ({bad})")
                 if bad >= config.max_bad_steps:
                     raise RuntimeError(f"{bad} consecutive non-finite steps")
                 continue
             bad = 0
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
             model.update_ema()
-            window = window + step_loss
             step += 1
+            if averaged is not None:
+                averaged.update(model, step)
+            window = window + step_loss
 
             if step % config.log_every == 0:
                 elapsed = time.time() - started
@@ -451,7 +538,11 @@ def fit(
                 and config.eval_every
                 and (step % config.eval_every == 0)
             ):
+                if averaged is not None:
+                    averaged.swap(model)
                 metrics = evaluate(model, val_batches(0), config.eval_batches)
+                if averaged is not None:
+                    averaged.swap(model)
                 best = min(best, metrics["ppl_last64"])
                 history.append({"step": step, **metrics})
                 log(
@@ -465,6 +556,8 @@ def fit(
     finally:
         stream.close()
 
+    if averaged is not None:
+        averaged.swap(model)  # The averaged weights are the final model.
     final = {}
     if val_batches:
         final = evaluate(model, val_batches(0), config.eval_batches)
