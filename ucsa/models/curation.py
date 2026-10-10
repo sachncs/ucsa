@@ -1,12 +1,12 @@
 """Memory service.
 
-The :class:`MemoryService` runs memory verification, consolidation, and
+The :class:`Curator` runs memory verification, consolidation, and
 pruning in the background, on a dedicated asyncio task. Inference and
 training paths enqueue work and return immediately; they never block
 waiting for memory operations.
 
-The service is launched by :meth:`MemoryService.start` and stopped by
-:meth:`MemoryService.stop`. Both methods are idempotent and safe to call
+The service is launched by :meth:`Curator.start` and stopped by
+:meth:`Curator.stop`. Both methods are idempotent and safe to call
 multiple times.
 
 Communication with the asyncio worker uses :class:`asyncio.Queue` for
@@ -29,21 +29,21 @@ from typing import Any
 import torch
 from torch import Tensor
 
-from ucsa.models.memory import Memory, MemoryUpdate
-from ucsa.models.state import PersistentCognitiveState
+from ucsa.models import cognitive, tiers
+from ucsa.models.tiers import Memory
 from ucsa.models.verification import Verifier
 
 LOGGER = logging.getLogger(__name__)
 
 
 VerificationHandler = Callable[
-    [MemoryUpdate, PersistentCognitiveState, float, bool], None
+    [tiers.Update, cognitive.State, float, bool], None
 ]
 
 
 @dataclass
-class ServiceStats:
-    """Lightweight statistics maintained by the :class:`MemoryService`.
+class Stats:
+    """Lightweight statistics maintained by the :class:`Curator`.
 
     Attributes:
         verified: Total verifications processed.
@@ -68,7 +68,7 @@ class ServiceStats:
 
 
 @dataclass
-class VerificationTask:
+class VerifyTask:
     """An item placed on the memory service queue.
 
     Attributes:
@@ -78,8 +78,8 @@ class VerificationTask:
             score, accepted)``.
     """
 
-    candidate: MemoryUpdate
-    cstate: PersistentCognitiveState
+    candidate: tiers.Update
+    cstate: cognitive.State
     on_complete: VerificationHandler | None = None
     trace: dict[str, Any] = field(default_factory=dict)
 
@@ -91,10 +91,10 @@ class PruneTask:
     k: int
 
 
-Task = VerificationTask | PruneTask
+Task = VerifyTask | PruneTask
 
 
-class MemoryService:
+class Curator:
     """Background memory verification, consolidation, and pruning."""
 
     def __init__(
@@ -111,7 +111,7 @@ class MemoryService:
         self.memory = memory
         self.verifier = verifier
         self.queue: asyncio.Queue[Task] = asyncio.Queue()
-        self.stats = ServiceStats()
+        self.stats = Stats()
         self.loop: asyncio.AbstractEventLoop | None = None
         self.worker_task: asyncio.Task[None] | None = None
         self.thread: threading.Thread | None = None
@@ -164,7 +164,7 @@ class MemoryService:
         try:
             future.result(timeout=timeout)
         except Exception as exc:  # pragma: no cover - defensive
-            LOGGER.warning("MemoryService stop failed: %s", exc)
+            LOGGER.warning("Curator stop failed: %s", exc)
         loop.call_soon_threadsafe(loop.stop)
         if self.thread is not None:
             self.thread.join(timeout=timeout)
@@ -187,7 +187,7 @@ class MemoryService:
         while True:
             task = await self.queue.get()
             try:
-                if isinstance(task, VerificationTask):
+                if isinstance(task, VerifyTask):
                     await self.process_verification(task)
                 elif isinstance(task, PruneTask):
                     await self.process_prune(task)
@@ -199,7 +199,7 @@ class MemoryService:
             finally:
                 self.queue.task_done()
 
-    async def process_verification(self, task: VerificationTask) -> None:
+    async def process_verification(self, task: VerifyTask) -> None:
         """Run a single verification task.
 
         Args:
@@ -225,8 +225,8 @@ class MemoryService:
 
     def submit_verification(
         self,
-        candidate: MemoryUpdate,
-        cstate: PersistentCognitiveState,
+        candidate: tiers.Update,
+        cstate: cognitive.State,
         on_complete: VerificationHandler | None = None,
     ) -> Future[None] | None:
         """Submit a verification task.
@@ -239,7 +239,7 @@ class MemoryService:
         Returns:
             ``asyncio.Future`` if the service is running, else ``None``.
         """
-        task = VerificationTask(
+        task = VerifyTask(
             candidate=candidate,
             cstate=cstate,
             on_complete=on_complete,
@@ -270,7 +270,7 @@ class MemoryService:
 
         Used for tests that don't want to spawn the worker thread.
         """
-        if isinstance(task, VerificationTask):
+        if isinstance(task, VerifyTask):
             self.stats.verified += 1
             score, accepted = self.verifier.verify(task.candidate, task.cstate)
             self.last_verification_signal.append(score)
@@ -285,14 +285,14 @@ class MemoryService:
 
 
 __all__ = [
-    "MemoryService",
+    "Curator",
     "PruneTask",
-    "ServiceStats",
+    "Stats",
     "VerificationHandler",
-    "VerificationTask",
+    "VerifyTask",
 ]
 
 
-def collect_signals(service: MemoryService) -> Tensor:
+def collect_signals(service: Curator) -> Tensor:
     """internal: return the recent verification signals as a tensor."""
     return torch.tensor(service.last_verification_signal, dtype=torch.float32)
