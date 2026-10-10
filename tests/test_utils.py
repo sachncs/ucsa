@@ -273,7 +273,7 @@ class TestLogging:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """TensorBoard writer is constructed when enabled."""
-        fake_writer = _FakeSummaryWriter()
+        fake_writer = StubSummaryWriter()
 
         class FakeSummaryWriter:
             def __init__(self, log_dir: str) -> None:
@@ -340,7 +340,7 @@ class TestLogging:
         close_logger(bundle)
 
 
-class _FakeSummaryWriter:
+class StubSummaryWriter:
     """internal: capture for TensorBoard fake writer."""
 
     init_log_dir: str | None = None
@@ -351,7 +351,11 @@ def logging_level_from_int(value: int) -> int:
     """internal: lift an int into the logging level namespace."""
     import logging
 
-    return value if value in logging._nameToLevel.values() else logging.INFO
+    return (
+        value
+        if value in logging.getLevelNamesMapping().values()
+        else logging.INFO
+    )
 
 
 class TestSeedCudaFallback:
