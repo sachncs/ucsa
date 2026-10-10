@@ -223,9 +223,7 @@ def main() -> None:
         from hydra import compose, initialize_config_dir
     except Exception as exc:  # pragma: no cover - environment-dependent
         raise RuntimeError("Hydra is required for the ucsa.train CLI.") from exc
-    config_dir = os.path.abspath(
-        os.path.dirname(__file__)
-    )
+    config_dir = os.path.abspath(os.path.dirname(__file__))
     with initialize_config_dir(version_base=None, config_dir=config_dir):
         cfg = compose(config_name="config")
         configure_logging()
