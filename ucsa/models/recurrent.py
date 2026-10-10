@@ -34,6 +34,8 @@ from torch import nn
 from torch.nn import functional
 from torch.utils import checkpoint as torch_checkpoint
 
+from ucsa.utils import precision
+
 
 @dataclasses.dataclass(frozen=True)
 class Config:
@@ -219,8 +221,10 @@ def rope_tables(
     Returns:
       `(cos, sin)`, each of shape `(length, head_dim // 2)`.
     """
-    inv = 1.0 / base ** (torch.arange(0, head_dim, 2).float() / head_dim)
-    freqs = torch.outer(torch.arange(length).float(), inv)
+    inv = 1.0 / base ** (
+        torch.arange(0, head_dim, 2, dtype=precision.DTYPE) / head_dim
+    )
+    freqs = torch.outer(torch.arange(length, dtype=precision.DTYPE), inv)
     return freqs.cos(), freqs.sin()
 
 
@@ -536,7 +540,7 @@ class Model(nn.Module):
         with torch.no_grad():
             target = self.target_summary(pooled)
             surprise = 1.0 - functional.cosine_similarity(
-                pred.detach().float(), target.float(), dim=-1
+                pred.detach(), target, dim=-1
             )
         return pred, surprise
 
@@ -679,7 +683,7 @@ class Model(nn.Module):
         self, hidden: torch.Tensor, target: torch.Tensor
     ) -> torch.Tensor:
         """Summed cross-entropy of a slice of hidden states against targets."""
-        logits = (hidden @ self.embed.weight.T).float()
+        logits = hidden @ self.embed.weight.T
         return functional.cross_entropy(
             logits.reshape(-1, logits.shape[-1]),
             target.reshape(-1),
@@ -705,7 +709,7 @@ class Model(nn.Module):
         out = self.hidden_states(ids)
         hidden = out["hidden"]
         step = config.loss_chunk or hidden.shape[1]
-        total = hidden.new_zeros((), dtype=torch.float32)
+        total = hidden.new_zeros(())
         for i in range(0, hidden.shape[1], step):
             args = (hidden[:, i : i + step], targets[:, i : i + step])
             if self.training and config.loss_chunk:
@@ -718,13 +722,11 @@ class Model(nn.Module):
         loss, metrics = ce, {"ce": ce.detach()}
         preds, tgts = out["jepa"]
         if preds is not None:
-            p = functional.normalize(preds.float(), dim=-1)
-            z = functional.normalize(tgts.float(), dim=-1)
+            p = functional.normalize(preds, dim=-1)
+            z = functional.normalize(tgts, dim=-1)
             align = (1.0 - (p * z).sum(-1)).mean()
             # Keep the target latent from collapsing to a constant.
-            spread = functional.relu(
-                0.5 - tgts.float().flatten(0, 1).std(0)
-            ).mean()
+            spread = functional.relu(0.5 - tgts.flatten(0, 1).std(0)).mean()
             jepa = align + spread
             loss = loss + config.jepa_weight * jepa
             metrics["jepa"] = jepa.detach()
