@@ -39,7 +39,7 @@ class HistoryPredictor:
 
 def tiny_model(**kw):
     torch.manual_seed(0)
-    cfg = recurrent.RecurrentConfig(
+    cfg = recurrent.Config(
         vocab_size=VOCAB,
         hidden=32,
         layers=2,
@@ -50,7 +50,7 @@ def tiny_model(**kw):
         bank_write_bias=(("working", 0.0), ("long_term", -2.0)),
         **kw,
     )
-    return recurrent.RecurrentUCSA(cfg).eval()
+    return recurrent.Model(cfg).eval()
 
 
 def roundtrip(make_predictor, tokens):
