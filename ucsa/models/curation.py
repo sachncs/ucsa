@@ -1,55 +1,53 @@
-"""Memory service.
+"""Background curation of memory: verification, consolidation, pruning.
 
-The :class:`Curator` runs memory verification, consolidation, and
-pruning in the background, on a dedicated asyncio task. Inference and
-training paths enqueue work and return immediately; they never block
-waiting for memory operations.
+A `Curator` takes memory work off the training and inference paths. Callers
+enqueue a task and return at once; a worker thread drains the queue in order.
 
-The service is launched by :meth:`Curator.start` and stopped by
-:meth:`Curator.stop`. Both methods are idempotent and safe to call
-multiple times.
+Design:
 
-Communication with the asyncio worker uses :class:`asyncio.Queue` for
-in-process callers and :func:`asyncio.run_coroutine_threadsafe` for
-external (sync) callers. The service exposes sync ``submit_*`` facades
-that drop to a synchronous fallback when no event loop is running yet.
+* One code path. `Curator.handle` is the only place a task is carried out;
+  the worker thread and direct synchronous calls both use it, so the two can
+  never disagree.
+* Failure isolation. An exception in one task (including in its callback) is
+  logged and counted in `Stats.errors`; the worker keeps serving the queue.
+* Restartability. Each `start` builds a fresh event loop and a queue bound to
+  it, so `stop` followed by `start` always yields a working curator.
+* No lost work. `stop` waits for every queued task before shutting down.
 """
-
-from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import logging
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import Future
-from dataclasses import dataclass, field
 from typing import Any
 
 import torch
-from torch import Tensor
 
-from ucsa.models import cognitive, tiers
-from ucsa.models.tiers import Memory
-from ucsa.models.verification import Verifier
+from ucsa.models import cognitive, tiers, verification
 
 LOGGER = logging.getLogger(__name__)
-
 
 VerificationHandler = Callable[
     [tiers.Update, cognitive.State, float, bool], None
 ]
 
+# How long `start` waits for the worker loop to begin running, in seconds.
+START_TIMEOUT = 1.0
 
-@dataclass
+
+@dataclasses.dataclass
 class Stats:
-    """Lightweight statistics maintained by the :class:`Curator`.
+    """Counters maintained by a `Curator`.
 
     Attributes:
-        verified: Total verifications processed.
-        accepted: Total verifications that resulted in long-term acceptance.
-        pruned: Total long-term slots recycled.
-        errors: Total task failures captured by the worker.
+      verified: Verifications attempted, including ones that failed.
+      accepted: Verifications that wrote a candidate into long-term memory.
+      pruned: Long-term slots recycled.
+      errors: Tasks (or callbacks) that raised inside the worker.
     """
 
     verified: int = 0
@@ -58,35 +56,30 @@ class Stats:
     errors: int = 0
 
     def to_dict(self) -> dict[str, int]:
-        """Return the stats as a JSON-friendly dict."""
-        return {
-            "verified": self.verified,
-            "accepted": self.accepted,
-            "pruned": self.pruned,
-            "errors": self.errors,
-        }
+        """Returns the counters as a JSON-friendly dict."""
+        return dataclasses.asdict(self)
 
 
-@dataclass
+@dataclasses.dataclass
 class VerifyTask:
-    """An item placed on the memory service queue.
+    """A candidate memory to verify, and maybe accept.
 
     Attributes:
-        candidate: The candidate memory.
-        cstate: The PCS at submission time.
-        on_complete: Optional callback invoked with ``(candidate, cstate,
-            score, accepted)``.
+      candidate: The candidate memory.
+      cstate: The cognitive state at submission time.
+      on_complete: Optional callback `(candidate, cstate, score, accepted)`.
+      trace: Free-form data carried with the task.
     """
 
     candidate: tiers.Update
     cstate: cognitive.State
     on_complete: VerificationHandler | None = None
-    trace: dict[str, Any] = field(default_factory=dict)
+    trace: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
-@dataclass
+@dataclasses.dataclass
 class PruneTask:
-    """An item requesting pruning of the lowest-retention slots."""
+    """A request to recycle the `k` lowest-retention long-term slots."""
 
     k: int
 
@@ -95,180 +88,39 @@ Task = VerifyTask | PruneTask
 
 
 class Curator:
-    """Background memory verification, consolidation, and pruning."""
+    """Runs memory verification and pruning, inline or on a worker thread."""
 
     def __init__(
-        self,
-        memory: Memory,
-        verifier: Verifier,
+        self, memory: tiers.Memory, verifier: verification.Verifier
     ) -> None:
-        """Initialise the memory service.
+        """Initialises a stopped curator.
 
         Args:
-            memory: The memory facade to operate on.
-            verifier: The verifier used for candidate evaluation.
+          memory: The memory facade to operate on.
+          verifier: Decides whether a candidate is accepted.
         """
         self.memory = memory
         self.verifier = verifier
-        self.queue: asyncio.Queue[Task] = asyncio.Queue()
         self.stats = Stats()
+        self.last_verification_signal: list[float] = []
+        self.queue: asyncio.Queue[Task] | None = None
         self.loop: asyncio.AbstractEventLoop | None = None
         self.worker_task: asyncio.Task[None] | None = None
         self.thread: threading.Thread | None = None
-        self.started: bool = False
-        self.last_verification_signal: list[float] = []
-
-    def start(self) -> None:
-        """Start the background worker.
-
-        Safe to call multiple times. If a worker is already running it is
-        left running.
-        """
-        if self.started:
-            return
-        self.loop = asyncio.new_event_loop()
-
-        def run_loop() -> None:
-            """internal: run the asyncio event loop in a worker thread."""
-            asyncio.set_event_loop(self.loop)
-            assert self.loop is not None
-            self.worker_task = self.loop.create_task(self.worker_loop())
-            try:
-                self.loop.run_forever()
-            finally:
-                self.loop.close()
-
-        self.thread = threading.Thread(target=run_loop, daemon=True)
-        self.thread.start()
-        # Wait briefly for the loop to be ready.
-        for _ in range(100):
-            if self.loop is not None and self.loop.is_running():
-                self.started = True
-                return
-            import time
-
-            time.sleep(0.01)
-        self.started = True
-
-    def stop(self, timeout: float = 5.0) -> None:
-        """Stop the background worker.
-
-        Args:
-            timeout: Maximum seconds to wait for the worker to drain.
-        """
-        if not self.started:
-            return
-        loop = self.loop
-        assert loop is not None
-        future = asyncio.run_coroutine_threadsafe(self.stop_worker(), loop)
-        try:
-            future.result(timeout=timeout)
-        except Exception as exc:  # pragma: no cover - defensive
-            LOGGER.warning("Curator stop failed: %s", exc)
-        loop.call_soon_threadsafe(loop.stop)
-        if self.thread is not None:
-            self.thread.join(timeout=timeout)
         self.started = False
 
-    async def stop_worker(self) -> None:
-        """Drain pending tasks and cancel the worker."""
-        await self.queue.join()
-        if self.worker_task is not None:
-            self.worker_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self.worker_task
+    def handle(self, task: Task) -> None:
+        """Carries out one task synchronously.
 
-    async def worker_loop(self) -> None:
-        """The main worker coroutine.
-
-        Pulls tasks off the queue and processes them. Errors are isolated:
-        one failing task does not stop the worker.
-        """
-        while True:
-            task = await self.queue.get()
-            try:
-                if isinstance(task, VerifyTask):
-                    await self.process_verification(task)
-                elif isinstance(task, PruneTask):
-                    await self.process_prune(task)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # pragma: no cover - defensive
-                LOGGER.exception("Memory service task failed: %s", exc)
-                self.stats.errors += 1
-            finally:
-                self.queue.task_done()
-
-    async def process_verification(self, task: VerifyTask) -> None:
-        """Run a single verification task.
+        This is the single implementation used by the worker thread and by
+        direct callers.
 
         Args:
-            task: The task payload.
-        """
-        self.stats.verified += 1
-        score, accepted = self.verifier.verify(task.candidate, task.cstate)
-        self.last_verification_signal.append(score)
-        if accepted:
-            self.memory.accept_into_long_term(task.candidate)
-            self.stats.accepted += 1
-        if task.on_complete is not None:
-            task.on_complete(task.candidate, task.cstate, score, accepted)
+          task: The task to carry out.
 
-    async def process_prune(self, task: PruneTask) -> None:
-        """Run a single pruning task.
-
-        Args:
-            task: The task payload.
-        """
-        recycled = self.memory.recycle_low_retention(task.k)
-        self.stats.pruned += len(recycled)
-
-    def submit_verification(
-        self,
-        candidate: tiers.Update,
-        cstate: cognitive.State,
-        on_complete: VerificationHandler | None = None,
-    ) -> Future[None] | None:
-        """Submit a verification task.
-
-        Args:
-            candidate: The candidate memory.
-            cstate: The PCS at submission time.
-            on_complete: Optional callback invoked on completion.
-
-        Returns:
-            ``asyncio.Future`` if the service is running, else ``None``.
-        """
-        task = VerifyTask(
-            candidate=candidate,
-            cstate=cstate,
-            on_complete=on_complete,
-        )
-        return self.submit(task)
-
-    def submit_prune(self, k: int) -> Future[None] | None:
-        """Submit a pruning task."""
-        return self.submit(PruneTask(k=k))
-
-    def submit(self, task: Task) -> Future[None] | None:
-        """Submit a generic task to the queue.
-
-        Args:
-            task: The task to enqueue.
-
-        Returns:
-            A ``concurrent.futures.Future`` if the service is running, else
-            ``None``. It is a thread-safe future rather than an
-            ``asyncio.Future`` because the worker owns its own loop.
-        """
-        if self.loop is None or not self.loop.is_running():
-            return None
-        return asyncio.run_coroutine_threadsafe(self.queue.put(task), self.loop)
-
-    def submit_sync_inline(self, task: Task) -> None:
-        """internal: synchronously process a task without the worker.
-
-        Used for tests that don't want to spawn the worker thread.
+        Raises:
+          TypeError: If `task` is not a `VerifyTask` or `PruneTask`.
+          ValueError: If a `PruneTask` has a negative `k`.
         """
         if isinstance(task, VerifyTask):
             self.stats.verified += 1
@@ -280,19 +132,109 @@ class Curator:
             if task.on_complete is not None:
                 task.on_complete(task.candidate, task.cstate, score, accepted)
         elif isinstance(task, PruneTask):
-            recycled = self.memory.recycle_low_retention(task.k)
-            self.stats.pruned += len(recycled)
+            if task.k < 0:
+                raise ValueError(f"k must be non-negative, got {task.k}.")
+            self.stats.pruned += len(self.memory.recycle_low_retention(task.k))
+        else:
+            raise TypeError(f"unsupported task type: {type(task).__name__}")
+
+    def start(self) -> None:
+        """Starts the worker thread; does nothing if already running."""
+        if self.started:
+            return
+        self.loop = asyncio.new_event_loop()
+        loop = self.loop
+
+        def run() -> None:
+            asyncio.set_event_loop(loop)
+            # The queue must be created on the loop that will use it.
+            self.queue = asyncio.Queue()
+            self.worker_task = loop.create_task(self.work())
+            try:
+                loop.run_forever()
+            finally:
+                loop.close()
+
+        self.thread = threading.Thread(target=run, daemon=True)
+        self.thread.start()
+        deadline = time.time() + START_TIMEOUT
+        while time.time() < deadline:
+            if loop.is_running() and self.queue is not None:
+                break
+            time.sleep(0.005)
+        self.started = True
+
+    def stop(self, timeout: float = 5.0) -> None:
+        """Waits for queued work, then stops the worker thread.
+
+        Args:
+          timeout: Maximum seconds to wait for the queue and the thread.
+        """
+        if not self.started:
+            return
+        loop = self.loop
+        assert loop is not None
+        future = asyncio.run_coroutine_threadsafe(self.drain(), loop)
+        try:
+            future.result(timeout=timeout)
+        except Exception as error:  # Shutting down must always complete.
+            LOGGER.warning("Curator drain failed: %s", error)
+        loop.call_soon_threadsafe(loop.stop)
+        if self.thread is not None:
+            self.thread.join(timeout=timeout)
+        self.started = False
+        self.queue = self.worker_task = None
+
+    async def drain(self) -> None:
+        """Waits until every queued task is done, then cancels the worker."""
+        assert self.queue is not None
+        await self.queue.join()
+        if self.worker_task is not None:
+            self.worker_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self.worker_task
+
+    async def work(self) -> None:
+        """Serves the queue forever; a failing task never stops it."""
+        assert self.queue is not None
+        while True:
+            task = await self.queue.get()
+            try:
+                self.handle(task)
+            except Exception as error:
+                LOGGER.exception("Curator task failed: %s", error)
+                self.stats.errors += 1
+            finally:
+                self.queue.task_done()
+
+    def submit(self, task: Task) -> Future[None] | None:
+        """Queues a task for the worker.
+
+        Args:
+          task: The task to queue.
+
+        Returns:
+          A future resolved once the task is queued, or None if the curator is
+          not running (the task is not queued; use `handle` to run it inline).
+        """
+        if not self.started or self.loop is None or self.queue is None:
+            return None
+        return asyncio.run_coroutine_threadsafe(self.queue.put(task), self.loop)
+
+    def submit_verification(
+        self,
+        candidate: tiers.Update,
+        cstate: cognitive.State,
+        on_complete: VerificationHandler | None = None,
+    ) -> Future[None] | None:
+        """Queues a verification; see `submit` for the return value."""
+        return self.submit(VerifyTask(candidate, cstate, on_complete))
+
+    def submit_prune(self, k: int) -> Future[None] | None:
+        """Queues a pruning task; see `submit` for the return value."""
+        return self.submit(PruneTask(k))
 
 
-__all__ = [
-    "Curator",
-    "PruneTask",
-    "Stats",
-    "VerificationHandler",
-    "VerifyTask",
-]
-
-
-def collect_signals(service: Curator) -> Tensor:
-    """internal: return the recent verification signals as a tensor."""
-    return torch.tensor(service.last_verification_signal, dtype=torch.float32)
+def collect_signals(curator: Curator) -> torch.Tensor:
+    """Returns the verification scores recorded so far, in order."""
+    return torch.tensor(curator.last_verification_signal, dtype=torch.float32)
