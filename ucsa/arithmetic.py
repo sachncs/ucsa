@@ -189,15 +189,13 @@ class Decoder:
 
 
 class ModelPredictor:
-    """Streams a `RecurrentUCSA` one token at a time, on the CPU.
+    """Streams a `recurrent.Model` one token at a time, on the CPU.
 
     Encoder and decoder each build one of these, so both see bit-identical
     logits: the same streaming code path, device and operation order.
     """
 
-    def __init__(
-        self, model: recurrent.RecurrentUCSA, start_token: int
-    ) -> None:
+    def __init__(self, model: recurrent.Model, start_token: int) -> None:
         """Prepares the stream.
 
         Args:
