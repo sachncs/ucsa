@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from ucsa.models.projection_heads import HeadConfig
+from ucsa.models import projection
 
 
 @dataclass(frozen=True)
-class HeadSpec:
+class Spec:
     """Specification for the projection heads."""
 
     vocab_size: int = 50257
@@ -21,14 +21,14 @@ class HeadSpec:
     intent_update_scale: float = 0.1
 
 
-def build_head_config(
+def build(
     hidden_size: int,
-    spec: HeadSpec | None = None,
-) -> HeadConfig:
-    """Build a :class:`HeadConfig` from a hidden size and optional spec."""
+    spec: Spec | None = None,
+) -> projection.Config:
+    """Build a :class:`projection.Config` from a hidden size and optional spec."""
     if spec is None:
-        spec = HeadSpec()
-    return HeadConfig(
+        spec = Spec()
+    return projection.Config(
         hidden_size=hidden_size,
         vocab_size=spec.vocab_size,
         num_plan_tokens=spec.num_plan_tokens,
@@ -40,10 +40,10 @@ def build_head_config(
     )
 
 
-def build_head_config_from_cfg(
+def from_cfg(
     cfg: Mapping[str, object] | object,
-) -> HeadConfig:
-    """Build a :class:`HeadConfig` from a UCSAConfig-like object."""
+) -> projection.Config:
+    """Build a :class:`projection.Config` from a architecture.Config-like object."""
     hidden_size = int(getattr(cfg, "hidden_size", 128))
     vocab_size = int(getattr(cfg, "vocab_size", 50257))
     top_k = int(getattr(cfg, "origination_top_k", 2))
@@ -53,14 +53,14 @@ def build_head_config_from_cfg(
     if head_section is None and isinstance(cfg, Mapping):
         head_section = cfg.get("heads")
     if head_section is None:
-        return HeadConfig(
+        return projection.Config(
             hidden_size=hidden_size,
             vocab_size=vocab_size,
             origination_top_k=top_k,
             origination_aux_loss_weight=aux_weight,
             intent_update_scale=update_scale,
         )
-    spec = HeadSpec(
+    spec = Spec(
         vocab_size=int(getattr(head_section, "vocab_size", vocab_size)),
         num_plan_tokens=int(getattr(head_section, "num_plan_tokens", 64)),
         num_tools=int(getattr(head_section, "num_tools", 32)),
@@ -69,12 +69,11 @@ def build_head_config_from_cfg(
         origination_aux_loss_weight=aux_weight,
         intent_update_scale=update_scale,
     )
-    return build_head_config(hidden_size, spec)
+    return build(hidden_size, spec)
 
 
 __all__ = [
-    "HeadConfig",
-    "HeadSpec",
-    "build_head_config",
-    "build_head_config_from_cfg",
+    "Spec",
+    "build",
+    "from_cfg",
 ]
