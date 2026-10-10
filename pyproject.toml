@@ -59,14 +59,13 @@ Changelog = "https://github.com/sachncs/ucsa/blob/master/CHANGELOG.md"
 [tool.setuptools]
 packages = [
     "ucsa",
-    "ucsa.configs",
     "ucsa.models",
     "ucsa.training",
     "ucsa.utils",
 ]
 
 [tool.setuptools.package-data]
-ucsa = ["configs/*.yaml"]
+ucsa = ["config.yaml"]
 
 [tool.ruff]
 line-length = 80
