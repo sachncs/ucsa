@@ -23,7 +23,7 @@ import datasets
 import torch
 import transformers
 
-from ucsa.models import ucsa
+from ucsa.models import architecture
 from ucsa.training import prefix
 
 # Seed shared by every task loader, so a `max_examples` cap picks the same
@@ -230,7 +230,7 @@ def choice_loglik(
 ) -> tuple[float, int]:
     """Scores `choice` given `context`.
 
-    A slot model (`ucsa.UCSA`) reads only the context and its slot `j`
+    A slot model (`architecture.UCSA`) reads only the context and its slot `j`
     predicts choice token `j`, so the choice is never in its input. A causal
     model reads context plus choice and is scored on the same tokens. At most
     `prefix.DEFAULT_NUM_TARGETS` choice tokens are scored in both cases.
@@ -257,7 +257,7 @@ def choice_loglik(
     ctx = ctx_ids[-(max_len - len(cont_ids)) :]
     ctx_t = torch.tensor([ctx], dtype=torch.long, device=device)
     with torch.no_grad():
-        if isinstance(model, ucsa.UCSA):
+        if isinstance(model, architecture.UCSA):
             out = model(ctx_t)
             logits = out.get("language", out.get("logits"))
             if logits is None:
