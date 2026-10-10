@@ -49,6 +49,10 @@ def main() -> None:
     parser.add_argument("--dataset", default="HuggingFaceFW/fineweb-edu")
     parser.add_argument("--train-tokens", type=int, default=120_000_000)
     parser.add_argument("--val-tokens", type=int, default=2_000_000)
+    parser.add_argument("--min-tokens", type=int, default=32)
+    parser.add_argument(
+        "--no-dedup", action="store_true", help="Keep duplicate documents."
+    )
     parser.add_argument("--skip-wikitext", action="store_true")
     args = parser.parse_args()
 
@@ -56,6 +60,9 @@ def main() -> None:
     os.makedirs(args.out, exist_ok=True)
     stream = datasets.load_dataset(args.dataset, split="train", streaming=True)
     docs = tokenized_documents((row["text"] for row in stream), tokenizer)
+    stats: dict[str, int] = {}
+    if not args.no_dedup:
+        docs = shards.filter_documents(docs, args.min_tokens, stats=stats)
 
     started = time.time()
     for name, limit in (("val", args.val_tokens), ("train", args.train_tokens)):
@@ -66,6 +73,8 @@ def main() -> None:
             f"({time.time() - started:.0f}s)",
             flush=True,
         )
+    if stats:
+        print(f"document filter: {stats}", flush=True)
     if not args.skip_wikitext:
         wiki = datasets.load_dataset(
             "Salesforce/wikitext", "wikitext-103-raw-v1", split="test"
