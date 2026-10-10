@@ -74,10 +74,10 @@ class TextDataset:
         if config is None:
             config = DatasetConfig()
         self.config = config
-        self.dataset = self._initialise_dataset()
-        self.text_field = self._detect_text_field()
+        self.dataset = self.initialise_dataset()
+        self.text_field = self.detect_text_field()
 
-    def _initialise_dataset(self) -> Iterable[Mapping[str, Any]]:
+    def initialise_dataset(self) -> Iterable[Mapping[str, Any]]:
         """Try to load the primary dataset; fall back on failure.
 
         Returns:
@@ -108,7 +108,7 @@ class TextDataset:
             "Unable to load any dataset from the configured chain."
         ) from last_error
 
-    def _detect_text_field(self) -> str:
+    def detect_text_field(self) -> str:
         """Return the dataset's text field name."""
         primary = self.config.primary_text_field
         sample = next(iter(self.dataset))
@@ -221,7 +221,7 @@ def dataset_tokenizer(  # internal: helper for tests
     )
 
     class FakeDataset(TextDataset):
-        def _initialise_dataset(
+        def initialise_dataset(
             self_inner,
         ) -> Iterable[Mapping[str, Any]]:
             data = {
@@ -234,7 +234,7 @@ def dataset_tokenizer(  # internal: helper for tests
             built: Iterable[Mapping[str, Any]] = Dataset.from_dict(data)
             return built
 
-        def _detect_text_field(self_inner) -> str:
+        def detect_text_field(self_inner) -> str:
             return "text"
 
     return FakeDataset(wrapper, config)
