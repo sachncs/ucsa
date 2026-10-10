@@ -70,8 +70,8 @@ def test_missing_or_short_shards_fail_loudly(tmp_path):
 
 def test_filter_drops_short_and_duplicate_documents_and_counts_them():
     docs = [
-        list(range(100)),
-        list(range(100)) + [7],  # same first 128 tokens' prefix: duplicate
+        list(range(200)),
+        list(range(200)) + [7],  # shares the first 128 tokens: duplicate
         [1, 2, 3],  # too short
         list(range(500, 700)),
     ]
