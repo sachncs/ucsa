@@ -3,21 +3,15 @@ import math
 import pytest
 import torch
 
-from ucsa.models.recurrent import RecurrentConfig, RecurrentUCSA
-from ucsa.training.engine import (
-    TrainConfig,
-    WeightEma,
-    evaluate,
-    fit,
-    load_model,
-    lr_at,
-)
+from ucsa.models import recurrent
+from ucsa.training import engine
+from ucsa.training.engine import WeightEma, evaluate, fit, load_model, lr_at
 
 
 def tiny_model():
     torch.manual_seed(0)
-    return RecurrentUCSA(
-        RecurrentConfig(
+    return recurrent.Model(
+        recurrent.Config(
             vocab_size=32,
             hidden=32,
             layers=1,
@@ -53,11 +47,11 @@ def cfg(tmp_path, **kw):
         out_dir=str(tmp_path),
     )
     base.update(kw)
-    return TrainConfig(**base)
+    return engine.Config(**base)
 
 
 def test_lr_schedule_warms_up_then_decays_to_floor():
-    c = TrainConfig(steps=100, warmup_steps=10, lr=1.0, min_lr_ratio=0.1)
+    c = engine.Config(steps=100, warmup_steps=10, lr=1.0, min_lr_ratio=0.1)
     assert lr_at(0, c) < lr_at(9, c) <= 1.0
     assert lr_at(10, c) == pytest.approx(1.0)
     assert lr_at(99, c) == pytest.approx(0.1, abs=1e-2)
@@ -129,9 +123,9 @@ def test_evaluate_reports_tail_and_all(tmp_path):
 
 def test_config_rejects_bad_values():
     with pytest.raises(ValueError):
-        TrainConfig(prefetch=0)
+        engine.Config(prefetch=0)
     with pytest.raises(ValueError):
-        TrainConfig.from_dict({"stepz": 1})
+        engine.Config.from_dict({"stepz": 1})
 
 
 def test_weight_ema_swap_round_trips_and_tracks_the_average(tmp_path):
@@ -180,9 +174,9 @@ def test_sixteen_bit_training_is_finite(tmp_path, precision):
 
 def test_precision_and_ema_settings_are_validated():
     with pytest.raises(ValueError):
-        TrainConfig(precision="fp8")
+        engine.Config(precision="fp8")
     with pytest.raises(ValueError):
-        TrainConfig(weight_ema=1.0)
+        engine.Config(weight_ema=1.0)
 
 
 def test_evaluate_reports_bits_per_byte_consistent_with_perplexity():
