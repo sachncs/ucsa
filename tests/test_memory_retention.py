@@ -5,13 +5,13 @@ from __future__ import annotations
 import pytest
 import torch
 
-from ucsa.models.memory import Memory
-from ucsa.models.state import PCSConfig, PersistentCognitiveState
+from ucsa.models import cognitive
+from ucsa.models.tiers import Memory
 
 
-def tiny_pcs() -> PersistentCognitiveState:
+def tiny_pcs() -> cognitive.State:
     """Return a fresh PCS sized for tests."""
-    return PersistentCognitiveState(PCSConfig(hidden_size=32))
+    return cognitive.State(cognitive.Config(hidden_size=32))
 
 
 class TestRetentionAccess:
