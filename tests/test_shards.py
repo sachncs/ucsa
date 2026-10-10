@@ -85,3 +85,61 @@ def test_filter_keeps_documents_that_only_share_a_short_start():
     a = [9] * 5 + list(range(100))
     b = [9] * 5 + list(range(200, 300))
     assert len(list(shards.filter_documents([a, b], min_tokens=10))) == 2
+
+
+def test_compression_ratio_orders_repetitive_prose_and_noise():
+    import random
+
+    rng = random.Random(0)
+    repetitive = "click here to read more. " * 200
+    prose = " ".join(
+        rng.choice(
+            [
+                "the",
+                "model",
+                "learns",
+                "language",
+                "from",
+                "text",
+                "and",
+                "predicts",
+                "next",
+                "words",
+                "well",
+                "enough",
+            ]
+        )
+        for _ in range(800)
+    )
+    noise = "".join(chr(rng.randrange(33, 126)) for _ in range(5000))
+    r_rep = shards.compression_ratio(repetitive)
+    r_prose = shards.compression_ratio(prose)
+    r_noise = shards.compression_ratio(noise)
+    assert r_rep < r_prose < r_noise
+    assert r_rep < 0.1
+    assert shards.compression_ratio("") == 1.0
+
+
+def test_compressibility_filter_drops_both_tails_and_counts_them():
+    import random
+
+    rng = random.Random(1)
+    repetitive = "buy now " * 300
+    noise = "".join(chr(rng.randrange(33, 126)) for _ in range(3000))
+    prose = " ".join(
+        rng.choice(["alpha", "beta", "gamma", "delta", "epsilon", "zeta"])
+        for _ in range(600)
+    )
+    stats = {}
+    kept = list(
+        shards.filter_by_compressibility(
+            [repetitive, prose, noise], low=0.05, high=0.6, stats=stats
+        )
+    )
+    assert kept == [prose]
+    assert stats == {
+        "seen": 3,
+        "kept": 1,
+        "too_repetitive": 1,
+        "too_random": 1,
+    }
