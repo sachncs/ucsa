@@ -130,7 +130,9 @@ def analyze(
         decision = (
             "better"
             if gap.high < 0
-            else "worse" if gap.low > 0 else "inconclusive"
+            else "worse"
+            if gap.low > 0
+            else "inconclusive"
         )
         out.append(
             Verdict(
