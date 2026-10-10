@@ -255,3 +255,13 @@ def test_evaluate_restores_the_mode_it_was_called_in():
     model.train()
     evaluate(model, batches(), 1)
     assert model.training
+
+
+def test_the_device_can_be_forced(monkeypatch):
+    monkeypatch.setenv("UCSA_DEVICE", "cpu")
+    assert engine.pick_device() == torch.device("cpu")
+
+
+def test_without_an_override_the_best_device_is_chosen(monkeypatch):
+    monkeypatch.delenv("UCSA_DEVICE", raising=False)
+    assert engine.pick_device().type in {"cpu", "mps", "cuda"}
