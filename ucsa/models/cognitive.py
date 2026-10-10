@@ -51,6 +51,8 @@ from dataclasses import dataclass, field
 import torch
 from torch import Tensor, nn
 
+from ucsa.utils import precision
+
 INTENT_BANK = "intent"
 
 METADATA_FIELDS: tuple[str, ...] = (
@@ -398,7 +400,7 @@ class State(nn.Module):
             )
         target = self.get_bank(name)
         with torch.no_grad():
-            target.copy_(tensor.to(device=target.device, dtype=target.dtype))
+            target.copy_(tensor.to(device=target.device))
 
     def get_all_tokens(self) -> Tensor:
         """Concatenate every bank along the token dimension.
@@ -457,7 +459,7 @@ class State(nn.Module):
             score = retention_score(
                 self.metadata(name, "importance"),
                 self.metadata(name, "usage"),
-                self.metadata(name, "age").float(),
+                precision.to_dtype(self.metadata(name, "age")),
                 weights,
             )
             self.metadata(name, "retention").copy_(score)
