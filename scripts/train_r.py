@@ -102,7 +102,7 @@ def batch_factories(
     Returns:
       `(train, val)`; each maps batches already consumed to an iterator.
     """
-    train_shard = shards.Shard(os.path.join(data_dir, "train.bin"))
+    train_shard = shards.Shard(os.path.join(data_dir, train_config.train_shard))
     val_shard = shards.Shard(os.path.join(data_dir, "val.bin"))
 
     def train(skip: int) -> engine.BatchIterator:
