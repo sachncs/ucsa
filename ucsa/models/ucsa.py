@@ -230,7 +230,7 @@ class UCSA(nn.Module):
             torch.zeros(config.hidden_size),
             persistent=False,
         )
-        self._baseline_initialised: bool = False
+        self.__baseline_initialised: bool = False
         # TC-JEPA (arXiv 2605.03245, May 2026, Meta): sparse cross-attention
         # text conditioner modulates the JEPA prediction. We treat the
         # model's own input-token embeddings as the conditioning source —
@@ -241,20 +241,20 @@ class UCSA(nn.Module):
         self.text_conditioner_scale: float = getattr(
             config, "text_conditioner_scale", 0.1
         )
-        self._text_q = nn.Linear(
+        self.text_q = nn.Linear(
             config.hidden_size, config.hidden_size, bias=False
         )
-        self._text_k = nn.Linear(
+        self.text_k = nn.Linear(
             config.hidden_size, config.hidden_size, bias=False
         )
-        self._text_v = nn.Linear(
+        self.text_v = nn.Linear(
             config.hidden_size, config.hidden_size, bias=False
         )
-        self._text_o = nn.Linear(
+        self.text_o = nn.Linear(
             config.hidden_size, config.hidden_size, bias=False
         )
 
-    def _condition_one(
+    def __condition_one(
         self,
         predicted: Tensor,
         token_embeds: Tensor,
@@ -268,7 +268,7 @@ class UCSA(nn.Module):
         used to return ``(1, S, H)`` for a ``(S, H)`` input, which made the
         JEPA loss broadcast against its ``(S, H)`` target.
         """
-        q = self._text_q(predicted.unsqueeze(0)).unsqueeze(1)
+        q = self.text_q(predicted.unsqueeze(0)).unsqueeze(1)
         scores = torch.matmul(q, k_proj.transpose(-1, -2)) / (
             token_embeds.shape[-1] ** 0.5
         )
@@ -279,7 +279,7 @@ class UCSA(nn.Module):
         attn.scatter_(-1, topk.indices, 1.0)
         attn = attn / attn.sum(dim=-1, keepdim=True).clamp(min=1e-6)
         conditioned = torch.matmul(attn, v).squeeze(1)
-        offset: Tensor = self._text_o(conditioned).reshape(predicted.shape)
+        offset: Tensor = self.text_o(conditioned).reshape(predicted.shape)
         conditioned_prediction: Tensor = (
             predicted + self.text_conditioner_scale * offset
         )
@@ -348,9 +348,9 @@ class UCSA(nn.Module):
             token_embeds = self.perception.embed_tokens(
                 inputs.to(self.pcs.get_bank("working").device)
             )
-            k_proj = self._text_k(token_embeds).unsqueeze(1)
-            v = self._text_v(token_embeds).unsqueeze(1)
-            jepa_predicted = self._condition_one(
+            k_proj = self.text_k(token_embeds).unsqueeze(1)
+            v = self.text_v(token_embeds).unsqueeze(1)
+            jepa_predicted = self.__condition_one(
                 jepa_predicted, token_embeds, k_proj, v
             )
             # Apply the same conditioner offset to every predicted
@@ -360,7 +360,7 @@ class UCSA(nn.Module):
             if len(jepa_multi_step) > 0:
                 jepa_multi_step = [
                     (
-                        self._condition_one(p, token_embeds, k_proj, v),
+                        self.__condition_one(p, token_embeds, k_proj, v),
                         t,
                     )
                     for p, t in jepa_multi_step
@@ -373,9 +373,9 @@ class UCSA(nn.Module):
         router_logits = self.operator.last_router_logits
 
         # Lazy-init the memory baseline the first time we see a tensor.
-        if not self._baseline_initialised and long_term.numel() > 0:
+        if not self.__baseline_initialised and long_term.numel() > 0:
             self.memory_baseline = long_term.detach().mean(dim=0).clone()
-            self._baseline_initialised = True
+            self.__baseline_initialised = True
 
         heads_out["jepa_predicted"] = jepa_predicted
         heads_out["jepa_target"] = jepa_target
