@@ -231,12 +231,12 @@ class MixtureOfExperts(nn.Module):
             )
 
         output = output.reshape(batch, seq, hidden)
-        aux_loss = self._load_balancing_loss(
+        aux_loss = self.__load_balancing_loss(
             router_logits, router_prob_per_expert
         )
         return output, aux_loss
 
-    def _load_balancing_loss(
+    def __load_balancing_loss(
         self,
         router_logits: Tensor,
         router_prob_per_expert: Tensor,
