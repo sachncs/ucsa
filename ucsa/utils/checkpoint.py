@@ -23,7 +23,7 @@ BANK_ID_EMBEDDING_SUFFIX = "bank_id_embedding.weight"
 
 
 @dataclass
-class CheckpointMetadata:
+class Metadata:
     """Sidecar metadata stored alongside model weights.
 
     Attributes:
@@ -44,7 +44,7 @@ class CheckpointMetadata:
 def save_checkpoint(
     model: nn.Module,
     path: str,
-    metadata: CheckpointMetadata | None = None,
+    metadata: Metadata | None = None,
 ) -> None:
     """Save model weights and metadata.
 
@@ -81,7 +81,7 @@ def adapt_legacy_state_dict(
     Adding a PCS bank changes exactly one saved shape: the operator's
     ``bank_id_embedding``, which holds one row per bank plus a final row
     for observation tokens. New banks are appended to
-    :data:`ucsa.models.state.BANK_NAMES`, so existing bank rows keep their
+    :data:`ucsa.models.cognitive.BANK_NAMES`, so existing bank rows keep their
     index, but the observation row moves to the new last index. Copying the
     old rows positionally would put the observation embedding into the new
     bank's slot, so the rows are remapped:
@@ -157,7 +157,7 @@ def load_checkpoint(
     model: nn.Module,
     path: str,
     strict: bool = True,
-) -> CheckpointMetadata:
+) -> Metadata:
     """Load model weights and metadata.
 
     Args:
@@ -169,7 +169,7 @@ def load_checkpoint(
             entries.
 
     Returns:
-        The loaded :class:`CheckpointMetadata` (empty if no metadata file
+        The loaded :class:`Metadata` (empty if no metadata file
         is found).
     """
     state_dict = load_file(path)
@@ -177,10 +177,10 @@ def load_checkpoint(
     model.load_state_dict(adapted, strict=strict)
     meta_path = path + ".meta.json"
     if not __import__("os").path.exists(meta_path):
-        return CheckpointMetadata()
+        return Metadata()
     with open(meta_path, encoding="utf-8") as fp:
         meta_dict = json.load(fp)
-    return CheckpointMetadata(
+    return Metadata(
         step=int(meta_dict.get("step", 0)),
         epoch=int(meta_dict.get("epoch", 0)),
         config=meta_dict.get("config"),
@@ -189,9 +189,9 @@ def load_checkpoint(
     )
 
 
-def metadata_from_dict(payload: Mapping[str, Any]) -> CheckpointMetadata:
-    """internal: build a :class:`CheckpointMetadata` from a dict."""
-    return CheckpointMetadata(
+def metadata_from_dict(payload: Mapping[str, Any]) -> Metadata:
+    """internal: build a :class:`Metadata` from a dict."""
+    return Metadata(
         step=int(payload.get("step", 0)),
         epoch=int(payload.get("epoch", 0)),
         config=payload.get("config"),
@@ -202,7 +202,7 @@ def metadata_from_dict(payload: Mapping[str, Any]) -> CheckpointMetadata:
 
 __all__ = [
     "BANK_ID_EMBEDDING_SUFFIX",
-    "CheckpointMetadata",
+    "Metadata",
     "adapt_legacy_state_dict",
     "load_checkpoint",
     "load_state_dict_compat",
