@@ -15,10 +15,11 @@ import json
 import os
 from typing import Any
 
+import transformers
 import yaml
 
 from ucsa.models import recurrent
-from ucsa.training import engine, shards
+from ucsa.training import compression, engine, shards
 
 CONFIG_PATH = os.path.join(
     os.path.dirname(__file__), "..", "ucsa", "config.yaml"
@@ -146,7 +147,17 @@ def main() -> None:
     if args.dry_run:
         return
     train, val = batch_factories(train_config, args.data)
-    record = engine.fit(model, train_config, train, val, resume=args.resume)
+    byte_lengths = compression.token_byte_lengths(
+        transformers.AutoTokenizer.from_pretrained("gpt2")
+    )
+    record = engine.fit(
+        model,
+        train_config,
+        train,
+        val,
+        resume=args.resume,
+        byte_lengths=byte_lengths,
+    )
     print(f"final: {record['final']}", flush=True)
 
 
