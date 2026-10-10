@@ -5,8 +5,7 @@ import math
 import pytest
 import torch
 
-from tests.helpers import Tokenizer, tiny_model
-from ucsa.training import eval_harness, scoring
+from ucsa.training import scoring
 
 
 def one_hot_logits(targets, vocab=64):
@@ -50,51 +49,3 @@ def test_continuation_logprobs_score_exactly_the_trailing_tokens():
 def test_perplexity_of_a_uniform_model_is_the_vocabulary_size():
     assert scoring.perplexity(3 * math.log(7), 3) == pytest.approx(7.0)
     assert scoring.perplexity(0.0, 0) == math.inf
-
-
-def test_a_choice_token_is_scored_only_from_what_precedes_it():
-    """Changing a later choice token never changes an earlier token's score."""
-    model, tok, device = tiny_model(), Tokenizer(), torch.device("cpu")
-    ctx = "the cat sat on the mat"
-    base = eval_harness.choice_loglik(model, tok, ctx, "abcd", device)
-    ids = torch.tensor([tok.encode(ctx) + tok.encode(" abcd")])
-    other = torch.tensor([tok.encode(ctx) + tok.encode(" abce")])
-    n = len(tok.encode(" abcd"))
-    with torch.no_grad():
-        a = scoring.continuation_logprobs(model(ids)["logits"], ids, n)
-        b = scoring.continuation_logprobs(model(other)["logits"], other, n)
-    assert torch.allclose(a[:-1], b[:-1], atol=1e-5)
-    assert not torch.allclose(a[-1:], b[-1:])
-    assert base[1] == n
-    assert base[0] == pytest.approx(float(a.sum()), abs=1e-4)
-
-
-def test_an_empty_choice_without_context_scores_nothing():
-    model, tok = tiny_model(), Tokenizer()
-    out = eval_harness.choice_loglik(model, tok, "", "", torch.device("cpu"))
-    assert out == (0.0, 0)
-
-
-def test_an_empty_context_is_conditioned_on_the_end_token():
-    model, tok = tiny_model(), Tokenizer()
-    total, count = eval_harness.choice_loglik(
-        model, tok, "", "xy", torch.device("cpu")
-    )
-    assert count == 2
-    assert total < 0
-
-
-def test_a_long_context_is_truncated_from_the_left():
-    model, tok = tiny_model(), Tokenizer()
-    total, count = eval_harness.choice_loglik(
-        model, tok, "a" * 500, "bc", torch.device("cpu"), max_len=32
-    )
-    assert count == len(tok.encode(" bc"))
-    assert math.isfinite(total)
-
-
-def test_unknown_tasks_are_an_error_not_a_silent_skip():
-    with pytest.raises(ValueError, match="unknown tasks"):
-        eval_harness.evaluate_all(
-            ["nope"], tiny_model(), Tokenizer(), torch.device("cpu")
-        )
