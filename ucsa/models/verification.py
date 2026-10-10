@@ -17,6 +17,7 @@ Both share the :class:`Verifier` interface.
 from __future__ import annotations
 
 import abc
+import math
 from typing import TYPE_CHECKING
 
 import torch
@@ -97,9 +98,15 @@ class Heuristic(Verifier):
             acceptance_threshold: Minimum score required for acceptance.
         """
         super().__init__()
-        total = (
-            confidence_weight + novelty_weight + recency_weight + usage_weight
+        weights = (
+            confidence_weight,
+            novelty_weight,
+            recency_weight,
+            usage_weight,
         )
+        if min(weights) < 0.0:
+            raise ValueError("Verifier weights must be non-negative.")
+        total = sum(weights)
         if total <= 0.0:
             raise ValueError("At least one verifier weight must be positive.")
         self.confidence_weight = confidence_weight / total
@@ -122,6 +129,8 @@ class Heuristic(Verifier):
         Returns:
             Tuple ``(score, accepted)``.
         """
+        if candidate.tokens.shape[0] == 0:
+            return 0.0, False  # nothing to store: never accept
         long_term = cstate.get_bank("long_term")
         usage = cstate.metadata("long_term", "usage")
         novelty = Heuristic.novelty(candidate.tokens, long_term, usage)
@@ -134,6 +143,10 @@ class Heuristic(Verifier):
             + self.recency_weight * recency
             + self.usage_weight * usage_score
         )
+        if not math.isfinite(score):
+            # A NaN anywhere (a corrupted slot) must reject. Without this,
+            # `min(1.0, nan)` is 1.0 and the candidate would be accepted.
+            return 0.0, False
         score = float(max(0.0, min(1.0, score)))
         return score, score >= self.acceptance_threshold
 
