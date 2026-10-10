@@ -41,12 +41,12 @@ from typing import TYPE_CHECKING, Any
 import torch
 from torch import Tensor
 
+from ucsa.models import verification
+from ucsa.models.cognitive import INTENT_BANK
 from ucsa.models.origination import pcs_restore, pcs_snapshot
-from ucsa.models.state import INTENT_BANK
-from ucsa.models.verification import LearnedVerifier
 
 if TYPE_CHECKING:
-    from ucsa.models.ucsa import UCSA
+    from ucsa.models.architecture import UCSA
 
 
 @dataclass
@@ -162,7 +162,7 @@ def jepa_chain_error(
     and the comparison becomes a real prediction error.
 
     Args:
-        outputs: A :meth:`ucsa.models.ucsa.UCSA.forward` result.
+        outputs: A :meth:`ucsa.models.architecture.UCSA.forward` result.
         target_outputs: Optional forward result from an EMA target encoder,
             supplying the targets.
 
@@ -237,7 +237,7 @@ def jepa_step_errors(
     doing the work.
 
     Args:
-        outputs: A :meth:`ucsa.models.ucsa.UCSA.forward` result.
+        outputs: A :meth:`ucsa.models.architecture.UCSA.forward` result.
         target_outputs: Optional EMA target encoder result.
 
     Returns:
@@ -304,7 +304,7 @@ def critic_score(model: UCSA, outputs: dict[str, Any]) -> float | None:
     """Score the current working memory with the learned verifier.
 
     The verifier is UCSA's existing acceptance critic. It is optional here:
-    only a :class:`~ucsa.models.verification.LearnedVerifier` produces a
+    only a :class:`~ucsa.models.verification.Learned` produces a
     differentiable-quality signal worth reading during descent.
 
     Args:
@@ -315,7 +315,7 @@ def critic_score(model: UCSA, outputs: dict[str, Any]) -> float | None:
         The critic's scalar score, or ``None`` when unavailable.
     """
     verifier = getattr(model, "verifier", None)
-    if not isinstance(verifier, LearnedVerifier):
+    if not isinstance(verifier, verification.Learned):
         return None
     working = outputs.get("language")
     if working is None:
@@ -335,7 +335,7 @@ def critic_objective(
 ) -> Tensor | None:
     """Verifier logit as a *differentiable* objective.
 
-    The spec lists the LearnedVerifier as the outcome critic. The
+    The spec lists the verification.Learned as the outcome critic. The
     ``critic_score`` helper above is a logged metric, taken under
     ``no_grad``; this one is the *objective* the descent can descend on.
     It exists as a separate path so the logged score does not need to
@@ -356,10 +356,10 @@ def critic_objective(
 
     Returns:
         Verifier logit as a tensor with grad, or ``None`` when the model
-        does not carry a :class:`LearnedVerifier`.
+        does not carry a :class:`verification.Learned`.
     """
     verifier = getattr(model, "verifier", None)
-    if not isinstance(verifier, LearnedVerifier):
+    if not isinstance(verifier, verification.Learned):
         return None
     candidate = model.pcs.get_bank("working")
     pooled = candidate.mean(dim=0)
@@ -378,13 +378,13 @@ def resolved_objective(model: UCSA, requested: str) -> str:
 
     Returns:
         ``"critic"`` when the request is satisfied by a
-        :class:`LearnedVerifier` on the model, ``"jepa"`` otherwise, and the
+        :class:`verification.Learned` on the model, ``"jepa"`` otherwise, and the
         literal request when it is not ``"auto"``.
     """
     if requested != "auto":
         return requested
     verifier = getattr(model, "verifier", None)
-    if isinstance(verifier, LearnedVerifier):
+    if isinstance(verifier, verification.Learned):
         return "critic"
     return "jepa"
 
