@@ -4,7 +4,7 @@ Run with::
 
     python -m ucsa.train [overrides...]
 
-Hydra/OmegaConf loads ``ucsa/configs/default.yaml`` and applies CLI
+Hydra/OmegaConf loads ``ucsa/config.yaml`` and applies CLI
 overrides. The script builds the model, dataset, loss, and trainer,
 then runs the configured number of training steps.
 """
@@ -224,10 +224,10 @@ def main() -> None:
     except Exception as exc:  # pragma: no cover - environment-dependent
         raise RuntimeError("Hydra is required for the ucsa.train CLI.") from exc
     config_dir = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "configs")
+        os.path.dirname(__file__)
     )
     with initialize_config_dir(version_base=None, config_dir=config_dir):
-        cfg = compose(config_name="default")
+        cfg = compose(config_name="config")
         configure_logging()
         logger_bundle = build_logger(
             LoggerConfig(
