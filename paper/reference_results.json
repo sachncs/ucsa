@@ -1,47 +1,27 @@
 {
-  "source": "Gu & Dao, 'Mamba: Linear-Time Sequence Modeling with Selective State Spaces', arXiv:2312.00752, Table 3",
-  "protocol": "EleutherAI lm-evaluation-harness, zero-shot, full evaluation splits. acc_norm for hellaswag and arc_challenge, acc for piqa, arc_easy and winogrande.",
+  "source": "Warstadt et al., 'Findings of the BabyLM Challenge: Sample-efficient pretraining on developmentally plausible corpora', CoNLL-BabyLM 2023, Table 2 (arXiv:2504.08165). BLiMP is the mean accuracy over its 67 phenomena, reported to two decimals.",
+  "protocol": "Zero-shot BLiMP minimal pairs scored by the model's log-likelihood of each sentence. OPT-125M is the best provided baseline trained on the 100M-word Strict track; ELC-BERT and BootBERT are Strict-track submissions; RoBERTa-base and Llama 2 are skylines trained on their full pre-training corpora, far more than 100M words.",
   "metrics": {
-    "hellaswag": "acc_norm",
-    "piqa": "acc",
-    "arc_easy": "acc",
-    "arc_challenge": "acc_norm",
-    "winogrande": "acc"
+    "blimp": "acc"
   },
   "chance": {
-    "hellaswag": 25.0,
-    "piqa": 50.0,
-    "arc_easy": 25.0,
-    "arc_challenge": 25.0,
-    "winogrande": 50.0
+    "blimp": 50.0
   },
   "models": {
-    "Pythia-160M": {
-      "params_m": 160,
-      "train_tokens_b": 300,
-      "hellaswag": 30.2,
-      "piqa": 61.4,
-      "arc_easy": 43.2,
-      "arc_challenge": 24.1,
-      "winogrande": 51.9
+    "OPT-125M (baseline)": {
+      "blimp": 75.0
     },
-    "Hybrid H3-130M": {
-      "params_m": 130,
-      "train_tokens_b": 300,
-      "hellaswag": 31.7,
-      "piqa": 64.2,
-      "arc_easy": 44.4,
-      "arc_challenge": 24.2,
-      "winogrande": 50.6
+    "ELC-BERT (best submission)": {
+      "blimp": 85.0
     },
-    "Mamba-130M": {
-      "params_m": 130,
-      "train_tokens_b": 300,
-      "hellaswag": 35.3,
-      "piqa": 64.5,
-      "arc_easy": 48.0,
-      "arc_challenge": 24.3,
-      "winogrande": 51.9
+    "BootBERT (submission)": {
+      "blimp": 86.0
+    },
+    "RoBERTa-base (skyline)": {
+      "blimp": 87.0
+    },
+    "Llama 2 70B (skyline)": {
+      "blimp": 84.0
     }
   }
 }
