@@ -22,15 +22,13 @@ from torch.nn import functional
 
 from ucsa.models import recurrent
 from ucsa.training import compression
+from ucsa.utils import precision
 
 BatchIterator = Iterator[tuple[torch.Tensor, torch.Tensor]]
 Batches = Callable[[int], BatchIterator]
 
 # Positions scored for the headline perplexity: the last 64 of each window.
 SCORED_TAIL = 64
-
-# Supported compute precisions and their autocast dtypes (None = full).
-PRECISIONS = {"fp32": None, "fp16": torch.float16, "bf16": torch.bfloat16}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -55,8 +53,6 @@ class Config:
       keep_ckpts: Numbered checkpoints to keep.
       log_every: Steps between log lines.
       seed: Seed for Python and torch RNGs and data order.
-      precision: Compute precision, `fp32`, `fp16` or `bf16`. 16-bit modes use
-        autocast with fp32 master weights; fp16 adds a dynamic loss scaler.
       weight_ema: Decay of an exponential moving average of the weights that
         is used for evaluation and the final model; 0 disables it.
       weight_ema_every: Steps between EMA updates (the decay is raised to
@@ -84,7 +80,6 @@ class Config:
     keep_ckpts: int = 2
     log_every: int = 100
     seed: int = 42
-    precision: str = "fp32"
     weight_ema: float = 0.0
     weight_ema_every: int = 4
     prefetch: int = 4
@@ -103,8 +98,6 @@ class Config:
             raise ValueError("min_lr_ratio must be in [0, 1]")
         if self.prefetch < 1:
             raise ValueError("prefetch must be >= 1")
-        if self.precision not in PRECISIONS:
-            raise ValueError(f"precision must be one of {sorted(PRECISIONS)}")
         if not 0.0 <= self.weight_ema < 1.0 or self.weight_ema_every < 1:
             raise ValueError("weight_ema must be in [0, 1), every >= 1")
 
@@ -180,6 +173,7 @@ def build_optimizer(model: nn.Module, config: Config) -> torch.optim.AdamW:
         ],
         lr=config.lr,
         betas=(config.beta1, config.beta2),
+        eps=precision.ADAM_EPS,
     )
 
 
@@ -289,7 +283,7 @@ class WeightEma:
         self.decay = decay**every
         self.every = every
         self.shadow = {
-            name: p.detach().clone().float()
+            name: p.detach().clone()
             for name, p in model.named_parameters()
             if p.requires_grad
         }
@@ -302,7 +296,7 @@ class WeightEma:
         for name, param in model.named_parameters():
             if name in self.shadow:
                 self.shadow[name].mul_(self.decay).add_(
-                    param.detach().float(), alpha=1.0 - self.decay
+                    param.detach(), alpha=1.0 - self.decay
                 )
 
     @torch.no_grad()
@@ -317,8 +311,8 @@ class WeightEma:
         for name, param in model.named_parameters():
             if name in self.shadow:
                 live = param.detach().clone()
-                param.copy_(self.shadow[name].to(param.dtype))
-                self.shadow[name] = live.float()
+                param.copy_(self.shadow[name])
+                self.shadow[name] = live
 
 
 @torch.no_grad()
@@ -355,7 +349,7 @@ def evaluate(
         if n >= count:
             break
         x, y = x.to(device), y.to(device)
-        logits = model(x)["logits"].float()
+        logits = model(x)["logits"]
         loss = functional.cross_entropy(
             logits.reshape(-1, logits.shape[-1]),
             y.reshape(-1),
@@ -471,8 +465,6 @@ def fit(
     optimizer = build_optimizer(model, config)
     params = [p for p in model.parameters() if p.requires_grad]
     os.makedirs(config.out_dir, exist_ok=True)
-    dtype = PRECISIONS[config.precision]
-    scaler = torch.amp.GradScaler(device.type, enabled=dtype == torch.float16)
     averaged = (
         WeightEma(model, config.weight_ema, config.weight_ema_every)
         if config.weight_ema
@@ -520,26 +512,19 @@ def fit(
             for _ in range(config.grad_accum):
                 x, y = next(stream)
                 x, y = x.to(device), y.to(device)
-                with torch.autocast(
-                    device.type, dtype=dtype, enabled=dtype is not None
-                ):
-                    loss, _ = model.compute_loss(x, y)
-                scaler.scale(loss / config.grad_accum).backward()
+                loss, _ = model.compute_loss(x, y)
+                (loss / config.grad_accum).backward()
                 step_loss = step_loss + loss.detach() / config.grad_accum
                 tokens += x.numel()
-            scaler.unscale_(optimizer)
             norm = clip_grad_norm(params, config.grad_clip)
             if not bool(torch.isfinite(norm)):  # The only host sync per step.
-                scaler.step(optimizer)  # Skips; lets the scaler back off.
-                scaler.update()
                 bad += 1
                 log(f"  step={step} non-finite gradient: skipped ({bad})")
                 if bad >= config.max_bad_steps:
                     raise RuntimeError(f"{bad} consecutive non-finite steps")
                 continue
             bad = 0
-            scaler.step(optimizer)
-            scaler.update()
+            optimizer.step()
             model.update_ema()
             step += 1
             if averaged is not None:
