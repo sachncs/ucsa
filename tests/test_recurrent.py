@@ -281,7 +281,8 @@ def test_closed_read_gate_makes_the_logits_independent_of_the_state():
 def test_read_scales_start_at_zero_and_learn():
     m = make(read_gate=True).train()
     scales = [b.read_scale for b in m.blocks if b.read_scale is not None]
-    assert scales and all(float(s) == 0.0 for s in scales)
+    assert scales
+    assert all(float(s) == 0.0 for s in scales)
     x = torch.randint(0, 64, (2, 32))
     loss, _ = m.compute_loss(x, torch.roll(x, -1, 1))
     loss.backward()
