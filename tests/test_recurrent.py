@@ -213,7 +213,7 @@ def test_slot_dropout_config_is_validated():
     with pytest.raises(ValueError):
         tiny(slot_dropout=1.5)
     with pytest.raises(ValueError):
-        tiny(min_slots=99)
+        tiny(min_slots=99, slot_dropout=0.5)
 
 
 def gated(**kw):
@@ -394,3 +394,16 @@ def test_the_jepa_pairs_exclude_the_padded_chunk():
     x = torch.randint(0, 64, (1, 28))  # three full chunks and a partial one
     preds, targets = m(x)["jepa"]
     assert preds.shape[1] == targets.shape[1] == 3
+
+
+def test_a_small_state_layout_is_valid_with_the_default_min_slots():
+    """Regression: the default min_slots (4) rejected layouts of fewer slots
+    even with slot dropout off, where min_slots has no effect."""
+    cfg = tiny(banks=(("working", 2),), bank_write_bias=(("working", 0.0),))
+    assert cfg.num_slots == 2
+    with pytest.raises(ValueError, match="min_slots"):
+        tiny(
+            banks=(("working", 2),),
+            bank_write_bias=(("working", 0.0),),
+            slot_dropout=0.5,
+        )
