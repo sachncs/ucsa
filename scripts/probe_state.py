@@ -45,7 +45,7 @@ def main() -> None:
     device = engine.pick_device()
     model = engine.load_model(args.ckpt, device)
     control = engine.load_model(args.control, device) if args.control else None
-    shard = shards.TokenShard(os.path.join(args.data, args.shard))
+    shard = shards.Shard(os.path.join(args.data, args.shard))
     report: dict = {"profiles": {}, "rate_distortion": []}
 
     for length in args.lengths:
