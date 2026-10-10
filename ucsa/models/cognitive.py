@@ -512,9 +512,7 @@ class State(nn.Module):
                     f"Replacement shape {tuple(replacement.shape)} does not "
                     f"match expected {expected_shape}."
                 )
-            replacement_tensor = replacement.to(
-                device=target.device, dtype=target.dtype
-            )
+            replacement_tensor = replacement.to(device=target.device)
         with torch.no_grad():
             target[indices] = replacement_tensor
 
