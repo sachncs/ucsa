@@ -63,6 +63,11 @@ class Update:
             raise ValueError(
                 f"confidence must be in [0, 1], got {self.confidence}."
             )
+        if not (
+            torch.isfinite(self.tokens).all()
+            and torch.isfinite(self.importance).all()
+        ):
+            raise ValueError("Update contains NaN or infinity.")
 
 
 class Memory:
@@ -195,7 +200,9 @@ class Memory:
         empty_indices = torch.tensor(empty, dtype=torch.long)
         if len(empty) < k:
             # Recycle the lowest-retention slots to make room.
-            recycled = self.cstate.recycle_bottom_k("long_term", k - len(empty))
+            recycled = self.cstate.recycle_bottom_k(
+                "long_term", k - len(empty), used_only=True
+            )
             empty_indices = torch.cat([empty_indices, recycled])[:k]
 
         with torch.no_grad():
@@ -241,7 +248,7 @@ class Memory:
             Indices of recycled slots.
         """
         self.cstate.update_retention()
-        recycled = self.cstate.recycle_bottom_k("long_term", k)
+        recycled = self.cstate.recycle_bottom_k("long_term", k, used_only=True)
         return [int(i) for i in recycled.tolist()]
 
     def long_term_usage(self) -> int:
