@@ -1,10 +1,10 @@
-"""UCSA-R: causal chunked state recurrence over a persistent cognitive state.
+"""UCSA-R: causal chunked state recurrence over a persistent state.
 
-The original UCSA decodes its language logits from working-bank slots that
-have read the whole input, so a slot can copy the token it is scored on (see
-`ucsa.training.prefix`). UCSA-R keeps the central idea, one persistent
-multi-bank state that everything reads and writes, and makes the information
-flow causal by construction.
+The original UCSA decoded its language logits from working-bank slots that
+had read the whole input, so a slot could copy the token it was scored on
+(see `ucsa.training.scoring`). UCSA-R keeps one persistent multi-bank state
+that every chunk reads and writes, and makes the information flow causal by
+construction.
 
 Data flow for a sequence cut into chunks of `chunk_size` tokens:
 
