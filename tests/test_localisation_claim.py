@@ -38,15 +38,16 @@ import math
 import pytest
 import torch
 
-from ucsa.models.losses import LossWeights, UCSACombinedLoss
+from ucsa.models import architecture, losses
+from ucsa.models.architecture import UCSA
 from ucsa.models.origination import (
     counterfactual_controllability,
     intent_collapse_report,
 )
-from ucsa.models.ucsa import UCSA, UCSAConfig
-from ucsa.training.curriculum import Curriculum, CurriculumSchedule
+from ucsa.training import curriculum, trainer as trainer_lib
+from ucsa.training.curriculum import Curriculum
 from ucsa.training.metrics import build_default_registry
-from ucsa.training.trainer import Trainer, TrainerConfig
+from ucsa.training.trainer import Trainer
 
 VOCAB = 32
 HALF = 4
@@ -91,7 +92,7 @@ def train_model(observation_mix: float, balance: bool = False) -> UCSA:
     """
     torch.manual_seed(0)
     model = UCSA(
-        UCSAConfig(
+        architecture.Config(
             hidden_size=64,
             num_layers=4,
             num_q_heads=4,
@@ -106,17 +107,17 @@ def train_model(observation_mix: float, balance: bool = False) -> UCSA:
     )
     trainer = Trainer(
         model=model,
-        loss_fn=UCSACombinedLoss(
-            LossWeights(origination=0.01 if balance else 0.0)
+        loss_fn=losses.Combined(
+            losses.Weights(origination=0.01 if balance else 0.0)
         ),
         optimizer=torch.optim.AdamW(model.parameters(), lr=1e-3),
-        config=TrainerConfig(
+        config=trainer_lib.Config(
             learning_rate=1e-3,
             max_steps=STEPS,
             warmup_steps=20,
             amp_dtype=torch.float32,
         ),
-        curriculum=Curriculum(CurriculumSchedule(1, 2, 3)),
+        curriculum=Curriculum(curriculum.Schedule(1, 2, 3)),
         metrics=build_default_registry(),
     )
     for inputs, targets in copy_task_batches(STEPS, seed=7):
