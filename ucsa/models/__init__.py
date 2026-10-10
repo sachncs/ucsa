@@ -1,12 +1,9 @@
-"""UCSA neural-model subpackage.
+"""Models and memory services.
 
-Modules in this package define the persistent cognitive state, the state
-transition operator interface and its concrete implementations, the reasoning
-loop, the memory hierarchy and its background service, the verification
-pipeline, the graph memory service, the projection heads, and the loss
-functions. The top-level :class:`ucsa.models.architecture.UCSA` model composes them.
+`recurrent` is UCSA-R, the language model. `cognitive`, `tiers`, `graph`,
+`curation` and `verification` are standalone memory services (banks with
+retention, a tiered memory, a graph of memories, a background curator and a
+verifier for candidate memories); no model in this package imports them.
 """
-
-from __future__ import annotations
 
 __all__: list[str] = []
