@@ -139,7 +139,7 @@ def test_a_corrupted_stream_decodes_to_different_tokens_not_a_crash():
     assert out != tokens
 
 
-# ----------------------------------------------------- the model as a compressor
+# -------------------------------------------------- the model as a compressor
 
 
 @pytest.mark.parametrize("use_state", [True, False])
