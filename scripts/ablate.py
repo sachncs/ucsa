@@ -44,6 +44,7 @@ ARMS: dict[str, list[str]] = {
     "lr-3e-4": ["train.lr=3e-4"],
     "lr-1.2e-3": ["train.lr=1.2e-3"],
     "lr-2.4e-3": ["train.lr=2.4e-3"],
+    "lr-4.8e-3": ["train.lr=4.8e-3"],
 }
 SEED_OVERRIDES = {"base-seed43": 43, "base-seed44": 44, "base-seed45": 45}
 
