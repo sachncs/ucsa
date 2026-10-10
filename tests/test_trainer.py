@@ -49,7 +49,6 @@ def tiny_trainer(
             max_steps=20,
             warmup_steps=2,
             log_every_n_steps=2,
-            amp_dtype=torch.float32,
         )
     if curriculum is None:
         curriculum = Curriculum()
@@ -208,7 +207,6 @@ class TestTrainerBasics:
                 max_steps=10,
                 warmup_steps=1,
                 log_every_n_steps=1,
-                amp_dtype=torch.float32,
             )
         )
         history = trainer.train(dataset, num_steps=5)
@@ -241,11 +239,6 @@ class TestTrainerBasics:
                 break
         assert trainer.curriculum.state.total_step >= 5
 
-    def test_amp_disabled_on_cpu(self) -> None:
-        """AMP is disabled when running on CPU."""
-        trainer = tiny_trainer()
-        assert trainer.amp_enabled is False
-
     def test_grad_clip_applied(self, dataset: DataLoader) -> None:
         """Gradient clipping is applied when configured."""
         config = trainer_lib.Config(
@@ -253,7 +246,6 @@ class TestTrainerBasics:
             max_steps=10,
             warmup_steps=1,
             grad_clip_norm=0.5,
-            amp_dtype=torch.float32,
         )
         trainer = tiny_trainer(config=config)
         for batch in dataset:
@@ -267,7 +259,6 @@ class TestTrainerBasics:
             max_steps=10,
             warmup_steps=1,
             grad_clip_norm=0.0,
-            amp_dtype=torch.float32,
         )
         trainer = tiny_trainer(config=config)
         for batch in dataset:

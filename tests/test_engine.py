@@ -160,21 +160,7 @@ def test_ema_is_skipped_between_update_steps():
     assert any(not torch.equal(before[k], ema.shadow[k]) for k in before)
 
 
-@pytest.mark.parametrize("precision", ["bf16", "fp16"])
-def test_sixteen_bit_training_is_finite(tmp_path, precision):
-    rec = fit(
-        tiny_model(),
-        cfg(tmp_path, precision=precision, weight_ema=0.9, steps=4),
-        batches,
-        batches,
-        log=lambda s: None,
-    )
-    assert math.isfinite(rec["final"]["ppl_last64"])
-
-
-def test_precision_and_ema_settings_are_validated():
-    with pytest.raises(ValueError):
-        engine.Config(precision="fp8")
+def test_ema_settings_are_validated():
     with pytest.raises(ValueError):
         engine.Config(weight_ema=1.0)
 
