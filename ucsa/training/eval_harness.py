@@ -1,27 +1,29 @@
-"""Zero-shot multiple-choice benchmarks, following lm-evaluation-harness.
+"""Zero-shot benchmarks scored by log-likelihood.
 
-Tasks: HellaSwag, ARC-Easy, ARC-Challenge, PIQA and WinoGrande. Prompts and
-metrics follow EleutherAI's lm-evaluation-harness so results can be compared
-with published numbers: each choice is scored by its log-likelihood given the
-context, `acc` ranks by total log-likelihood and `acc_norm` by
-log-likelihood per character of the choice. HellaSwag and ARC-Challenge
-report `acc_norm`; the other tasks report `acc`.
+BLiMP (Warstadt et al., 2020): 67 phenomena of English grammar, 1,000 minimal
+pairs each. A pair is correct when the model gives the grammatical sentence a
+strictly higher total log-probability than the ungrammatical one; the score is
+the mean accuracy over phenomena, the number the BabyLM challenge reports. A
+sentence is conditioned on the end-of-text token only, so nothing but the
+sentence itself is read.
 
-Loaders stream from Hugging Face `datasets` through a fixed-seed shuffle, so
-a `max_examples` cap selects the same examples on every run; with no cap the
-full split is evaluated. The seed is recorded on every result.
+A task is a loader that yields examples with a `context`, a list of
+`choices`, the `label` of the right one and an optional `group`. Loaders
+shuffle with a fixed seed, so a `max_examples` cap selects the same examples
+on every run; with no cap the full split is evaluated.
 """
 
+import collections
 import dataclasses
 import math
 import random
-import re
 from collections.abc import Callable, Iterable
 from typing import Any
 
 import datasets
 import torch
 import transformers
+from torch.nn import functional
 
 from ucsa.models import recurrent
 from ucsa.training import scoring
@@ -33,172 +35,72 @@ DEFAULT_EVAL_SEED = 1234
 Example = dict[str, Any]
 
 
-@dataclasses.dataclass
-class TaskSpec:
+@dataclasses.dataclass(frozen=True)
+class Task:
     """One benchmark task.
 
     Attributes:
-      name: Key in `TASK_REGISTRY`.
-      loader: Called with the seed; yields examples with `context`,
-        `choices`, `label` and optionally `contexts` (one per choice, for
-        tasks whose context depends on the choice).
-      max_examples: Cap on examples; None evaluates the full split.
-      seed: Seed for the loader's shuffle.
-      metric: Headline metric, `acc` or `acc_norm`. Both are always
-        recorded in `EvalResult.extras`.
+      name: Key in `TASKS`.
+      loader: Called with the seed; yields examples.
     """
 
     name: str
-    loader: Callable[..., Iterable[Example]]
-    max_examples: int | None = None
-    seed: int = DEFAULT_EVAL_SEED
-    metric: str = "acc"
+    loader: Callable[[int], Iterable[Example]]
 
 
-@dataclasses.dataclass
-class EvalResult:
+@dataclasses.dataclass(frozen=True)
+class Result:
     """Result of one task evaluation.
 
     Attributes:
       name: Task name.
       n: Examples scored.
-      correct: Correct predictions under the headline metric.
-      accuracy: Headline accuracy in `[0, 1]`.
-      log_likelihood_mean: Mean per-token log-likelihood of the chosen
-        answer.
-      extras: Seed, cap, metric name, both accuracies and the binomial
-        standard error of the headline metric.
+      accuracy: Mean accuracy over groups, in `[0, 1]`.
+      stderr: Standard error of `accuracy`.
+      groups: Accuracy of each group (for BLiMP, each phenomenon).
+      seed: Shuffle seed of the loader.
+      max_examples: Cap on examples; None means the full split.
     """
 
     name: str
     n: int
-    correct: int
     accuracy: float
-    log_likelihood_mean: float = 0.0
-    extras: dict[str, Any] = dataclasses.field(default_factory=dict)
+    stderr: float
+    groups: dict[str, float]
+    seed: int
+    max_examples: int | None
 
     def to_dict(self) -> dict[str, Any]:
         """Returns the result as a plain dict."""
         return dataclasses.asdict(self)
 
 
-def shuffled_stream(
-    ds: Iterable[Example], seed: int, buffer_size: int = 2000
-) -> Iterable[Example]:
-    """Yields `ds` in a deterministic shuffled order.
+def load_blimp(seed: int = DEFAULT_EVAL_SEED) -> Iterable[Example]:
+    """Yields BLiMP minimal pairs, grammatical sentence first.
 
     Args:
-      ds: A streaming Hugging Face dataset (has `.shuffle`) or any iterable.
       seed: Shuffle seed.
-      buffer_size: Shuffle buffer for streaming datasets.
 
     Yields:
-      The records of `ds`.
+      Examples with an empty context, `[good, bad]` as choices, label 0 and
+      the phenomenon name as `group`.
     """
-    if hasattr(ds, "shuffle"):
-        yield from ds.shuffle(seed=seed, buffer_size=buffer_size)
-        return
-    rows = list(ds)
+    rows = []
+    for name in datasets.get_dataset_config_names("nyu-mll/blimp"):
+        for ex in datasets.load_dataset("nyu-mll/blimp", name, split="train"):
+            rows.append(
+                {
+                    "context": "",
+                    "choices": [ex["sentence_good"], ex["sentence_bad"]],
+                    "label": 0,
+                    "group": name,
+                }
+            )
     random.Random(seed).shuffle(rows)
     yield from rows
 
 
-def clean_hellaswag(text: str) -> str:
-    """Removes WikiHow markup the way lm-evaluation-harness does."""
-    text = text.strip().replace(" [title]", ". ")
-    text = re.sub(r"\[.*?\]", "", text)
-    return text.replace("  ", " ")
-
-
-def load_hellaswag(seed: int = DEFAULT_EVAL_SEED) -> Iterable[Example]:
-    """Yields HellaSwag validation examples in harness format."""
-    ds = datasets.load_dataset(
-        "Rowan/hellaswag", split="validation", streaming=True
-    )
-    for ex in shuffled_stream(ds, seed):
-        context = ex["ctx_a"] + " " + ex["ctx_b"].capitalize()
-        yield {
-            "context": clean_hellaswag(ex["activity_label"] + ": " + context),
-            "choices": [clean_hellaswag(e) for e in ex["endings"]],
-            "label": int(ex["label"]),
-        }
-
-
-def load_arc(name: str, seed: int = DEFAULT_EVAL_SEED) -> Iterable[Example]:
-    """Yields ARC test examples in harness format.
-
-    Args:
-      name: `ARC-Easy` or `ARC-Challenge`.
-      seed: Shuffle seed.
-
-    Yields:
-      Examples with a `Question: ... Answer:` context.
-    """
-    ds = datasets.load_dataset(
-        "allenai/ai2_arc", name, split="test", streaming=True
-    )
-    for ex in shuffled_stream(ds, seed):
-        yield {
-            "context": "Question: " + ex["question"] + "\nAnswer:",
-            "choices": ex["choices"]["text"],
-            "label": ex["choices"]["label"].index(ex["answerKey"]),
-        }
-
-
-def load_piqa(seed: int = DEFAULT_EVAL_SEED) -> Iterable[Example]:
-    """Yields PIQA validation examples in harness format.
-
-    The upstream `ybisk/piqa` is a loading script that current `datasets`
-    versions no longer run; `gimmaru/piqa` mirrors the same schema.
-    """
-    ds = datasets.load_dataset(
-        "gimmaru/piqa", split="validation", streaming=True
-    )
-    for ex in shuffled_stream(ds, seed):
-        yield {
-            "context": "Question: " + ex["goal"] + "\nAnswer:",
-            "choices": [ex["sol1"], ex["sol2"]],
-            "label": int(ex["label"]),
-        }
-
-
-def load_winogrande(seed: int = DEFAULT_EVAL_SEED) -> Iterable[Example]:
-    """Yields WinoGrande validation examples with partial scoring.
-
-    As in lm-evaluation-harness, each option is substituted for the blank in
-    the *context*, and the text after the blank is the continuation that is
-    scored. The continuation is the same for both options, so the model is
-    asked which prefix makes the rest of the sentence more likely.
-    """
-    ds = datasets.load_dataset(
-        "allenai/winogrande",
-        "winogrande_xl",
-        split="validation",
-        streaming=True,
-    )
-    for ex in shuffled_stream(ds, seed):
-        head, _, tail = ex["sentence"].partition("_")
-        yield {
-            "context": "",
-            "contexts": [head + ex["option1"], head + ex["option2"]],
-            "choices": [tail.strip(), tail.strip()],
-            "label": int(ex["answer"]) - 1,
-        }
-
-
-TASK_REGISTRY: dict[str, TaskSpec] = {
-    "hellaswag": TaskSpec("hellaswag", load_hellaswag, metric="acc_norm"),
-    "arc_easy": TaskSpec(
-        "arc_easy", lambda seed=DEFAULT_EVAL_SEED: load_arc("ARC-Easy", seed)
-    ),
-    "arc_challenge": TaskSpec(
-        "arc_challenge",
-        lambda seed=DEFAULT_EVAL_SEED: load_arc("ARC-Challenge", seed),
-        metric="acc_norm",
-    ),
-    "piqa": TaskSpec("piqa", load_piqa),
-    "winogrande": TaskSpec("winogrande", load_winogrande),
-}
+TASKS: dict[str, Task] = {"blimp": Task("blimp", load_blimp)}
 
 
 def encode(
@@ -216,129 +118,109 @@ def encode(
     return [int(i) for i in tokenizer.encode(text, add_special_tokens=False)]
 
 
-def choice_loglik(
+@torch.no_grad()
+def choice_logprobs(
     model: recurrent.Model,
     tokenizer: transformers.PreTrainedTokenizerBase,
     context: str,
-    choice: str,
+    choices: list[str],
     device: torch.device,
     max_len: int = 1024,
-) -> tuple[float, int]:
-    """Scores `choice` given `context`.
+) -> list[tuple[float, int]]:
+    """Scores every choice given the context, in one forward pass.
 
-    The model reads context plus choice and is scored on the choice tokens
-    only; at most `scoring.DEFAULT_NUM_TARGETS` of them are scored.
+    Each choice is read after the context and scored on its own tokens, at
+    most `scoring.DEFAULT_NUM_TARGETS` of them. Rows are right-padded; the
+    model is causal, so padding never changes the score of an earlier token.
 
     Args:
       model: Causal model.
       tokenizer: Tokenizer for the model.
-      context: Conditioning text; may be empty.
-      choice: Continuation to score.
+      context: Conditioning text; empty means the end-of-text token.
+      choices: Continuations to score.
       device: Device holding the model.
       max_len: Maximum input length; the start of the context is dropped.
 
     Returns:
-      `(sum_log_prob, n_scored_tokens)`.
+      `(sum_log_prob, n_scored_tokens)` per choice; `(0.0, 0)` for a choice
+      with no tokens.
     """
-    cont_ids = encode(tokenizer, " " + choice if context else choice)
-    cont_ids = cont_ids[: scoring.DEFAULT_NUM_TARGETS]
-    if not cont_ids:
-        return 0.0, 0
     ctx_ids = encode(tokenizer, context) if context else []
-    if not ctx_ids:
-        ctx_ids = [tokenizer.eos_token_id or 0]
-    ctx = ctx_ids[-(max_len - len(cont_ids)) :]
-    ids = torch.tensor([ctx + cont_ids], dtype=torch.long, device=device)
-    with torch.no_grad():
-        logits = model(ids)["logits"]
-    logprobs = scoring.continuation_logprobs(logits, ids, len(cont_ids))
-    return float(logprobs.sum().item()), int(logprobs.numel())
-
-
-def conditional_loglik(
-    model: recurrent.Model,
-    tokenizer: transformers.PreTrainedTokenizerBase,
-    context: str,
-    choice: str,
-    device: torch.device,
-    max_len: int = 1024,
-) -> float:
-    """Returns the mean per-token log-likelihood of `choice` given `context`.
-
-    Args:
-      model: Causal model.
-      tokenizer: Tokenizer for the model.
-      context: Conditioning text.
-      choice: Continuation to score.
-      device: Device holding the model.
-      max_len: Maximum input length.
-
-    Returns:
-      The mean log-probability per scored token, or 0 if none was scored.
-    """
-    total, count = choice_loglik(
-        model, tokenizer, context, choice, device, max_len
-    )
-    return total / count if count else 0.0
+    ctx_ids = ctx_ids or [tokenizer.eos_token_id or 0]
+    rows: list[list[int]] = []
+    spans: list[tuple[int, int]] = []
+    for choice in choices:
+        cont = encode(tokenizer, " " + choice if context else choice)
+        cont = cont[: scoring.DEFAULT_NUM_TARGETS]
+        ctx = ctx_ids[-(max_len - len(cont)) :]
+        rows.append(ctx + cont)
+        spans.append((len(ctx), len(cont)))
+    width = max(len(row) for row in rows)
+    ids = torch.zeros(len(rows), width, dtype=torch.long)
+    for i, row in enumerate(rows):
+        ids[i, : len(row)] = torch.tensor(row)
+    ids = ids.to(device)
+    model.eval()
+    logits = model(ids)["logits"]
+    out = []
+    for i, (start, count) in enumerate(spans):
+        if count == 0:
+            out.append((0.0, 0))
+            continue
+        pred = logits[i, start - 1 : start - 1 + count]
+        nll = functional.cross_entropy(
+            pred, ids[i, start : start + count], reduction="sum"
+        )
+        out.append((-float(nll), count))
+    return out
 
 
 def evaluate_task(
-    spec: TaskSpec,
+    task: Task,
     model: recurrent.Model,
     tokenizer: transformers.PreTrainedTokenizerBase,
     device: torch.device,
-) -> EvalResult:
+    max_examples: int | None = None,
+    seed: int = DEFAULT_EVAL_SEED,
+) -> Result:
     """Runs one task.
 
+    An example counts as correct only when the right choice scores strictly
+    higher than every other, so ties never favour the first choice.
+
     Args:
-      spec: Task to run.
+      task: Task to run.
       model: Causal model.
       tokenizer: Tokenizer for the model.
       device: Device holding the model.
+      max_examples: Cap on examples; None evaluates the full split.
+      seed: Shuffle seed of the loader.
 
     Returns:
-      The task's `EvalResult`.
+      The task's `Result`.
     """
-    model.eval()
-    correct = {"acc": 0, "acc_norm": 0}
-    total = 0
-    ll_sum = 0.0
-    for i, ex in enumerate(spec.loader(spec.seed)):
-        if spec.max_examples is not None and i >= spec.max_examples:
+    hits: dict[str, list[int]] = collections.defaultdict(list)
+    for i, ex in enumerate(task.loader(seed)):
+        if max_examples is not None and i >= max_examples:
             break
-        choices, label = ex["choices"], ex["label"]
-        contexts = ex.get("contexts", [ex["context"]] * len(choices))
-        scored = [
-            choice_loglik(model, tokenizer, ctx, choice, device)
-            for ctx, choice in zip(contexts, choices, strict=True)
-        ]
-        sums = [s for s, _ in scored]
-        # acc ranks by total log-likelihood, acc_norm by log-likelihood per
-        # character of the choice (the harness convention).
-        norm = [s / max(1, len(c)) for s, c in zip(sums, choices, strict=True)]
-        correct["acc"] += int(sums.index(max(sums)) == label)
-        correct["acc_norm"] += int(norm.index(max(norm)) == label)
-        best_sum, best_n = scored[sums.index(max(sums))]
-        ll_sum += best_sum / best_n if best_n else 0.0
-        total += 1
-    model.train()
-    n = max(1, total)
-    acc, acc_norm = correct["acc"] / n, correct["acc_norm"] / n
-    head = acc_norm if spec.metric == "acc_norm" else acc
-    return EvalResult(
-        name=spec.name,
-        n=total,
-        correct=correct[spec.metric],
-        accuracy=head,
-        log_likelihood_mean=ll_sum / n,
-        extras={
-            "seed": spec.seed,
-            "max_examples": spec.max_examples,
-            "metric": spec.metric,
-            "acc": acc,
-            "acc_norm": acc_norm,
-            "stderr": math.sqrt(head * (1.0 - head) / n),
-        },
+        scored = choice_logprobs(
+            model, tokenizer, ex["context"], ex["choices"], device
+        )
+        sums = [total for total, _ in scored]
+        right = sums[ex["label"]]
+        won = all(right > s for j, s in enumerate(sums) if j != ex["label"])
+        hits[ex.get("group", "all")].append(int(won))
+    groups = {g: sum(h) / len(h) for g, h in hits.items()}
+    accuracy = sum(groups.values()) / len(groups) if groups else 0.0
+    variance = sum(p * (1.0 - p) / len(hits[g]) for g, p in groups.items())
+    return Result(
+        name=task.name,
+        n=sum(len(h) for h in hits.values()),
+        accuracy=accuracy,
+        stderr=math.sqrt(variance) / max(1, len(groups)),
+        groups=groups,
+        seed=seed,
+        max_examples=max_examples,
     )
 
 
@@ -348,11 +230,11 @@ def evaluate_all(
     tokenizer: transformers.PreTrainedTokenizerBase,
     device: torch.device,
     max_examples: int | None = None,
-) -> list[EvalResult]:
+) -> list[Result]:
     """Runs several tasks.
 
     Args:
-      names: Task names; None or empty runs every registered task.
+      names: Task names; None or empty runs every task.
       model: Causal model.
       tokenizer: Tokenizer for the model.
       device: Device holding the model.
@@ -362,23 +244,18 @@ def evaluate_all(
       One result per task.
 
     Raises:
-      ValueError: If a name is not a registered task.
+      ValueError: If a name is not a task.
     """
-    names = names or list(TASK_REGISTRY)
-    unknown = [name for name in names if name not in TASK_REGISTRY]
+    names = names or list(TASKS)
+    unknown = [name for name in names if name not in TASKS]
     if unknown:
-        raise ValueError(f"unknown tasks {unknown}; have {list(TASK_REGISTRY)}")
+        raise ValueError(f"unknown tasks {unknown}; have {list(TASKS)}")
     results = []
     for name in names:
-        spec = dataclasses.replace(
-            TASK_REGISTRY[name], max_examples=max_examples
+        print(f"  eval {name} ...", flush=True)
+        result = evaluate_task(
+            TASKS[name], model, tokenizer, device, max_examples
         )
-        print(f"  eval {spec.name} ...", flush=True)
-        result = evaluate_task(spec, model, tokenizer, device)
         results.append(result)
-        print(
-            f"    {result.name}: {result.correct}/{result.n} "
-            f"acc={result.accuracy:.4f}",
-            flush=True,
-        )
+        print(f"    {name}: acc={result.accuracy:.4f} n={result.n}", flush=True)
     return results
