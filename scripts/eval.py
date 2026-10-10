@@ -101,7 +101,11 @@ def main() -> None:
         if not os.path.exists(path):
             continue
         ppl = heldout_ppl(
-            model, shards.Shard(path), device, args.ppl_batches, args.max_seq_len
+            model,
+            shards.Shard(path),
+            device,
+            args.ppl_batches,
+            args.max_seq_len,
         )
         report["ppl"][label] = ppl
         print(f"{label} ppl_last64: {ppl:.1f}", flush=True)
