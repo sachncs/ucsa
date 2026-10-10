@@ -196,7 +196,7 @@ class TestLearnedVerifier:
         assert pooled.shape == (32,)
 
     def test_summarize_cstate(self, verifier: verification.Learned) -> None:
-        """``summarize_cstate`` returns a vector of size ``cstate_summary_size``."""
+        """``summarize_cstate`` returns ``cstate_summary_size`` values."""
         summary = verifier.summarize_cstate(tiny_pcs())
         assert summary.shape == (8,)
 
