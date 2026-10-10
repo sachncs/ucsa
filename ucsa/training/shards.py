@@ -9,6 +9,7 @@ data stream exactly.
 
 import hashlib
 import os
+import zlib
 from collections.abc import Iterable, Iterator
 
 import numpy as np
@@ -58,6 +59,57 @@ def filter_documents(
         seen_hashes.add(digest)
         counts["kept"] += 1
         yield ids
+
+
+def compression_ratio(text: str) -> float:
+    """Returns compressed size over raw size under zlib level 6.
+
+    Natural prose sits near 0.4. Boilerplate and repeated lists compress far
+    below that; garbled or machine-generated text compresses far less.
+
+    Args:
+      text: Document text.
+
+    Returns:
+      `len(zlib(text)) / len(text)` in bytes, or 1.0 for empty text.
+    """
+    raw = text.encode("utf-8")
+    if not raw:
+        return 1.0
+    return len(zlib.compress(raw, 6)) / len(raw)
+
+
+def filter_by_compressibility(
+    texts: Iterable[str],
+    low: float,
+    high: float,
+    stats: dict[str, int] | None = None,
+) -> Iterator[str]:
+    """Keeps documents whose compression ratio lies in `[low, high]`.
+
+    Args:
+      texts: Document texts.
+      low: Minimum ratio; below it a document is too repetitive.
+      high: Maximum ratio; above it a document is too random.
+      stats: If given, updated in place with `seen`, `kept`, `too_repetitive`
+        and `too_random` counts.
+
+    Yields:
+      The documents that pass.
+    """
+    counts = stats if stats is not None else {}
+    for key in ("seen", "kept", "too_repetitive", "too_random"):
+        counts.setdefault(key, 0)
+    for text in texts:
+        counts["seen"] += 1
+        ratio = compression_ratio(text)
+        if ratio < low:
+            counts["too_repetitive"] += 1
+        elif ratio > high:
+            counts["too_random"] += 1
+        else:
+            counts["kept"] += 1
+            yield text
 
 
 def write_shard(
