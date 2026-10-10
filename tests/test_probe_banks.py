@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from scripts.probe_banks import probe_banks
 
-from ucsa.models.state import BANK_NAMES
-from ucsa.models.ucsa import UCSA, UCSAConfig
+from ucsa.models import architecture
+from ucsa.models.architecture import UCSA
+from ucsa.models.cognitive import BANK_NAMES
 
 
 def test_probe_banks_summarises_every_bank():
-    cfg = UCSAConfig(
+    cfg = architecture.Config(
         hidden_size=32,
         vocab_size=200,
         num_layers=2,
@@ -26,7 +27,7 @@ def test_probe_banks_summarises_every_bank():
 
 
 def test_probe_banks_centroid_matrix_is_symmetric_self_one():
-    cfg = UCSAConfig(
+    cfg = architecture.Config(
         hidden_size=32,
         vocab_size=200,
         num_layers=2,
@@ -48,7 +49,7 @@ def test_probe_banks_centroid_matrix_is_symmetric_self_one():
 
 
 def test_probe_banks_top_tokens_are_strings():
-    cfg = UCSAConfig(
+    cfg = architecture.Config(
         hidden_size=32,
         vocab_size=200,
         num_layers=2,
@@ -64,7 +65,7 @@ def test_probe_banks_top_tokens_are_strings():
 
 
 def test_probe_banks_norm_stats_are_finite():
-    cfg = UCSAConfig(
+    cfg = architecture.Config(
         hidden_size=32,
         vocab_size=200,
         num_layers=2,
