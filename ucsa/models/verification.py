@@ -1,14 +1,14 @@
 """Verification pipeline.
 
 A :class:`Verifier` is the gate between candidate memory and the long-term
-bank. It receives a :class:`ucsa.models.memory.MemoryUpdate` and the current
+bank. It receives a :class:`ucsa.models.tiers.Update` and the current
 PCS, returns a score in ``[0, 1]`` and an accept/reject decision.
 
 Two implementations ship:
 
-- :class:`HeuristicVerifier` -- a score-based blend of confidence, novelty,
+- :class:`Heuristic` -- a score-based blend of confidence, novelty,
   recency, and usage.
-- :class:`LearnedVerifier` -- a small MLP head trained on the retention
+- :class:`Learned` -- a small MLP head trained on the retention
   signal (whether the candidate was re-used in subsequent requests).
 
 Both share the :class:`Verifier` interface.
@@ -23,8 +23,7 @@ import torch
 from torch import Tensor, nn
 
 if TYPE_CHECKING:
-    from ucsa.models.memory import MemoryUpdate
-    from ucsa.models.state import PersistentCognitiveState
+    from ucsa.models import cognitive, tiers
 
 
 class Verifier(nn.Module, abc.ABC):
@@ -37,8 +36,8 @@ class Verifier(nn.Module, abc.ABC):
     @abc.abstractmethod
     def verify(
         self,
-        candidate: MemoryUpdate,
-        cstate: PersistentCognitiveState,
+        candidate: tiers.Update,
+        cstate: cognitive.State,
     ) -> tuple[float, bool]:
         """Score and decide whether to accept ``candidate``.
 
@@ -54,8 +53,8 @@ class Verifier(nn.Module, abc.ABC):
     @abc.abstractmethod
     def update_signal(
         self,
-        candidate: MemoryUpdate,
-        cstate: PersistentCognitiveState,
+        candidate: tiers.Update,
+        cstate: cognitive.State,
         was_used: bool,
     ) -> Tensor:
         """Update the verifier's training signal.
@@ -71,7 +70,7 @@ class Verifier(nn.Module, abc.ABC):
         """
 
 
-class HeuristicVerifier(Verifier):
+class Heuristic(Verifier):
     """Score-based verifier blending confidence, novelty, recency, usage.
 
     Final score: ``0.4 * confidence + 0.3 * novelty + 0.2 * recency
@@ -111,8 +110,8 @@ class HeuristicVerifier(Verifier):
 
     def verify(
         self,
-        candidate: MemoryUpdate,
-        cstate: PersistentCognitiveState,
+        candidate: tiers.Update,
+        cstate: cognitive.State,
     ) -> tuple[float, bool]:
         """Score the candidate against the current PCS.
 
@@ -125,9 +124,9 @@ class HeuristicVerifier(Verifier):
         """
         long_term = cstate.get_bank("long_term")
         usage = cstate.metadata("long_term", "usage")
-        novelty = HeuristicVerifier.novelty(candidate.tokens, long_term, usage)
-        recency = HeuristicVerifier.recency(candidate.importance)
-        usage_score = HeuristicVerifier.usage_signal(candidate.importance)
+        novelty = Heuristic.novelty(candidate.tokens, long_term, usage)
+        recency = Heuristic.recency(candidate.importance)
+        usage_score = Heuristic.usage_signal(candidate.importance)
         confidence = candidate.confidence
         score = (
             self.confidence_weight * confidence
@@ -140,8 +139,8 @@ class HeuristicVerifier(Verifier):
 
     def update_signal(
         self,
-        candidate: MemoryUpdate,
-        cstate: PersistentCognitiveState,
+        candidate: tiers.Update,
+        cstate: cognitive.State,
         was_used: bool,
     ) -> Tensor:
         """Heuristic verifier does not learn; returns a zero tensor."""
@@ -196,7 +195,7 @@ class HeuristicVerifier(Verifier):
         return 0.5 + 0.5 * sig
 
 
-class LearnedVerifier(Verifier):
+class Learned(Verifier):
     """MLP-based verifier trained on the retention signal.
 
     The model is a 2-layer MLP that takes the concatenation of the
@@ -230,7 +229,7 @@ class LearnedVerifier(Verifier):
         )
         self.summarizer = nn.Linear(hidden_size, cstate_summary_size)
 
-    def pool_candidate(self, candidate: MemoryUpdate) -> Tensor:
+    def pool_candidate(self, candidate: tiers.Update) -> Tensor:
         """Mean-pool the candidate's tokens into a single vector.
 
         Args:
@@ -241,7 +240,7 @@ class LearnedVerifier(Verifier):
         """
         return candidate.tokens.mean(dim=0)
 
-    def summarize_cstate(self, cstate: PersistentCognitiveState) -> Tensor:
+    def summarize_cstate(self, cstate: cognitive.State) -> Tensor:
         """Compute a PCS summary vector.
 
         Args:
@@ -257,8 +256,8 @@ class LearnedVerifier(Verifier):
 
     def verify(
         self,
-        candidate: MemoryUpdate,
-        cstate: PersistentCognitiveState,
+        candidate: tiers.Update,
+        cstate: cognitive.State,
     ) -> tuple[float, bool]:
         """Score and decide using the MLP head.
 
@@ -278,8 +277,8 @@ class LearnedVerifier(Verifier):
 
     def update_signal(
         self,
-        candidate: MemoryUpdate,
-        cstate: PersistentCognitiveState,
+        candidate: tiers.Update,
+        cstate: cognitive.State,
         was_used: bool,
     ) -> Tensor:
         """Compute BCE loss against the retention signal.
@@ -302,7 +301,7 @@ class LearnedVerifier(Verifier):
 
 
 __all__ = [
-    "HeuristicVerifier",
-    "LearnedVerifier",
+    "Heuristic",
+    "Learned",
     "Verifier",
 ]
