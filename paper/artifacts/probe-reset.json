@@ -1,0 +1,8 @@
+{
+  "windows": 200,
+  "kept_state_bits": 6.385018264904185,
+  "reset_state_bits": 6.398952987207694,
+  "reset_minus_kept_bits": 0.013934634968568315,
+  "low_bits": 0.012673255121694605,
+  "high_bits": 0.0152379760965658
+}
