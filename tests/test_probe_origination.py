@@ -6,14 +6,15 @@ import pytest
 import torch
 from scripts.probe_origination import build_probe_inputs, descent_sweep
 
-from ucsa.models.ucsa import UCSA, UCSAConfig
+from ucsa.models import architecture
+from ucsa.models.architecture import UCSA
 
 
 def tiny_model() -> UCSA:
     """Return a tiny UCSA with the origination path active."""
     torch.manual_seed(0)
     return UCSA(
-        UCSAConfig(
+        architecture.Config(
             hidden_size=32,
             num_layers=2,
             vocab_size=100,
