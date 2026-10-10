@@ -65,6 +65,11 @@ class RecurrentConfig:
       importance, so memory can be shrunk at inference with graceful
       degradation. 0 disables it.
     min_slots: Smallest prefix sampled by `slot_dropout`.
+    surprise_gate: Write more when the state failed to predict the chunk.
+      The JEPA predictor's error for a chunk (its surprise) shifts the write
+      gate through a learned per-slot gain that starts at zero, so the model
+      stores the residual that prediction left unexplained. Needs
+      `jepa_weight > 0`.
     jepa_weight: Weight of the causal JEPA loss. 0 disables it.
       ema_momentum: Momentum of the JEPA target encoder.
       loss_chunk: Tokens per slice of the checkpointed LM-head loss, so the
@@ -97,6 +102,7 @@ class RecurrentConfig:
     use_state: bool = True
     slot_dropout: float = 0.0
     min_slots: int = 4
+    surprise_gate: bool = False
     jepa_weight: float = 0.1
     ema_momentum: float = 0.996
     loss_chunk: int = 1024
@@ -143,6 +149,10 @@ class RecurrentConfig:
                 f"min_slots must be in [1, {self.num_slots}]",
             ),
             (self.jepa_weight >= 0.0, "jepa_weight must be >= 0"),
+            (
+                not self.surprise_gate or self.jepa_weight > 0,
+                "surprise_gate needs jepa_weight > 0",
+            ),
             (0.0 < self.ema_momentum < 1.0, "ema_momentum must be in (0, 1)"),
             (self.loss_chunk >= 0, "loss_chunk must be >= 0"),
             (0.0 <= self.dropout < 1.0, "dropout must be in [0, 1)"),
@@ -403,24 +413,36 @@ class StateUpdater(nn.Module):
             [torch.full((n,), bias.get(name, 0.0)) for name, n in config.banks]
         )
         self.slot_bias = nn.Parameter(slot_bias.unsqueeze(-1))
+        # Per-slot response to surprise; zero keeps the baseline behaviour.
+        self.surprise_gain = (
+            nn.Parameter(torch.zeros(config.num_slots, 1))
+            if config.surprise_gate
+            else None
+        )
 
     def forward(
-        self, state: torch.Tensor, chunk: torch.Tensor
+        self,
+        state: torch.Tensor,
+        chunk: torch.Tensor,
+        surprise: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Writes one chunk summary into the state.
 
         Args:
           state: Current state of shape `(batch, slots, dim)`.
           chunk: Chunk summary of shape `(batch, tokens, dim)`.
+          surprise: Per-example surprise of shape `(batch,)`, used when the
+            updater has a surprise gain.
 
         Returns:
           The new state and the mean write gate per slot, `(batch, slots)`.
         """
         read = self.read(self.read_norm(state), chunk)
         candidate = self.out_norm(state + read)
-        gate = torch.sigmoid(
-            self.gate(torch.cat([state, read], -1)) + self.slot_bias
-        )
+        logits = self.gate(torch.cat([state, read], -1)) + self.slot_bias
+        if self.surprise_gain is not None and surprise is not None:
+            logits = logits + self.surprise_gain * surprise.view(-1, 1, 1)
+        gate = torch.sigmoid(logits)
         if self.top_k:
             top = gate.mean(-1).topk(self.top_k, dim=-1).indices
             keep = torch.zeros_like(gate[..., :1]).scatter_(
@@ -499,31 +521,68 @@ class RecurrentUCSA(nn.Module):
             x = block(x, state, self.cos, self.sin)
         return self.final_norm(x)
 
+    def __surprise(
+        self, state: torch.Tensor, pooled: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Predicts a chunk's latent from the state and scores the miss.
+
+        Args:
+          state: State before the chunk, `(batch, slots, dim)`.
+          pooled: Mean token embedding of the chunk, `(batch, dim)`.
+
+        Returns:
+          The prediction `(batch, dim)` and the surprise `(batch,)`, which is
+          `1 - cosine(prediction, target)` and carries no gradient.
+        """
+        pred = self.predictor(state.mean(1))
+        with torch.no_grad():
+            target = self.target_summary(pooled)
+            surprise = 1.0 - functional.cosine_similarity(
+                pred.detach().float(), target.float(), dim=-1
+            )
+        return pred, surprise
+
     def __scan(
-        self, state: torch.Tensor, summaries: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        self,
+        state: torch.Tensor,
+        summaries: torch.Tensor,
+        pooled: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
         """Writes chunk summaries into the state one chunk at a time.
 
         Args:
           state: Initial state of shape `(batch, slots, dim)`.
           summaries: Chunk summaries of shape `(batch, chunks, tokens, dim)`.
+          pooled: Mean token embedding per chunk, `(batch, chunks, dim)`;
+            when given, the JEPA prediction (and the surprise that gates the
+            write) is computed for every chunk.
 
         Returns:
-          `(reads, final, writes)` where `reads[:, t]` is `S_{t-1}`, the state
-          chunk `t` reads, `final` is the last state and `writes` holds the mean
-          write gate per chunk and slot.
+          `(reads, final, writes, preds)` where `reads[:, t]` is `S_{t-1}`,
+          the state chunk `t` reads, `final` is the last state, `writes` holds
+          the mean write gate per chunk and slot, and `preds` is the JEPA
+          prediction per chunk (None without `pooled`).
         """
-        reads, writes = [], []
+        reads, writes, preds = [], [], []
         for t in range(summaries.shape[1]):
             reads.append(state)
-            state, write = self.updater(state, summaries[:, t])
+            surprise = None
+            if pooled is not None:
+                pred, surprise = self.__surprise(state, pooled[:, t])
+                preds.append(pred)
+            state, write = self.updater(state, summaries[:, t], surprise)
             writes.append(write)
             if (
                 self.config.bptt_chunks
                 and (t + 1) % self.config.bptt_chunks == 0
             ):
                 state = state.detach()
-        return torch.stack(reads, 1), state, torch.stack(writes, 1)
+        return (
+            torch.stack(reads, 1),
+            state,
+            torch.stack(writes, 1),
+            torch.stack(preds, 1) if preds else None,
+        )
 
     def hidden_states(
         self,
@@ -560,14 +619,20 @@ class RecurrentUCSA(nn.Module):
         final = start
         if config.use_state:
             summaries = self.__encode(x).view(batch, chunks, size, -1)
-            reads, final, writes = self.__scan(start, summaries)
+            predictive = config.surprise_gate or (
+                config.jepa_weight > 0 and chunks > 1
+            )
+            pooled = (
+                x.view(batch, chunks, size, -1).mean(2) if predictive else None
+            )
+            reads, final, writes, preds = self.__scan(start, summaries, pooled)
             read = reads.reshape(batch * chunks, *reads.shape[2:])
             read = read[:, : self.__slots_to_read(active_slots)]
             if config.jepa_weight > 0 and chunks > 1:
-                preds = self.predictor(reads.mean(2))
                 with torch.no_grad():
-                    pooled = x.view(batch, chunks, size, -1).mean(2)
                     targets = self.target_summary(pooled)
+            else:
+                preds = None
         else:
             read = (
                 start.unsqueeze(1)
@@ -711,8 +776,13 @@ class RecurrentUCSA(nn.Module):
             while current.shape[1] > size:
                 head, current = current[:, :size], current[:, size:]
                 if self.config.use_state:
-                    summary = self.__encode(self.embed(head))
-                    state, _ = self.updater(state, summary)
+                    embedded = self.embed(head)
+                    surprise = None
+                    if self.config.surprise_gate:
+                        _, surprise = self.__surprise(state, embedded.mean(1))
+                    state, _ = self.updater(
+                        state, self.__encode(embedded), surprise
+                    )
             read = state if self.config.use_state else self.initial_state(batch)
             hidden = self.__decode(self.embed(current), read)
             logits = hidden[:, -1] @ self.embed.weight.T
