@@ -281,11 +281,15 @@ class Learned(Verifier):
         Returns:
             Tuple ``(score, accepted)``.
         """
+        if candidate.tokens.shape[0] == 0:
+            return 0.0, False  # nothing to store: never accept
         with torch.no_grad():
             pooled = self.pool_candidate(candidate)
             summary = self.summarize_cstate(cstate)
             logit = self.mlp(torch.cat([pooled, summary], dim=-1))
             score = float(torch.sigmoid(logit).item())
+        if not math.isfinite(score):  # corrupted state: fail closed
+            return 0.0, False
         return score, score >= self.acceptance_threshold
 
     def update_signal(
