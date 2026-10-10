@@ -108,7 +108,7 @@ training run, the smoke command above is the path. See
 
 ```
 ucsa/
-├── configs/         Hydra/OmegaConf YAML configuration
+├── config.yaml      Hydra/OmegaConf configuration (one file)
 ├── models/          PCS, operators, memory, heads, losses, top-level UCSA
 ├── training/        trainer, dataset, curriculum, metrics,
 │                    evaluation, EMA, Muon optimiser, eval harness
@@ -169,7 +169,7 @@ separation is what makes per-slot attribution well posed.
 
 ## Configuration
 
-All hyperparameters live in [`ucsa/configs/default.yaml`](ucsa/configs/default.yaml).
+All hyperparameters live in [`ucsa/config.yaml`](ucsa/config.yaml).
 Override on the CLI:
 
 ```bash

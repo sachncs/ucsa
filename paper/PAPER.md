@@ -383,7 +383,7 @@ artifacts land under ``runs/``.
 
 ## Appendix B. Hyperparameters
 
-See ``ucsa/configs/default.yaml`` for the full list and
+See ``ucsa/config.yaml`` for the full list and
 ``scripts/train.py`` defaults.
 
 ## Appendix C. PCS Retention Score

@@ -200,7 +200,7 @@ specify; the rest fall back to the standard sizes.
 Every ablation flag on `scripts/train.py` is a one-line override
 that zeroes out one loss weight. If you want to design a new one
 (for example, disabling only the JEPA chain's Gaussian
-regulariser), edit `ucsa/configs/default.yaml` and add a new
+regulariser), edit `ucsa/config.yaml` and add a new
 argument to the argparse block.
 
 ```python

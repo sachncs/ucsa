@@ -85,7 +85,7 @@ previous artefacts and writes the next.
 
 ## Configuration
 
-Every hyperparameter lives in `ucsa/configs/default.yaml`. Override
+Every hyperparameter lives in `ucsa/config.yaml`. Override
 on the CLI:
 
 ```bash

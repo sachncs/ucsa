@@ -168,7 +168,7 @@ Reviewers look for:
 
 ```
 ucsa/
-├── configs/         Hydra / OmegaConf YAML configuration
+├── config.yaml      Hydra / OmegaConf configuration (one file)
 ├── models/          PCS, operators, memory, heads, losses, top-level UCSA
 ├── training/        trainer, dataset, curriculum, metrics,
 │                    evaluation, EMA, Muon optimiser, eval harness
