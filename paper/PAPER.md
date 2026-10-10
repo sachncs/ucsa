@@ -311,6 +311,11 @@ failure was found, and each has a regression test.
   over a matched stateless model (Section 5), with one seed per arm. Training
   windows are 1,024 tokens; a constant-size state could matter at much longer
   contexts or larger scale, which we did not test.
+  We also tried to force the state to store a planted span on a synthetic task.
+  At 4,000 steps the state models stayed at random-token perplexity, but so did
+  a wide-window control until its last evaluation, so the test was too short to
+  say whether the mechanism can store anything; the longer runs were stopped
+  and are not reported. The mechanism is therefore unverified, not refuted.
 * **Noise.** Training is not bitwise reproducible on this hardware. The noise
   floor was measured from repeated same-configuration runs and is about 0.015
   bits/token per run. Conclusions near that size are not claimed.
