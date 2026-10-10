@@ -9,7 +9,7 @@ cognitive state:
     C_{t+1} = F(C_t, O_t)
 
 The reference implementation is the
-:class:`ucsa.models.transformer_operator.TransformerOperator`. Future
+:class:`ucsa.models.transformer.Operator`. Future
 implementations (Mamba, RWKV, Hyena, SSMs) plug in by satisfying this
 interface. The reasoning loop, memory pipeline, and projection heads all
 work against the interface and require no changes when the operator is
@@ -24,10 +24,10 @@ from typing import TYPE_CHECKING
 from torch import Tensor, nn
 
 if TYPE_CHECKING:
-    from ucsa.models.state import PersistentCognitiveState
+    from ucsa.models import cognitive
 
 
-class StateTransitionOperator(nn.Module, abc.ABC):
+class Operator(nn.Module, abc.ABC):
     """Abstract base class for UCSA state transition operators.
 
     Subclasses implement :meth:`forward`, which receives the current PCS and
@@ -46,9 +46,9 @@ class StateTransitionOperator(nn.Module, abc.ABC):
     @abc.abstractmethod
     def forward(
         self,
-        cstate: PersistentCognitiveState,
+        cstate: cognitive.State,
         observation: Tensor,
-    ) -> PersistentCognitiveState:
+    ) -> cognitive.State:
         """Compute :math:`C_{t+1} = F(C_t, O_t)`.
 
         Args:
@@ -57,7 +57,7 @@ class StateTransitionOperator(nn.Module, abc.ABC):
                 ``(batch, observation_tokens, hidden_size)``.
 
         Returns:
-            A new :class:`PersistentCognitiveState` representing the
+            A new :class:`cognitive.State` representing the
             updated cognitive state. Implementations may mutate ``cstate``
             in place when the surrounding pipeline allows, but the default
             contract is to return a fresh state.
@@ -85,4 +85,4 @@ class StateTransitionOperator(nn.Module, abc.ABC):
         """Return the operator's registration name."""
 
 
-__all__ = ["StateTransitionOperator"]
+__all__ = ["Operator"]
