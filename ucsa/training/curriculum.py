@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 
-class CurriculumStage(Enum):
+class Stage(Enum):
     """Enumeration of curriculum stages."""
 
     LANGUAGE_ONLY = 1
@@ -32,7 +32,7 @@ class CurriculumStage(Enum):
 
 
 @dataclass(frozen=True)
-class CurriculumSchedule:
+class Schedule:
     """Step boundaries for each stage.
 
     Attributes:
@@ -64,7 +64,7 @@ class CurriculumSchedule:
 
 
 @dataclass
-class CurriculumState:
+class State:
     """Mutable state tracked by the curriculum.
 
     Attributes:
@@ -74,10 +74,10 @@ class CurriculumState:
         history: List of ``(step, stage)`` transitions.
     """
 
-    current_stage: CurriculumStage = CurriculumStage.LANGUAGE_ONLY
+    current_stage: Stage = Stage.LANGUAGE_ONLY
     stage_step: int = 0
     total_step: int = 0
-    history: list[tuple[int, CurriculumStage]] = field(default_factory=list)
+    history: list[tuple[int, Stage]] = field(default_factory=list)
 
 
 class Curriculum:
@@ -85,17 +85,17 @@ class Curriculum:
 
     def __init__(
         self,
-        schedule: CurriculumSchedule | None = None,
+        schedule: Schedule | None = None,
     ) -> None:
         """Initialise the curriculum.
 
         Args:
-            schedule: Optional :class:`CurriculumSchedule`.
+            schedule: Optional :class:`Schedule`.
         """
-        self.schedule = schedule or CurriculumSchedule()
-        self.state = CurriculumState()
+        self.schedule = schedule or Schedule()
+        self.state = State()
 
-    def step(self) -> CurriculumStage:
+    def step(self) -> Stage:
         """Advance the curriculum by one step.
 
         Returns:
@@ -112,7 +112,7 @@ class Curriculum:
             self.state.stage_step = 0
         return new_stage
 
-    def get_stage(self, total_step: int) -> CurriculumStage:
+    def get_stage(self, total_step: int) -> Stage:
         """Return the stage for a given global step.
 
         Args:
@@ -122,16 +122,14 @@ class Curriculum:
             The stage active at ``total_step``.
         """
         if total_step < self.schedule.stage_1_end:
-            return CurriculumStage.LANGUAGE_ONLY
+            return Stage.LANGUAGE_ONLY
         if total_step < self.schedule.stage_2_end:
-            return CurriculumStage.LANGUAGE_JEPA
+            return Stage.LANGUAGE_JEPA
         if total_step < self.schedule.stage_3_end:
-            return CurriculumStage.LANGUAGE_JEPA_MEMORY
-        return CurriculumStage.JOINT
+            return Stage.LANGUAGE_JEPA_MEMORY
+        return Stage.JOINT
 
-    def active_components(
-        self, stage: CurriculumStage | None = None
-    ) -> set[str]:
+    def active_components(self, stage: Stage | None = None) -> set[str]:
         """Return the set of loss component names active at ``stage``.
 
         Args:
@@ -143,18 +141,18 @@ class Curriculum:
         """
         if stage is None:
             stage = self.state.current_stage
-        if stage is CurriculumStage.LANGUAGE_ONLY:
+        if stage is Stage.LANGUAGE_ONLY:
             return {"ar"}
-        if stage is CurriculumStage.LANGUAGE_JEPA:
+        if stage is Stage.LANGUAGE_JEPA:
             return {"ar", "jepa"}
-        if stage is CurriculumStage.LANGUAGE_JEPA_MEMORY:
+        if stage is Stage.LANGUAGE_JEPA_MEMORY:
             return {"ar", "jepa", "memory"}
         return {"ar", "jepa", "memory", "router"}
 
 
 __all__ = [
     "Curriculum",
-    "CurriculumSchedule",
-    "CurriculumStage",
-    "CurriculumState",
+    "Schedule",
+    "Stage",
+    "State",
 ]
