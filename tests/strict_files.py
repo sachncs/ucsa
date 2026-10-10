@@ -27,6 +27,7 @@ STRICT_FILES: tuple[str, ...] = (
     "scripts/tune.py",
     "scripts/ablate.py",
     "scripts/ladder.py",
+    "scripts/probe_state.py",
     "scripts/dry_run.py",
     "scripts/compress.py",
     "scripts/profile_r.py",
