@@ -16,11 +16,15 @@ OUT="${OUT:-ckpts/r-small}"
 CONTROL="${CONTROL:-ckpts/r-nostate}"
 export HF_HUB_DISABLE_TELEMETRY=1
 
+# Keep a laptop awake for the length of a multi-hour run (macOS only).
+AWAKE=""
+command -v caffeinate >/dev/null 2>&1 && AWAKE="caffeinate -i"
+
 [ -f data/train.bin ] || "$PY" scripts/prepare_data.py --out data
 
 "$PY" scripts/dry_run.py --preset small --out-json runs/dry-run.json
 
-"$PY" scripts/train_r.py --preset small --out-dir "$OUT" --resume \
+$AWAKE "$PY" scripts/train_r.py --preset small --out-dir "$OUT" --resume \
     --set "train.steps=$STEPS"
 cp "$OUT/record.json" runs/final-record.json
 
