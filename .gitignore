@@ -53,3 +53,7 @@ site/dist
 site/node_modules
 site/.vite
 site/tsconfig.tsbuildinfo
+
+# Tokenised shards and archived checkpoints (large, regenerable)
+data/
+ckpts-*/
