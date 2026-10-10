@@ -43,7 +43,7 @@ from typing import TYPE_CHECKING, Any
 import torch
 from torch import Tensor
 
-from ucsa.models.state import INTENT_BANK
+from ucsa.models.cognitive import INTENT_BANK
 from ucsa.training.metrics import (
     intent_gate_entropy,
     intent_gate_mutual_info,
@@ -53,7 +53,7 @@ from ucsa.training.metrics import (
 )
 
 if TYPE_CHECKING:
-    from ucsa.models.ucsa import UCSA
+    from ucsa.models.architecture import UCSA
 
 
 @dataclass
@@ -222,7 +222,7 @@ def action_logits(model: UCSA, inputs: Tensor) -> Tensor:
     """Run the model and return the emitted action logits.
 
     Args:
-        model: A :class:`~ucsa.models.ucsa.UCSA`-like model whose forward
+        model: A :class:`~ucsa.models.architecture.UCSA`-like model whose forward
             returns a dict with a ``language`` entry.
         inputs: Token ids of shape ``(batch, seq)``.
 
