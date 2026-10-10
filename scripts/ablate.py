@@ -62,7 +62,7 @@ def run_arm(
         ],
     )
     model_config, train_config = train_r.build_configs(ns)
-    model = recurrent.RecurrentUCSA(model_config)
+    model = recurrent.Model(model_config)
     train, val = train_r.batch_factories(train_config, args.data)
     started = time.time()
     record = engine.fit(
