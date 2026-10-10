@@ -15,7 +15,7 @@
 - :class:`~ucsa.models.memory.Memory` -- hierarchical memory facade.
 - :class:`~ucsa.models.memory_service.MemoryService` -- background
   memory worker.
-- :class:`~ucsa.models.graph_service.GraphService` -- background graph
+- :class:`~ucsa.models.graph.Graph` -- background graph
   memory.
 
 The forward pass is intentionally minimal: text in, language logits
@@ -32,7 +32,7 @@ from typing import Any
 import torch
 from torch import Tensor, nn
 
-from ucsa.models.graph_service import GraphService
+from ucsa.models import graph as concept_graph
 from ucsa.models.head_config import (
     build_head_config_from_cfg,
 )
@@ -146,7 +146,7 @@ class UCSA(nn.Module):
         heads: ProjectionHeads | None = None,
         verifier: Verifier | None = None,
         memory_service: MemoryService | None = None,
-        graph_service: GraphService | None = None,
+        graph: concept_graph.Graph | None = None,
     ) -> None:
         """Initialise the UCSA model.
 
@@ -157,7 +157,7 @@ class UCSA(nn.Module):
             heads: Optional pre-built projection heads.
             verifier: Optional verifier for memory.
             memory_service: Optional pre-built memory service.
-            graph_service: Optional pre-built graph service.
+            graph: Optional pre-built concept graph.
         """
         super().__init__()
         if config is None:
@@ -218,7 +218,7 @@ class UCSA(nn.Module):
         self.memory_service = memory_service or MemoryService(
             self.memory, self.verifier
         )
-        self.graph_service = graph_service or GraphService(
+        self.graph = graph or concept_graph.Graph(
             num_concepts=config.num_concepts
         )
         # ``memory_baseline`` is a non-trainable buffer that the trainer
@@ -502,9 +502,7 @@ def build_ucsa_from_hydra(overrides: list[str] | None = None) -> UCSA:
         raise RuntimeError(
             "Hydra is required for build_ucsa_from_hydra."
         ) from exc
-    config_dir = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..")
-    )
+    config_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     with initialize_config_dir(version_base=None, config_dir=config_dir):
         cfg = compose(config_name="config", overrides=overrides or [])
     return build_ucsa(cfg)
