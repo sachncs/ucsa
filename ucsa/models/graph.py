@@ -24,7 +24,7 @@ from collections.abc import Callable
 import torch
 from torch.nn import functional
 
-from ucsa.models import state as pcs_state
+from ucsa.models import cognitive as pcs_state
 
 
 class Metric(abc.ABC):
@@ -360,7 +360,7 @@ class Graph:
         )
         self.memory = Memory()
 
-    def build(self, state: pcs_state.PersistentCognitiveState) -> Memory:
+    def build(self, state: pcs_state.State) -> Memory:
         """Builds the graph from the used slots of the long-term bank.
 
         Args:
@@ -484,7 +484,7 @@ class Graph:
 
     def inject(
         self,
-        state: pcs_state.PersistentCognitiveState,
+        state: pcs_state.State,
         query: torch.Tensor,
         top_k: int = 4,
     ) -> int:
