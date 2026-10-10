@@ -206,13 +206,18 @@ class ModelPredictor:
         self.model = model.cpu().eval()
         self.size = model.config.chunk_size
         self.state = self.model.initial_state(1)
+        self.previous = None  # cache of the chunk before the current one
+        self.cache = None  # cache of the current chunk, filled by `logits`
         self.current = [start_token]
 
     @torch.no_grad()
     def logits(self) -> torch.Tensor:
         """Returns next-token logits given everything consumed so far."""
         current = torch.tensor([self.current], dtype=torch.long)
-        return self.model.next_logits(self.state, current)[0]
+        logits, self.cache = self.model.next_logits(
+            self.state, current, self.previous
+        )
+        return logits[0]
 
     @torch.no_grad()
     def update(self, token: int) -> None:
@@ -221,6 +226,7 @@ class ModelPredictor:
         if len(self.current) > self.size:
             chunk = torch.tensor([self.current[: self.size]], dtype=torch.long)
             self.state = self.model.advance(self.state, chunk)
+            self.previous = self.cache  # computed when the chunk was full
             self.current = self.current[self.size :]
 
 
