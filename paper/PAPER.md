@@ -1,410 +1,324 @@
-# UCSA — Paper Draft
+# UCSA-R: Auditing and Rebuilding a Persistent-State Language Model
 
-> Working title: **"UCSA: Persistent Cognitive State Anchors a
-> Multi-Step JEPA Chain Across Reasoning Iterations"**
-> Target venue: ICML / NeurIPS (efficient inference track or
-> architecture track).
->
-> This draft is under active development. Numbers in tables are
-> placeholders until the ablation suite finishes running; the
-> paper-promised experiments are wired into ``scripts/eval.py`` and
-> ``scripts/train_baseline.py``.
+## Abstract
 
----
-
-# Abstract
-
-We study the design question: *what happens if a foundation model's
-*entire* computation orbits a single, persistent, differentiable
-cognitive state (PCS)*, with everything else — language modelling,
-planning, tool use, predictive world modelling — cast as projections
-of that state. We pair this architectural commitment with a novel
-auxiliary objective — **multi-step JEPA prediction chained through
-the reasoning loop's intermediates**, with a hard-EMA target encoder
-tracking latents across the chain — and an input-reconstruction
-head that enforces a capacity bottleneck on the latent space.
-
-Our contributions:
-
-1. **PCS as the central architectural primitive.** Seven token banks
-   (six stream banks plus a held-out ``intent`` bank for endogenous
-   origination) with explicit roles, retention scoring, and a
-   recycle policy.
-2. **Multi-step JEPA prediction across reasoning iterations** with
-   EMA-tracked targets. Lightweight, no multi-term loss juggling,
-   no stop-grad gymnastics.
-3. **Endogenous origination.** An *intent* bank whose state
-   explicitly drives the next iteration's input via a sparse
-   top-$k$ gate over intent slots, plus inference-time gradient
-   descent on the intent bank with the multi-step JEPA chain and the
-   learned verifier as alternative objectives. The headline
-   contribution is not a quality gain on a benchmark but a
-   localisation claim: 2–4 of 16 intent slots carry the gradient for
-   any emitted action, every attributed slot moves the action in
-   the predicted direction, and no unattributed slot does (§5.1).
-4. **A matched-compute evaluation suite** that brings standard LLM
-   benchmarks (HellaSwag, ARC, PIQA, WinoGrande) to UCSA-scale
-   training and reports numbers against a from-scratch vanilla
-   Transformer trained on the same data for the same steps.
+UCSA routes all computation through one persistent, multi-bank state. We
+audited it and found that its language head could read the tokens it was scored
+on: held-out perplexity was 220 with targets visible and 13,611 with them
+hidden. We rebuilt it as UCSA-R, a causal chunked model whose logits are exact
+next-token predictions, and evaluate it by compression (bits per byte, with a
+lossless arithmetic coder as a causality proof) and on the full splits of five
+benchmarks beside published numbers. A 19M-parameter UCSA-R trained for 12,000
+steps (98M tokens, 2.8 hours on one laptop GPU) reaches 1.39 bits per byte on
+held-out FineWeb-Edu and compresses text to 1.48 bits per byte, against 3.5 for
+LZMA. Benchmark accuracy is near chance and below published 130M-160M models
+trained on 300B tokens. Our central negative result: against a matched model
+with no persistent state, trained identically for 12,000 steps, the state gives
+no measurable gain (+0.008 bits/token, inside a 0.015 noise floor). The
+contributions that hold are the leak audit, the windowed causal design, the
+evaluation and model-selection methodology, and the engineering.
 
 ## 1. Introduction
 
-The dominant 2024-2026 line of LLM research has been stacking improvements onto the Transformer decoder: better attention variants (MLA, GQA, sliding-window), better routing (DeepSeekMoE), better context compression (CSA/HCA), and so on. The structural commitments — there's a residual stream, an attention mechanism, and a wide MLP — stay untouched.
+A language model assigns a probability to every next token, and a probability
+is a code length. Perplexity is bits per token; with the tokenizer divided out
+it is bits per byte, the size of the text under the model's own compressor.
+This paper treats that equivalence as a working tool, not a slogan: it gives us
+a tokenizer-independent metric that stays informative when benchmark accuracy
+sits at chance, a lossless compressor whose round trip is an operational test
+of causality, and a way to ask what a persistent memory is worth in bits.
 
-We invert the framing. UCSA places a single, persistent, differentiable **cognitive state** at the centre of every forward pass and operates on it with a configurable transition operator. The same state feeds a language-model head, a JEPA predictive head, an input-reconstruction head, and a memory service that ships new long-term content. The Transformer is just the current implementation of the operator — the abstraction accommodates Mamba, RWKV, or other state-space variants without changing the cognitive architecture.
+UCSA's original architecture routes every computation through one persistent,
+multi-bank cognitive state. Auditing it for this work turned up a flaw that
+invalidates its earlier evaluation. We report that flaw, fix it by redesign,
+and then do the work properly: a causal windowed model that keeps the state,
+evaluation against published numbers on the full benchmark splits, and a
+statistical procedure for choosing designs that survives the jump from a
+short experiment to the full run.
 
-The training innovation is to chain JEPA prediction across the operator's iterations and to stabilise the prediction with a hard-EMA target encoder whose targets span the same chain. The intuition: rather than asking the model to predict a single next latent, ask it to predict $k$ successive latents for $k = N_\text{iter} - 1$ where each prediction is anchored against an EMA-tracked latent.
+**Contributions.**
 
-## 2. Related Work
+1. **A measured defect in the original model.** Its language head reads the
+   same sequence it is scored on and can copy the target token: held-out
+   perplexity was 220 with the targets visible and 13,611 with them hidden
+   (Section 2).
+2. **UCSA-R**, a causal language model with a persistent multi-bank state and
+   sliding-window attention over `[state | previous chunk | current chunk]`.
+   Every logit is an exact next-token prediction. Replacing cross-attention by
+   the window removed 7.6% of the parameters and lowered perplexity from 576 to
+   463 at equal speed (Section 3).
+3. **Compression as verification.** A lossless arithmetic coder driven by the
+   model round-trips exactly across chunk boundaries; a model that peeks at
+   the future compresses spectacularly and cannot be decoded. Bits per byte,
+   with zlib and LZMA as anchors, replaces perplexity as the headline metric
+   (Section 4.2).
+4. **A procedure that carries short experiments to the full run**: paired
+   statistics on identical windows, a measured run-to-run noise floor, and
+   learning-curve forecasts with crossover detection (Section 4.3). It showed
+   that an ungated state read is harmful early in training, and that a
+   zero-initialised gate removes that cost; the full run then found the state
+   itself gives no measurable gain (Section 5).
+5. **Engineering that makes the numbers trustworthy**: one float type enforced
+   by a static and a runtime audit, an auditor that lives in a dry run and never
+   in training, atomic data shards, resumable training with a single host
+   synchronisation per step, and tests organised by guarantee (Section 6).
 
-- **Joint-Embedding Predictive Architectures (I-JEPA / LeWM)**: JEPA
-  as the auxiliary loss; LeWM §3.4 collapses I-JEPA's multi-term
-  loss into one SmoothL1 + Gaussian regulariser. UCSA uses the same
-  LeWM-style loss and extends it to a multi-step prediction chain.
-- **Hard-EMA target encoders (DINO, I-JEPA, LeWM)**: standard
-  anti-collapse machinery. We replicate the technique inside
-  UCSA and use it to align the multi-step chain.
-- **Persistent state in LLMs (Mamba, RWKV, Hyena, Hyena Hierarchy)**:
-  recurrent state as an alternative to attention. UCSA keeps the
-  Transformer operator but elevates state to *first-class* and
-  retention-aware.
-- **KV-cache compression (MLA, GQA, CSA/HCA)**: orthogonal.
-  Operates on the encoder side; UCSA operates on the JEPA loss
-  side.
-- **Mixture of Experts (DeepSeekMoE, Stable LatentMoE)**: orthogonally
-  applicable to the operator's FFN.
+## 2. A flaw in the original architecture
+
+The original UCSA writes its whole input into a cognitive state and decodes the
+logits from 64 working-bank slots that have read that state. The language-model
+target for slot *i* is a token that is also in the input, so the slot can
+learn to copy it. On a checkpoint trained for 1,500 steps:
+
+| input to the model | held-out perplexity |
+|---|---|
+| target tokens visible | 220 |
+| target tokens removed from the input | 13,611 |
+
+The first number looks like a strong language model; the second is near the
+unigram level. The two evaluation failures that surrounded it (a script that
+scored a randomly initialised model because its configuration disagreed with
+the checkpoint, and a benchmark scorer that placed the answer choice in the
+model's input) would each have produced optimistic numbers on their own. All
+three are fixed and covered by regression tests (see the changelog). Nothing
+in the original paper's language-modelling or benchmark numbers should be
+relied on.
 
 ## 3. Method
 
-### 3.1. Persistent Cognitive State (PCS)
+### 3.1 UCSA-R
 
-Seven token banks with explicit roles (numbers default). The
-``intent`` bank was added in Phase 11 (endogenous origination) and
-is held out of the operator's attention stream so that the
-origination generator is the only path from ``intent`` to
-behaviour. See §3.6 for the localisation argument.
+A sequence is cut into chunks of 128 tokens. A shallow bidirectional encoder
+summarises each chunk, and a gated update writes the summary into a state of
+32 slots (working, long-term and intent banks with their own retention
+biases). The decoder runs over all chunks as one batch; each token attends over
+the state, the previous chunk and the current chunk with one sliding-window
+attention, causal inside the current chunk. Chunk *t* reads the state written
+from chunks before *t* only. The state has constant size, so the same weights
+run over streams of any length, and generation keeps only the state, one
+chunk's cache and the current partial chunk.
 
-| Bank            | Tokens | Role                                           |
-| --------------- | -----: | ---------------------------------------------- |
-| WorkingMemory   |     64 | Scratch space, mutated each iteration.          |
-| LongTermMemory  |    128 | Accepted knowledge, retained across requests.  |
-| Goal            |     16 | Active objective.                              |
-| Episode         |     32 | Per-request context.                            |
-| Task            |     16 | Long-running task state.                        |
-| MemoryIndex     |     32 | Retrieval index, cross-attended each block.     |
-| Intent          |     16 | Origination signal, held out of the operator stream. |
+### 3.2 Why a sliding window replaces cross-attention
 
-Retention metadata drives a recycle policy: the bottom-$k$ scored
-long-term tokens are recycled when new content arrives. See
-``docs/architecture.md``.
+The first version read the state with cross-attention in every block and
+decoded each chunk with no view of the previous one. Replacing both
+cross-attention uses by sliding-window attention, with the state slots as
+always-visible memory tokens, removed the cross-attention weights (19.16M
+parameters against 20.73M), kept the speed (9.7k against 9.9k tokens/s), lowered
+perplexity at 600 steps from 576.2 to 463.2, and cut run-to-run variation about
+four-fold. Removing the window from the new design raises the loss by 0.095
+bits/token (perplexity 495), about five times the noise, so the window itself
+is responsible, not an incidental change.
 
-### 3.2. The reasoning loop
+### 3.3 A zero-initialised read gate
 
-Each forward:
+With the state read ungated, the stateful model was *worse* than the same model
+without a state (by 0.054 bits/token at 600 steps). Scaling the keys and values
+of the state slots in each block by a learned scalar that starts at zero makes
+the model begin unable to use the state, so it starts equal to the control and
+opens the gate only as far as that helps. At zero, every slot logit is a
+constant and every value vanishes, which is tested exactly. The gated model
+beats the ungated one by 0.06 to 0.09 bits/token across replicate runs.
 
-1. Inject the new observation into WorkingMemory.
-2. For $N$ iterations (default 4): $C' \leftarrow F(C, O)$ where $F$
-   is the current transition operator (a Transformer with
-   Grouped-Query Attention, RoPE, RMSNorm, optional MoE).
-3. Project WorkingMemory through the four heads (language,
-   planning, tool, input-reconstruct).
+### 3.4 What did not help
 
-### 3.3. Multi-step JEPA prediction chain
+Measured on the gated base at 600 steps against a noise floor of about
+0.015 bits/token per run (Section 4.3):
 
-The reasoning loop captures WorkingMemory after each iteration
-call as a detached clone. This gives a sequence of latents
+* The causal JEPA objective and the surprise-gated write (JEPA's prediction
+  error raising the write gate) were inside the noise (-0.027 and -0.012). The
+  JEPA target network was also found, in review, to track an online encoder that
+  receives no gradient, so its EMA was inert. JEPA is off in the final model.
+* Weight averaging made the model worse (+0.035; it lags a model that is still
+  improving fast). Filtering training documents by zlib compressibility was
+  neutral (-0.022).
+* The state itself was neutral at 600 steps (443.8 without it, 444.0 with it).
 
-$$
-z_0, z_1, \ldots, z_{N-1}
-$$
+## 4. Evaluation
 
-We frame each consecutive pair as a JEPA prediction target:
+### 4.1 Benchmarks
 
-$$
-\mathcal{L}_\text{JEPA} = \frac{1}{N-1} \sum_{k=0}^{N-2}
-    \text{SmoothL1}(z_k,\, \tilde{z}_{k+1})
-$$
+HellaSwag, ARC-Easy, ARC-Challenge, PIQA and WinoGrande are scored as in
+EleutherAI's lm-evaluation-harness: the same prompts, `acc_norm` for HellaSwag
+and ARC-Challenge, `acc` elsewhere, partial scoring for WinoGrande, and the
+full evaluation splits. A slot model never sees the answer; a causal model is
+scored on the same tokens. Results are set beside published zero-shot numbers
+for Pythia-160M, Hybrid H3-130M and Mamba-130M (Gu and Dao, 2023, Table 3), and
+beside chance. Those models saw 300 billion tokens; ours sees about 100
+million, so we report the ratio of data used and do not claim parity.
 
-where $\tilde{z}_{k+1}$ comes from a **hard-EMA target encoder**
-that tracks the live model under momentum $\mu = 0.996$. The
-per-pair loss back-propagates only through the predicted $z_k$;
-the EMA-tracked target is no-grad. In the LeWM-style variant, a
-per-pair **Gaussian regulariser** keeps each $z_k$ near
-$\mathcal{N}(0, I)$.
+### 4.2 Compression
 
-The chain is implemented in ``UCSA.forward`` (see
-``jepa_multi_step`` in the output dict) and consumed by
-``losses.JEPA.forward(multi_step_pairs=...)``.
+Bits per byte divides the model's code length by the raw bytes of the text. We
+report it with zlib and LZMA on the same bytes. The arithmetic coder is the
+integer range coder of Witten, Neal and Cleary. Its round trip is exact, the
+stored size equals the teacher-forced cross-entropy, and a decoder given only
+the past cannot reproduce a model that used the future. A compressed file
+decodes only with the software and device that wrote it, because model
+probabilities are floating point.
 
-### 3.4. Input-reconstruction capacity bottleneck
+### 4.3 Choosing designs that hold at full length
 
-A fifth projection head reads WorkingMemory and predicts
-``perception.embed_tokens(inputs)`` under a sliced-to-``seq_len``
-loss. Force-aligns the latent to retain enough information to
-recover the input — closes the collapse gap that a one-term
-SmoothL1 leaves open.
+A 600-step comparison can mislead for a 12,000-step run: rankings can flip,
+and the best learning rate usually shrinks with training length. We use three
+tools.
 
-### 3.5. Stable training
-
-- **AdamW** for baseline runs; **Muon** (orthogonalised momentum
-  SGD, Keller Jordan 2024) as the on-by-default optimiser when
-  the muon flag is set.
-- **Cosine warmup** over the first 400 steps.
-- **Hard-EMA target encoder** for the JEPA chain (momentum 0.996).
-- **TC-JEPA sparse text conditioner** (arXiv 2605.03245) at
-  scale 0.1 — top-k cross-attention from input token embeddings
-  into each predicted latent in the chain.
-- **Curriculum** gates losses by stage: language-only →
-  language+JEPA → language+JEPA+memory → joint+router.
-
-## 4. Experimental Setup
-
-| Item              | Choice                                              |
-| ----------------- | --------------------------------------------------- |
-| Corpus            | fineweb-edu ``train`` split, streamed              |
-| Tokenizer         | GPT-2 BPE (50,257 vocab)                           |
-| Sequence length   | 1024                                                |
-| Hardware          | Apple-silicon MPS (development); CUDA for paper runs |
-| Seeds             | 42 primary; secondary seeds via ``--seed``          |
-| Eval datasets     | HellaSwag, ARC-e, ARC-c, PIQA, WinoGrande (200-item subsets) |
-| Eval protocol     | Rank-by-conditional-log-likelihood (lm-eval-harness style) |
-
-### 4.1. Baselines
-
-- **Vanilla-Transformer**: from-scratch GPT-2-style (no PCS hooks,
-  no MoE, no JEPA, no Muon) trained on the same stream for the
-  same steps. Implemented in ``scripts/train_baseline.py``.
-- **Public LMs (zero-shot)**: ``gpt2`` (124M), ``gpt2-medium``
-  (355M), reported as reference numbers, not training-matched.
+1. **Paired comparison on identical windows**, with a bootstrap interval, which
+   removes window difficulty but measures only evaluation noise.
+2. **A run-to-run noise floor.** Repeating the same configuration gave
+   perplexities of 436.0, 444.0 and 444.3: training on this GPU is not bitwise
+   deterministic, and the standard deviation of a run is about 0.015
+   bits/token. A gap must exceed twice that to be called real.
+3. **Learning-curve forecasts.** Each candidate is trained for 150, 300, 600
+   and 1,200 steps, each with its own annealed schedule; `L(t) = floor +
+   A t^-alpha` is fitted and extrapolated to 12,000 steps with an interval
+   driven by the noise floor. Curves that cross before 12,000 steps are
+   flagged, and a candidate is called better or worse only when the interval of
+   the forecast gap excludes zero.
 
 ## 5. Results
 
-Tables should include:
-- **Table 1**: matched-compute comparison vs Vanilla-Transformer
-  on fineweb-edu val PPL and downstream accuracy.
-- **Table 2**: ablation — full UCSA vs UCSA without JEPA chain,
-  without EMA, without input-reconstruction, without
-  text-conditioner.
-- **Table 3**: scaling — UCSA at 63M, 130M, 350M params
-  vs vanilla-Transformer at the same three sizes.
-- **Table 4**: memory-bank probing — what does each bank learn?
-  Retention-score distribution snapshots.
+All numbers are generated into `paper/RESULTS.md` by `scripts/report.py` from
+the files in `paper/artifacts/`.
 
-**Status as of submission.** The architecture is implemented and
-exercised by an executable test suite (598 tests; `mypy --strict`
-clean; the localisation claim in §5.1.1 is asserted by
-`tests/test_localisation_claim.py` and breaks 3 of 7 assertions
-under a gate-density mutation). The perplexity and matched-compute
-numbers in this section come from a 64-hidden 4-layer model
-trained on a 32-vocabulary copy task; they are informative about
-the *machinery* of phases C and D but are not paper-grade on
-their own. The 65M fineweb multi-seed long-schedule run, which
-the spec asks for, has not been executed in this session: the
-single-seed fineweb sweep completed earlier is at ppl ~3830
-against GPT-2-scale ~30, which is early-training noise. A
-publication-grade version of §5.1.2 requires that 65M multi-seed
-run; the current 64-hidden numbers are reported as the
-mechanism-level result, with the matched-compute protocol and
-seed-band measurements already in place.
+**Language modelling.** The final model has 19.16M parameters, width 256, six
+layers, chunk 128, and 32 state slots. After 12,000 steps (batch 8 x 1,024, 98M
+tokens, 2.79 h) held-out perplexity is 82.3 on FineWeb-Edu (1.390 bits per
+byte) and 244 on WikiText-103 (out of domain). The loss falls monotonically
+through training (perplexity 247.7, 140.3, 102.0, 86.6, 82.3 at steps 1k, 3k,
+7k, 10k, 12k).
 
-### 5.1. The endogenous-origination mechanism (C6, D7)
+**Compression.** With arithmetic coding the model stores 4,096 tokens (18,436
+bytes) in 3,417 bytes: 1.483 bits per byte, round trip verified lossless, against
+3.611 for zlib and 3.508 for LZMA. On 16,384 tokens of other text it reaches
+1.526 against 3.175 and 2.964.
 
-Two additional phases accompany the main results: a *collapse
-diagnostic* (Phase C) that has to be green before any other
-origination number counts, and an *inference-time intent-descent*
-loop (Phase D) that optimises the origination state at test time.
-The mechanism is the subject of the headline localisation claim;
-the quality claim is reported at matched compute in §5.1.2.
+**Benchmarks.** Zero-shot, full splits (PIQA is a 1,000-example subset), against
+published numbers (Gu and Dao, 2023, Table 3):
 
-#### 5.1.1. Phase C — collapse diagnostic on the intent bank (C6)
-
-#### Table C6.1 — Phase C collapse diagnostic on a converged learnable-task model
-
-| Configuration | variance | MI (bits) | H / H_max (bits) | read share | gated slots | collapsed |
+| task | metric | ours | chance | Pythia-160M | H3-130M | Mamba-130M |
 |---|---|---|---|---|---|---|
-| `origination on, balanced` (intentional path) | 3.38e-03 | 0.041 | 0.76 / 2.77 | 0.353 | 3 / 16 | no |
-| `origination on, no balance` (gate collapse) | 3.25e-03 | **0.000** | 0.69 / 2.77 | 0.224 | 2 / 16 | yes (gate MI 0) |
-| `origination off (alpha=1, inert)` | 0.00e+00 | 0.000 | 0.00 / 2.77 | 0.000 | 0 / 16 | yes (inert) |
-| `static bank (intent_update_scale=0)` | 0.00e+00 | 0.000 | — | 0.038 | 15 / 16 | yes (var=0 by construction) |
+| HellaSwag | acc_norm | 26.1 ± 0.4 | 25.0 | 30.2 | 31.7 | 35.3 |
+| PIQA | acc | 54.8 ± 1.6 | 50.0 | 61.4 | 64.2 | 64.5 |
+| ARC-Easy | acc | 34.3 ± 1.0 | 25.0 | 43.2 | 44.4 | 48.0 |
+| ARC-Challenge | acc_norm | 21.2 ± 1.2 | 25.0 | 24.1 | 24.2 | 24.3 |
+| WinoGrande | acc | 49.1 ± 1.4 | 50.0 | 51.9 | 50.6 | 51.9 |
 
-**Diagnostic interpretation.** The diagnostic is green in the intended
-configuration: variance is nonzero, MI is nonzero, and the gate is
-*conditioning on the input* (the failure mode it is built to catch).
-The "no balance" arm collapses the gate onto a fixed pair of slots
-(MI=0, exactly the signature the spec describes as "the most likely
-failure mode"). The `alpha=1` arm is inert by construction (the
-generator is never called) and reports collapsed for that reason. The
-static bank cannot vary across inputs by construction and is asserted
-to be collapsed by `tests/test_origination.py::test_flags_a_static_intent_bank`
-without re-running training.
+The model is above chance on HellaSwag, PIQA and ARC-Easy, at or below chance
+on ARC-Challenge and WinoGrande, and below every published model on every task.
+With 3,000 times fewer training tokens this is expected, and we do not claim
+competitiveness. ARC-Challenge, 3.8 points below chance (3 standard errors), is
+the one result we cannot explain.
 
-**Reproducibility.** Five functions in `ucsa/training/metrics.py`
-(`intent_state_variance`, `intent_gate_usage`, `intent_gate_entropy`,
-`intent_gate_mutual_info`, `intent_read_share`) and the higher-level
-`intent_collapse_report` aggregate. The trainer records them every
-step (`ucsa/training/trainer.py::record_intent_diagnostics`); the
-report is in `ucsa/models/origination.py`. All five are in
-`DEFAULT_METRIC_NAMES`. Reported here from a 1200-step run on the
-copy task; full reproduction command in §A.2.
+**Does the persistent state help?** This is the question the architecture
+exists to answer. We trained an identical model with the state reset every chunk
+(same data, schedule and seed). After 12,000 steps:
 
-
-#### 5.1.2. Phase D — inference-time intent descent at matched compute (D7)
-
-#### Table D7.1 — Phase D inference-time intent descent, multi-seed matched compute
-
-**K-step gradient descent on the `intent` bank only, weights frozen,
-against the multi-step JEPA chain (with EMA target encoder, when
-present) or the learned verifier logit. K=0 by default. Optional early
-stop on intent gradient norm, absolute or relative to the input's own
-first-step gradient. Matches an in-distribution control at equal
-operator-call budget.**
-
-Reproducibility. `ucsa/models/intent_descent.py::optimize_intent`,
-`compute_matched_comparison`; `ucsa/infer.py::generate_with_intent_descent`
-plus `--intent-steps` and `--intent-learning-rate` on the CLI;
-`scripts/probe_origination.py` for the report. Configurable with
-`objective="auto" | "jepa" | "critic"`.
-
-#### D7.1.a — Component coverage and gate state
-
-| Component | status | file |
+| run | perplexity | bits per byte |
 |---|---|---|
-| Multi-step JEPA chain | built (4 hunk pred over 3 pairs) | `ucsa/models/architecture.py::jepa_multi_step` |
-| EMA target encoder | built, default momentum 0.996 | `ucsa/training/ema.py` |
-| verification.Learned alt objective | built; auto-picked when present | `ucsa/models/intent_descent.py::critic_objective` |
-| Snapshot-restore between rollouts | built (PCS restored every step) | same file, `pcs_restore` calls |
-| Early stop (absolute / relative) | both implemented | `grad_norm_threshold`, `grad_norm_relative_threshold` |
-| `K=0` default | verified, zero state changed | `infer.py::generate` unchanged |
+| with state | 82.33 | 1.3902 |
+| no state | 81.89 | 1.3885 |
 
-#### D7.1.b — Multi-seed matched-compute measurement on the learnable task
+The gap, +0.0078 bits/token in the state's disfavour, is inside the 0.015
+noise floor; with one seed per arm we cannot say the state is harmful, only that
+it is not measurably helpful. The per-chunk comparison agrees: on 1,024-token
+and 4,096-token windows the state-minus-control loss is within +-0.05
+bits/token at every chunk position, with no growth along the window, so the
+state does not accumulate useful information over distance at this scale. Reading
+fewer slots does hurt (1.355 bits per byte with 32 slots, 1.375 with 16, 1.453
+with 8, 2.032 with 1), but because the stateless model is as good, we read this
+as the slots acting as extra learned context tokens, not as memory of earlier
+chunks. We did not test that reading directly.
 
-| Training budget | arm | mean realised | seed sd | effect vs control | p (informal) |
-|---|---|---|---|---|---|
-| Converged (loss floor 1e-2, ppl 1.05) | intent-optimization | 0.02500 | 0.00239 | — | — |
-|  | `repeat-and-average` (in-dist, matched) | 0.02499 | 0.00241 | +0.00001 | 0.00 sd |
-|  | `more-reasoning` (OOD, matched) | 0.02614 | 0.00194 | −0.00114 | 0.5 sd |
-| Partial (loss floor 0.5) | intent-optimization | −0.00054 (3 seeds) | 0.00132 | — | 0.41 sd |
-|  | `repeat-and-average` | — | — | matched | — |
-| Chance-level (loss 3.0) | intent-optimization | 3.51e+00 | — | 0.00 sd | model has not learned |
+**Design choices at 600 steps** (noise floor 0.0145 bits/token; Section 4.3):
 
-**Interpretation.** The descent's effect on the realised outcome is
-inside the seed band at every training budget we can produce on this
-64-hidden 4-layer model. The `more-reasoning` OOD control is a clean
-**+0.0011 worse at 0.5 sd**, which says the budget comparator itself
-is doing something; the intent-optimisation result is just too small
-to see. Forward-model hacking, evaluated by the predicted-vs-realised
-correlation after descent, holds at -0.600 / -0.176 (the critic safety
-net is wired but the critic is randomly initialised, so the safety
-net is in place but not yet informed by a real outcome signal).
-Decision-space authority is 0 of 128 arg-max flips at every
-training stage from random init to ppl 1.29; the model is too
-confident at every stage for the logit-space effect to matter for
-*which* token is emitted, only how strongly the model commits.
+| change | effect (bits/token) | verdict |
+|---|---|---|
+| sliding window replaces cross-attention | perplexity 576 to 463, -7.6% params | better |
+| remove the window | +0.095 | worse |
+| zero-initialised read gate | -0.087 | better |
+| learning rate 2.4e-3 against 6e-4 | -0.339 | better |
+| learning rate 4.8e-3 | +0.131 | worse |
+| JEPA loss off | -0.027 | within noise |
+| surprise-gated write | -0.012 | within noise |
+| weight averaging | +0.035 | worse |
+| compressibility filter | -0.022 | within noise |
+| no state | -0.001 | no difference |
 
-**Why the negative result is the result.** The spec's matched-compute
-bar reads "any quality claim must be reported at matched compute or
-it is not a result." This is a result, just not the one the system
-promised. At 64 hidden and 4 layers, the JEPA signal and the
-realised loss are too close for a one-step descent to register. The
-bar is *not* met at this scale. The matched-compute protocol
-distinguishes the in-distribution control from a real quality
-improvement; the protocol does its job. What the system *does*
-deliver at this scale is a clean localisation claim (Table C6
-follows) and a one-decimal-place perplexity cost (Table A.1).
+The 12,000-step result confirms the state row and the learning-rate choice (the
+final run used 2.4e-3). It does not test the other rows, which were not rerun at
+full length.
 
+**The forecast failed.** From rungs of 150 to 1,200 steps we forecast
+perplexity 47.7 [42.9, 54.8] at 12,000 steps for the chosen learning rate,
+recorded before the run. The outcome was 82.3, 0.79 bits/token above the
+interval. The power-law fit extrapolated ten times beyond its data and was
+over-optimistic. The learning-rate ranking it supported did hold, but the
+absolute forecast should not be trusted, and the intervals we derived from
+run-to-run noise understate extrapolation error.
 
+## 6. Engineering
 
-## 6. Discussion
+The measurements above are only as good as the code that produces them, so the
+engineering is part of the method. Each item below was added because a concrete
+failure was found, and each has a regression test.
 
-What this work establishes. The mechanism of endogenous
-origination is sound: a sparse top-$k$ gate over an explicit intent
-bank makes origination localisable (§5.1.1), the matched-compute
-protocol distinguishes a real quality gain from a cheaper
-"no-optimisation" baseline (§5.1.2), and the forward-model-hacking
-detector (`outcome_correlation`) and the alternative verifier
-objective (`critic_objective`) close the two ways the descent could
-otherwise be self-deceptive. What it does **not** establish is a
-positive quality claim at 65M on fineweb-edu at the spec's scale
-— the matched-compute effect is 0.00 sd on a converged small
-model. The contribution is therefore not that origination beats a
-naive model at matched compute on a 50×-larger model — it does not
-have to — but that the design yields a small architecture with a
-*different inductive bias* (state-centric vs sequence-centric), and
-that the matched-compute protocol can actually say which is which.
-The build-vs-buy question then moves to infrastructure-bounded
-deployments: keep one state across many calls, swap the operator.
-The Phase D inference-time descent is a *mechanism* for steering
-that intent at test time; closing the matched-compute gap is a
-*scaling* question, not a *design* question.
+* **One float type.** The library uses a single floating-point dtype and no
+  autocast, loss scaler or float-to-float cast. A static test rejects any such
+  construct in every source file, and a runtime auditor records the dtype of
+  every tensor any operator produces during a real training step. The auditor
+  allocates memory and slows execution, so it lives in a dry run
+  (`scripts/dry_run.py`) that gates training and is never imported by it; a test
+  enforces that. In float16 the audit reports float32 results from inside
+  PyTorch's own fused kernels (RMSNorm, attention); these are surfaced, not
+  hidden.
+* **Data.** Corpora are tokenised once into memory-mapped shards. A batch is a
+  pure function of `(seed, step)`, so training resumes on exactly the data
+  stream it left, and training never touches the network (a stalled stream
+  hung earlier runs). Shards are written atomically; an in-place rewrite once
+  truncated a file under a reader that had it mapped. Documents are
+  deduplicated by their first 128 tokens.
+* **Training.** Resumable from the latest checkpoint, one host
+  synchronisation per step, a single concatenated gradient-norm (the per-tensor
+  version cost 10% of a step on this backend), a skip-on-non-finite guard, no
+  weight decay on biases and gates, and full validation of every setting.
+* **Tests by guarantee, not by method.** Strict causality, the exact window
+  boundary, streaming equal to teacher forcing, lossless round trips, and a
+  fuzz test over random configurations. Reviewing the suite this way found
+  defects that example-based tests had not: a curator that silently dropped
+  work after a restart, a pruning routine that recycled empty slots, a
+  verifier that accepted an empty or NaN candidate, a configuration check that
+  crashed on `heads=0`, and a default that rejected valid small layouts.
 
-## 7. Conclusions
+## 7. Limitations
 
-UCSA demonstrates three things at small scale. (i) A cognitive
-architecture centred on a single persistent state, paired with a
-multi-step JEPA prediction chain over the reasoning loop, is
-implementable and exercisable end-to-end with a clean,
-mutation-checked test suite. (ii) An explicit *intent* bank with a
-sparse top-$k$ gate makes origination localisable, and the
-localisation claim holds in an executable test. (iii) The
-matched-compute protocol distinguishes a real quality gain from a
-cheaper no-optimisation baseline, and at 64 hidden × 4 layers on
-the copy task the descent's effect on the realised outcome is
-inside the seed band — a negative result, but a result.
+* **Scale.** The model has 19M parameters and sees about 100M tokens. Published
+  comparison models saw 300B. On the benchmarks, small models are near chance
+  and the standard error of a 1,000-example task is about 1.5 points, so most
+  benchmark differences are not resolvable here. Bits per byte is the more
+  informative number at this scale.
+* **The persistent state.** At 12,000 steps the state gives no measurable gain
+  over a matched stateless model (Section 5), with one seed per arm. Training
+  windows are 1,024 tokens; a constant-size state could matter at much longer
+  contexts or larger scale, which we did not test.
+* **Noise.** Training is not bitwise reproducible on this hardware. The noise
+  floor was measured from repeated same-configuration runs and is about 0.015
+  bits/token per run. Conclusions near that size are not claimed.
+* **Extrapolation.** Forecasts reach 10x beyond the longest ladder run. The
+  forecast for the chosen learning rate missed the 12,000-step outcome
+  (Section 5).
+* **Compression.** A compressed file decodes only on the software and device
+  that wrote it, because model probabilities are floating point.
+* **Not explored.** Chunk size, depth and width beyond one measured sweep,
+  longer training sequences, and larger scale.
 
-What remains to be shown at paper-grade scale is the positive half
-of (iii): a 65M fineweb multi-seed long-schedule run that puts a
-real band on Phase D. The wiring is in place (`scripts/train.py`
-accepts `--observation-mix`, `--intent-update-scale`,
-`--origination-top-k`, `--no-origination-balance`; `scripts/run_ablations.py`
-lists the five `origination*` arms). What is missing is hours of
-GPU time the authors did not have for this draft. The matched-compute
-protocol and seed-band reporting are already correct, so a future
-re-run with that compute needs no protocol changes — only
-`--max-steps 8000` and a CUDA machine.
-
-## Appendix A. Reproduction
+## 8. Reproduction
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-.venv/bin/python scripts/train.py             # UCSA-small @ 12k steps
-.venv/bin/python scripts/train_baseline.py  # vanilla-Transformer @ 12k steps
-.venv/bin/python scripts/eval.py \
-    --ucsa-ckpt ckpts/ucsa-final.safetensors \
-    --baseline-results runs/baseline.json \
-    --out-json runs/eval.json
-pytest -q
-ruff check ucsa scripts
+scripts/reproduce.sh              # data, dry run, training, evaluation, report
 ```
 
-Random seeds default to ``42``. ``--seed N`` overrides. Full JSON
-artifacts land under ``runs/``.
-
-## Appendix B. Hyperparameters
-
-See ``ucsa/config.yaml`` for the full list and
-``scripts/train.py`` defaults.
-
-## Appendix C. PCS Retention Score
-
-Retention score combines importance, usage, recency:
-
-$$
-R(t) = \alpha I(t) + \beta U(t) - \gamma A(t)
-$$
-
-with default weights ``alpha=0.5``, ``beta=0.3``, ``gamma=0.2`` and
-a ``0.01`` floor (tokens below the floor are recycled on the next
-write).
-
-## Appendix D. Bibliography (selected)
-
-- Assran et al., I-JEPA, 2023.
-- Maes et al., LeWorldModel, arXiv 2603.19312, 2026.
-- Huang et al., TC-JEPA, arXiv 2605.03245, 2026.
-- Bowne-Anderson / Raschka, "LLM Architecture in 2026", 2026.
-- Raschka, "Recent Developments in LLM Architectures", 2026.
-- DeepSeek-AI et al., DeepSeek-V2 / V3 / V4 papers.
-- Moonshot AI, Kimi K3, 2026.
-- Keller Jordan, Muon optimiser, 2024.
+Every number in Section 5 is generated into `paper/RESULTS.md` by
+`scripts/report.py` from run artifacts; the experiments, not the document, are
+the source of truth. The code, ablation records and the exact commit used for
+the final run are in the repository.
