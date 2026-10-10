@@ -380,8 +380,8 @@ class GroupedQueryAttention(nn.Module):
         self.kv_cache["v"] = v_full
         self.kv_cache["length"] = int(k_full.shape[2])
 
-        k_expanded = self._expand_kv(k_full)
-        v_expanded = self._expand_kv(v_full)
+        k_expanded = self.__expand_kv(k_full)
+        v_expanded = self.__expand_kv(v_full)
 
         attn_output = torch.nn.functional.scaled_dot_product_attention(
             q,
@@ -397,7 +397,7 @@ class GroupedQueryAttention(nn.Module):
         projected: Tensor = self.out_proj(attn_output)
         return projected
 
-    def _expand_kv(self, kv: Tensor) -> Tensor:
+    def __expand_kv(self, kv: Tensor) -> Tensor:
         """Expand KV heads to match the number of query heads.
 
         Args:
@@ -556,7 +556,7 @@ class FeedForward(nn.Module):
 
 
 @dataclass
-class _BlockAux:
+class BlockAux:
     """Container for auxiliary outputs collected per block.
 
     Attributes:
@@ -640,7 +640,7 @@ class TransformerBlock(nn.Module):
         is_first_step: bool,
         memory_index: Tensor | None,
         working_slice: tuple[int, int],
-    ) -> tuple[Tensor, _BlockAux]:
+    ) -> tuple[Tensor, BlockAux]:
         """Run one block.
 
         Args:
@@ -655,7 +655,7 @@ class TransformerBlock(nn.Module):
         Returns:
             Tuple ``(updated_all_tokens, aux_outputs)``.
         """
-        aux = _BlockAux()
+        aux = BlockAux()
         normed = self.norm_self_attn(all_tokens)
         attn_out = self.self_attn(normed, normed, is_first_step)
         all_tokens = all_tokens + self.residual_dropout(attn_out)
@@ -760,7 +760,7 @@ class TransformerOperator(StateTransitionOperator):
         """Build parameters and any lazy buffers.
 
         The PCS bank offsets are bound lazily on the first call to
-        :meth:`forward` via :meth:`_bind_offsets`, because bank sizes are
+        :meth:`forward` via :meth:`__bind_offsets`, because bank sizes are
         only known once a :class:`PersistentCognitiveState` is attached.
         This :meth:`initialize` therefore marks the operator ready and
         initialises the bookkeeping containers, but does not populate
@@ -801,7 +801,9 @@ class TransformerOperator(StateTransitionOperator):
         """
         return self.last_bank_tensors
 
-    def _read_bank(self, cstate: PersistentCognitiveState, name: str) -> Tensor:
+    def __read_bank(
+        self, cstate: PersistentCognitiveState, name: str
+    ) -> Tensor:
         """Read one bank, preferring the carried differentiable tensor.
 
         Args:
@@ -816,7 +818,7 @@ class TransformerOperator(StateTransitionOperator):
             return carried[name]
         return cstate.get_bank(name)
 
-    def _read_pcs_tokens(self, cstate: PersistentCognitiveState) -> Tensor:
+    def __read_pcs_tokens(self, cstate: PersistentCognitiveState) -> Tensor:
         """Read every bank as one tensor, preferring the carried tensors.
 
         Args:
@@ -837,7 +839,7 @@ class TransformerOperator(StateTransitionOperator):
             [carried[name] for name in self.stream_bank_names], dim=0
         )
 
-    def _bind_offsets(
+    def __bind_offsets(
         self, cstate: PersistentCognitiveState
     ) -> dict[str, tuple[int, int]]:
         """Bind and return bank offsets for the given PCS.
@@ -856,7 +858,7 @@ class TransformerOperator(StateTransitionOperator):
             cursor += size
         return offsets
 
-    def _add_position_signal(
+    def __add_position_signal(
         self,
         tokens: Tensor,
         offsets: Mapping[str, tuple[int, int]],
@@ -913,7 +915,7 @@ class TransformerOperator(StateTransitionOperator):
                 f"{tuple(observation.shape)}."
             )
         batch = observation.shape[0]
-        pcs_tokens = self._read_pcs_tokens(cstate)
+        pcs_tokens = self.__read_pcs_tokens(cstate)
         if pcs_tokens.shape[-1] != observation.shape[-1]:
             raise ValueError(
                 f"PCS hidden size ({pcs_tokens.shape[-1]}) does not match "
@@ -925,13 +927,13 @@ class TransformerOperator(StateTransitionOperator):
                 f"match PCS hidden size ({pcs_tokens.shape[-1]})."
             )
 
-        offsets = self._bind_offsets(cstate)
+        offsets = self.__bind_offsets(cstate)
         pcs_tokens_b = pcs_tokens.unsqueeze(0).expand(batch, -1, -1).clone()
         all_tokens = torch.cat([pcs_tokens_b, observation], dim=1)
         working_start, working_end = offsets["working"]
 
         bank_id_base = len(self.stream_bank_names)
-        all_tokens = self._add_position_signal(
+        all_tokens = self.__add_position_signal(
             all_tokens, offsets, bank_id_base
         )
 
@@ -943,7 +945,7 @@ class TransformerOperator(StateTransitionOperator):
         # modified by an inplace operation". Cloning detaches the storage
         # (not the graph), exactly as ``pcs_tokens_b`` already does above.
         memory_index_tokens = (
-            self._read_bank(cstate, "memory_index")
+            self.__read_bank(cstate, "memory_index")
             .unsqueeze(0)
             .expand(batch, -1, -1)
             .clone()
