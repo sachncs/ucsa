@@ -1,0 +1,17 @@
+{
+  "dtype": "torch.float32",
+  "dtypes_seen": [
+    "torch.float32"
+  ],
+  "offenders": [],
+  "off_dtype_tensors": [],
+  "parameters": 19156774,
+  "peak_memory_mb": 9804.71875,
+  "forward_seconds": 0.22158503532409668,
+  "backward_seconds": 0.5701549053192139,
+  "optimizer_seconds": 0.031701087951660156,
+  "step_seconds": 0.8234410285949707,
+  "tokens_per_second": 9948.496268127335,
+  "loss_finite": true,
+  "grad_norm_finite": true
+}

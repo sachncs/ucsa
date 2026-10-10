@@ -1,0 +1,143 @@
+{
+  "device": "mps",
+  "recurrent_tasks": {
+    "hellaswag": {
+      "name": "hellaswag",
+      "n": 10042,
+      "correct": 2625,
+      "accuracy": 0.2614021111332404,
+      "log_likelihood_mean": -4.24746856714668,
+      "extras": {
+        "seed": 1234,
+        "max_examples": null,
+        "metric": "acc_norm",
+        "acc": 0.26309500099581756,
+        "acc_norm": 0.2614021111332404,
+        "stderr": 0.004384786660237667
+      }
+    },
+    "arc_easy": {
+      "name": "arc_easy",
+      "n": 2376,
+      "correct": 815,
+      "accuracy": 0.343013468013468,
+      "log_likelihood_mean": -6.927946994661023,
+      "extras": {
+        "seed": 1234,
+        "max_examples": null,
+        "metric": "acc",
+        "acc": 0.343013468013468,
+        "acc_norm": 0.3282828282828283,
+        "stderr": 0.009738915584246955
+      }
+    },
+    "arc_challenge": {
+      "name": "arc_challenge",
+      "n": 1172,
+      "correct": 249,
+      "accuracy": 0.21245733788395904,
+      "log_likelihood_mean": -5.894336468085768,
+      "extras": {
+        "seed": 1234,
+        "max_examples": null,
+        "metric": "acc_norm",
+        "acc": 0.15955631399317405,
+        "acc_norm": 0.21245733788395904,
+        "stderr": 0.011948382209569458
+      }
+    },
+    "piqa": {
+      "name": "piqa",
+      "n": 1000,
+      "correct": 548,
+      "accuracy": 0.548,
+      "log_likelihood_mean": -5.431336728830026,
+      "extras": {
+        "seed": 1234,
+        "max_examples": null,
+        "metric": "acc",
+        "acc": 0.548,
+        "acc_norm": 0.535,
+        "stderr": 0.015738360778683402
+      }
+    },
+    "winogrande": {
+      "name": "winogrande",
+      "n": 1267,
+      "correct": 622,
+      "accuracy": 0.4909234411996843,
+      "log_likelihood_mean": -4.5814108863877205,
+      "extras": {
+        "seed": 1234,
+        "max_examples": null,
+        "metric": "acc",
+        "acc": 0.4909234411996843,
+        "acc_norm": 0.4909234411996843,
+        "stderr": 0.014044624339359765
+      }
+    }
+  },
+  "recurrent_avg_acc": 0.3711592716460704,
+  "recurrent_ppl": {
+    "fineweb-edu": 83.22645903610974,
+    "wikitext-103": 244.38048927271373
+  },
+  "recurrent_params": 19288358,
+  "reference_comparison": [
+    {
+      "task": "hellaswag",
+      "metric": "acc_norm",
+      "ours": 26.140211113324042,
+      "stderr": 0.4384786660237667,
+      "n": 10042,
+      "chance": 25.0,
+      "Pythia-160M": 30.2,
+      "Hybrid H3-130M": 31.7,
+      "Mamba-130M": 35.3
+    },
+    {
+      "task": "piqa",
+      "metric": "acc",
+      "ours": 54.800000000000004,
+      "stderr": 1.5738360778683402,
+      "n": 1000,
+      "chance": 50.0,
+      "Pythia-160M": 61.4,
+      "Hybrid H3-130M": 64.2,
+      "Mamba-130M": 64.5
+    },
+    {
+      "task": "arc_easy",
+      "metric": "acc",
+      "ours": 34.301346801346796,
+      "stderr": 0.9738915584246955,
+      "n": 2376,
+      "chance": 25.0,
+      "Pythia-160M": 43.2,
+      "Hybrid H3-130M": 44.4,
+      "Mamba-130M": 48.0
+    },
+    {
+      "task": "arc_challenge",
+      "metric": "acc_norm",
+      "ours": 21.245733788395903,
+      "stderr": 1.1948382209569457,
+      "n": 1172,
+      "chance": 25.0,
+      "Pythia-160M": 24.1,
+      "Hybrid H3-130M": 24.2,
+      "Mamba-130M": 24.3
+    },
+    {
+      "task": "winogrande",
+      "metric": "acc",
+      "ours": 49.09234411996843,
+      "stderr": 1.4044624339359764,
+      "n": 1267,
+      "chance": 50.0,
+      "Pythia-160M": 51.9,
+      "Hybrid H3-130M": 50.6,
+      "Mamba-130M": 51.9
+    }
+  ]
+}

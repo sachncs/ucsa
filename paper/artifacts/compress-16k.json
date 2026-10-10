@@ -1,0 +1,12 @@
+{
+  "tokens": 16384,
+  "raw_bytes": 69654,
+  "compressed_bytes": 13284,
+  "ucsa_bits_per_byte": 1.5257128090274787,
+  "anchors_bits_per_byte": {
+    "zlib": 3.1750896828813318,
+    "lzma": 2.9639833548572248
+  },
+  "lossless_round_trip": true,
+  "encode_seconds": 97.2182469367981
+}
