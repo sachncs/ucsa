@@ -8,7 +8,7 @@ from ucsa.training import curriculum as curriculum_lib
 from ucsa.training.curriculum import Curriculum
 
 
-class TestCurriculumSchedule:
+class TestSchedule:
     """Tests for :class:`curriculum_lib.Schedule`."""
 
     def test_default_schedule_valid(self) -> None:
