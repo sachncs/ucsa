@@ -48,7 +48,7 @@ TensorBoard + Weights & Biases unified logger.
 | `log_metrics(bundle, metrics, step)` | Push a metrics dict to every backend. |
 | `close_logger(bundle)` | Flush and close every backend. |
 
-## `ucsa.models.state` — the PCS
+## `ucsa.models.cognitive` — the PCS
 
 The persistent cognitive state and its seven banks.
 
@@ -56,9 +56,9 @@ The persistent cognitive state and its seven banks.
 | --- | --- |
 | `BANK_NAMES` | Tuple of the seven default bank names. |
 | `INTENT_BANK` | The bank name for the origination signal. |
-| `PCSConfig` | Dataclass for hidden size, per-bank sizes, and retention-tuning weights. |
+| `cognitive.Config` | Dataclass for hidden size, per-bank sizes, and retention-tuning weights. |
 | `BankSpec` | Static spec for one bank: name and token count. |
-| `PersistentCognitiveState` | The PCS module itself. Owns the seven bank tensors and their retention metadata. |
+| `cognitive.State` | The PCS module itself. Owns the seven bank tensors and their retention metadata. |
 | `retention_score(...)` | Compute the retention score from `importance`, `usage`, and `age`. |
 
 The PCS exposes:
@@ -70,34 +70,34 @@ The PCS exposes:
 - `recycle_bottom_k(name, k)` → run the recycle policy on the bottom-k
   long-term memory tokens
 
-## `ucsa.models.transition_operator` — the operator ABC
+## `ucsa.models.transition` — the operator ABC
 
 Abstract base for the state transition operator
 `C_{t+1} = F(C_t, O_t)`.
 
 | Symbol | Purpose |
 | --- | --- |
-| `StateTransitionOperator` | ABC; subclasses implement `forward`, `initialize`, `reset`, and the `name` property. |
+| `transition.Operator` | ABC; subclasses implement `forward`, `initialize`, `reset`, and the `name` property. |
 
-The reference implementation is `TransformerOperator`; alternative
+The reference implementation is `transformer.Operator`; alternative
 implementations (Mamba, RWKV, Hyena, SSMs) plug in by satisfying the
 interface and require no changes anywhere else.
 
-## `ucsa.models.transformer_operator` — the reference operator
+## `ucsa.models.transformer` — the reference operator
 
 Pre-norm transformer with grouped-query attention, sliding-window KV
 cache, optional `memory_index` cross-attention, and dense or MoE FFN.
 
 | Symbol | Purpose |
 | --- | --- |
-| `TransformerOperatorConfig` | All operator hyperparameters. |
-| `TransformerBlock` | One pre-norm block (self-attn + cross-attn + FFN). |
+| `transformer.Config` | All operator hyperparameters. |
+| `transformer.Block` | One pre-norm block (self-attn + cross-attn + FFN). |
 | `RMSNorm` | Root-mean-square layer norm. |
 | `RotaryEmbedding` | RoPE with cached cos/sin tables. |
 | `GroupedQueryAttention` | GQA with sliding-window KV cache. |
 | `CrossAttention` | Cross-attention from the `memory_index` bank. |
 | `FeedForward` | SwiGLU FFN. |
-| `TransformerOperator` | The full operator: stacks `num_layers` blocks, runs MoE on the upper half. |
+| `transformer.Operator` | The full operator: stacks `num_layers` blocks, runs MoE on the upper half. |
 
 Bank offsets are bound lazily on the first forward, since the sizes
 depend on the attached PCS.
@@ -108,9 +108,9 @@ Top-k routed Mixture of Experts with a load-balancing loss.
 
 | Symbol | Purpose |
 | --- | --- |
-| `MoEConfig` | Number of experts, top-k, capacity factor, aux loss weight. |
+| `moe.Config` | Number of experts, top-k, capacity factor, aux loss weight. |
 | `Expert` | One expert FFN. |
-| `MixtureOfExperts` | The full MoE module. Stashes `last_router_logits` for the trainer. |
+| `moe.Mixture` | The full MoE module. Stashes `last_router_logits` for the trainer. |
 
 ## `ucsa.models.perception` — tokenisation and embedding
 
@@ -119,11 +119,11 @@ the hidden-size representation consumed by the operator.
 
 | Symbol | Purpose |
 | --- | --- |
-| `TokenizerWrapper` | Wraps a HuggingFace tokenizer with caching and length handling. |
+| `perception.Tokenizer` | Wraps a HuggingFace tokenizer with caching and length handling. |
 | `Perception` | Embedding table + projection to the operator's hidden size. |
 | `FakeTokenizer` | A char-→-id tokenizer used by the offline test suite. |
 
-## `ucsa.models.reasoning_loop` — N iterations of F
+## `ucsa.models.reasoning` — N iterations of F
 
 The reasoning loop applies the operator `N` times per forward, mixes
 in the observation via `alpha_k` when origination is enabled, and
@@ -132,10 +132,10 @@ operator.
 
 | Symbol | Purpose |
 | --- | --- |
-| `ReasoningLoopConfig` | `num_iterations`, `observation_mix`, `observation_mix_decay`. |
-| `ReasoningLoop` | The loop itself. Owns the operator, origination, intent-update, and differentiable carry. |
+| `reasoning.Config` | `num_iterations`, `observation_mix`, `observation_mix_decay`. |
+| `reasoning.Loop` | The loop itself. Owns the operator, origination, intent-update, and differentiable carry. |
 
-## `ucsa.models.memory` — hierarchical memory facade
+## `ucsa.models.tiers` — hierarchical memory facade
 
 Propose / verify / accept for long-term memory tokens.
 
@@ -143,14 +143,14 @@ Propose / verify / accept for long-term memory tokens.
 | --- | --- |
 | `Memory` | Hierarchical facade; snapshot, restore, propose, accept. |
 
-## `ucsa.models.memory_service` — background memory worker
+## `ucsa.models.curation` — background memory worker
 
 Async memory pipeline that runs verification, consolidation, and
 pruning on a background thread.
 
 | Symbol | Purpose |
 | --- | --- |
-| `MemoryService` | Queue-based async worker. |
+| `curation.Curator` | Queue-based async worker. |
 
 ## `ucsa.models.graph` — concept graph
 
@@ -186,45 +186,45 @@ Two implementations behind a shared interface.
 | Symbol | Purpose |
 | --- | --- |
 | `Verifier` | ABC. |
-| `HeuristicVerifier` | Score blends confidence, novelty, recency, usage. |
-| `LearnedVerifier` | Small MLP head trained on the retention signal. |
+| `verification.Heuristic` | Score blends confidence, novelty, recency, usage. |
+| `verification.Learned` | Small MLP head trained on the retention signal. |
 
-## `ucsa.models.projection_heads` — four heads + origination
+## `ucsa.models.projection` — four heads + origination
 
 The four projection heads, plus the input-reconstruction head and
 the origination generator.
 
 | Symbol | Purpose |
 | --- | --- |
-| `HeadSpec` / `HeadConfig` | Builders for head hyperparameters. |
-| `LanguageHead` | Vocabulary logits from working memory. |
-| `PlanningHead` | Discrete plan tokens. |
-| `ToolHead` | Discrete tool tokens. |
-| `MemoryHead` | Memory query embeddings. |
-| `InputReconstructionHead` | LeWM-style capacity bottleneck. |
-| `OriginationHead` | The endogenous-origination generator. |
+| `head_config.Spec` / `projection.Config` | Builders for head hyperparameters. |
+| `projection.Language` | Vocabulary logits from working memory. |
+| `projection.Planning` | Discrete plan tokens. |
+| `projection.Tool` | Discrete tool tokens. |
+| `projection.Memory` | Memory query embeddings. |
+| `projection.Reconstruction` | LeWM-style capacity bottleneck. |
+| `projection.Origination` | The endogenous-origination generator. |
 | `IntentUpdate` | Refreshes the `intent` bank per iteration. |
-| `ProjectionHeads` | Bundle of all heads; the entry point. |
+| `projection.Heads` | Bundle of all heads; the entry point. |
 
 ## `ucsa.models.losses` — the combined loss
 
 | Symbol | Purpose |
 | --- | --- |
-| `LossWeights` | Per-component weights: `ar`, `jepa`, `memory`, `router`, `reconstruction`, `origination`. |
-| `AutoregressiveLoss` | Vanilla cross-entropy on language logits. |
-| `JEPALoss` | Cosine similarity + SmoothL1 on the JEPA pairs. Supports single-step (I-JEPA) and multi-step (LeWM) modes. |
-| `MemoryStabilityLoss` | MSE against the moving `memory_baseline`. |
-| `RouterLoadBalancingLoss` | Switch-Transformer load-balancing loss. |
-| `InputReconstructionLoss` | MSE against the input-token embeddings. |
-| `UCSACombinedLoss` | Weighted combination of every term above. |
+| `losses.Weights` | Per-component weights: `ar`, `jepa`, `memory`, `router`, `reconstruction`, `origination`. |
+| `losses.Autoregressive` | Vanilla cross-entropy on language logits. |
+| `losses.JEPA` | Cosine similarity + SmoothL1 on the JEPA pairs. Supports single-step (I-JEPA) and multi-step (LeWM) modes. |
+| `losses.MemoryStability` | MSE against the moving `memory_baseline`. |
+| `losses.RouterBalance` | Switch-Transformer load-balancing loss. |
+| `losses.Reconstruction` | MSE against the input-token embeddings. |
+| `losses.Combined` | Weighted combination of every term above. |
 
-## `ucsa.models.ucsa` — the top-level model
+## `ucsa.models.architecture` — the top-level model
 
 | Symbol | Purpose |
 | --- | --- |
-| `UCSAConfig` | Top-level config. |
+| `architecture.Config` | Top-level config. |
 | `UCSA` | The model: builds the PCS, the operator, the loop, the heads, the losses. |
-| `build_ucsa(config)` | Build a `UCSA` from a config dict. |
+| `architecture.build(config)` | Build a `UCSA` from a config dict. |
 
 ## `ucsa.models.origination` — probes
 
@@ -246,7 +246,7 @@ the origination generator.
 
 | Symbol | Purpose |
 | --- | --- |
-| `CurriculumSchedule` | `stage_1_end`, `stage_2_end`, `stage_3_end`. |
+| `curriculum.Schedule` | `stage_1_end`, `stage_2_end`, `stage_3_end`. |
 | `Curriculum` | Active-component gating by global step. |
 
 The four stages, step-gated:
@@ -260,13 +260,13 @@ The four stages, step-gated:
 
 | Symbol | Purpose |
 | --- | --- |
-| `EMATargetEncoder` | Frozen EMA copy of the model. Buffers are not updated on purpose. |
+| `ema.TargetEncoder` | Frozen EMA copy of the model. Buffers are not updated on purpose. |
 
 ## `ucsa.training.metrics` — metrics registry
 
 | Symbol | Purpose |
 | --- | --- |
-| `MetricsRegistry` | Time-averaged metrics. |
+| `metrics.Registry` | Time-averaged metrics. |
 | `build_default_registry()` | Default registry with the standard UCSA metrics. |
 | `intent_state_variance`, `intent_gate_entropy`, `intent_gate_mutual_info`, `intent_gate_usage`, `intent_read_share` | Per-step diagnostics. |
 | `perplexity_from_loss` | Cross-entropy → perplexity. |
@@ -292,14 +292,14 @@ The four stages, step-gated:
 
 | Symbol | Purpose |
 | --- | --- |
-| `EvaluationLoop` | No-grad loop that produces `(inputs, targets)` batches and runs `compute_loss` for validation. |
+| `evaluation.Loop` | No-grad loop that produces `(inputs, targets)` batches and runs `compute_loss` for validation. |
 
 ## `ucsa.training.trainer` — the training loop
 
 | Symbol | Purpose |
 | --- | --- |
-| `TrainerConfig` | All trainer hyperparameters, including EMA momentum and intent-window size. |
-| `TrainerState` | Mutable training state: `global_step`, `last_loss`, `last_components`, `started_at`. |
+| `trainer.Config` | All trainer hyperparameters, including EMA momentum and intent-window size. |
+| `trainer.State` | Mutable training state: `global_step`, `last_loss`, `last_components`, `started_at`. |
 | `CosineWarmupScheduler` | Linear warmup followed by cosine decay to `min_lr_ratio` of the peak. |
 | `Trainer` | The training loop: `train_step`, `train`, `save_checkpoint`, `load_checkpoint`, `compute_loss`. |
 
@@ -307,8 +307,8 @@ The four stages, step-gated:
 
 | Symbol | Purpose |
 | --- | --- |
-| `DatasetConfig` | Streaming config: sequence length, primary dataset, split, pack. |
-| `TextDataset` | Iterable dataset with a `pack_sequences` option. |
+| `dataset.Config` | Streaming config: sequence length, primary dataset, split, pack. |
+| `dataset.Text` | Iterable dataset with a `pack_sequences` option. |
 
 ## `ucsa` — top-level entrypoints
 

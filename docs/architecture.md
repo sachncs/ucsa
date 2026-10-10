@@ -31,11 +31,11 @@ knowledge.
 | `memory_index` | 32 | Retrieval index, cross-attended each block. |
 | `intent` | 16 | Origination signal for the next input. |
 
-Implementation: `ucsa/models/state.py`.
+Implementation: `ucsa/models/cognitive.py`.
 
 Each long-term memory token carries four scalar metadata fields —
 `importance`, `usage`, `age`, `retention_score` — that drive the
-recycle policy. See `retention_score` in `ucsa/models/state.py` for
+recycle policy. See `retention_score` in `ucsa/models/cognitive.py` for
 the formula.
 
 The `intent` bank is last in `BANK_NAMES` by design. The operator
@@ -53,9 +53,9 @@ new PCS:
 C_{t+1} = F(C_t, O_t)
 ```
 
-`ucsa.models.transition_operator.StateTransitionOperator` is the
+`ucsa.models.transition.Operator` is the
 abstract base. The reference implementation is
-`ucsa.models.transformer_operator.TransformerOperator`: a pre-norm
+`ucsa.models.transformer.Operator`: a pre-norm
 transformer with grouped-query attention, sliding-window KV cache,
 optional cross-attention from the `memory_index` bank, and a
 Mixture of Experts FFN on the upper half of layers.
@@ -73,12 +73,12 @@ A forward pass through UCSA does three things:
 2. For `N` iterations (default 4): `C' = F(C, O_k)`.
 3. Project `working` through the heads to produce outputs.
 
-Implementation: `ucsa/models/reasoning_loop.py`.
+Implementation: `ucsa/models/reasoning.py`.
 
 The operator's write-back copies under `torch.no_grad`, so the
 loop also carries the operator's *differentiable* bank tensors
 from one iteration to the next and out to the heads
-(`ReasoningLoop.differentiable_bank`). Without that carry the
+(`reasoning.Loop.differentiable_bank`). Without that carry the
 autograd graph ends at every transition and no loss can reach the
 operator at all. `differentiable_state_carry=False` restores the
 older severed behaviour for ablations.
@@ -93,7 +93,7 @@ O_{k+1} = (1 - alpha_k) * G(intent, working_k) + alpha_k * O_0
 alpha_k = observation_mix * observation_mix_decay ** k
 ```
 
-`G` is the `OriginationHead`: a cross-attention read whose keys and
+`G` is the `projection.Origination`: a cross-attention read whose keys and
 values come from `concat(intent, working)` and whose queries come
 from the current input stream. This makes the signal that
 *causes* the next state an explicit, addressable variable rather
@@ -106,7 +106,7 @@ hold `alpha_k = 1`, never call `G`, and reproduce the previous
 behaviour exactly, so origination is opt-in.
 
 Implementation: `ucsa/models/origination.py`,
-`ucsa/models/projection_heads.py` (the `OriginationHead` itself).
+`ucsa/models/projection.py` (the `projection.Origination` itself).
 
 ### Inference-time intent descent
 
@@ -133,7 +133,7 @@ Working  --(propose)-->  Candidate  --(verify)-->  LongTerm
 ```
 
 Verification, consolidation, and pruning run in the
-`ucsa.models.memory_service.MemoryService` background worker.
+`ucsa.models.curation.Curator` background worker.
 Inference never blocks on memory.
 
 ### Verifier
@@ -141,10 +141,10 @@ Inference never blocks on memory.
 Two implementations behind a shared interface
 (`ucsa.models.verification.Verifier`):
 
-- **`HeuristicVerifier`** (default). Score blends confidence,
+- **`verification.Heuristic`** (default). Score blends confidence,
   novelty (1 − cosine similarity to nearest long-term memory),
   recency, and usage.
-- **`LearnedVerifier`**. Small MLP head trained on the retention
+- **`verification.Learned`**. Small MLP head trained on the retention
   signal: whether each candidate was re-accessed in subsequent
   steps.
 
@@ -176,8 +176,8 @@ When the **hard-EMA target encoder** is active (default
 model's intermediates, which keeps the prediction chain aligned
 with EMA-tracked latents.
 
-Implementation: `ucsa/models/losses.py` (`JEPALoss`),
-`ucsa/training/ema.py` (`EMATargetEncoder`).
+Implementation: `ucsa/models/losses.py` (`losses.JEPA`),
+`ucsa/training/ema.py` (`ema.TargetEncoder`).
 
 ## Projection heads
 
@@ -185,24 +185,24 @@ Four independent heads, all reading from `working`:
 
 | Head | Output |
 | --- | --- |
-| `LanguageHead` | Vocabulary logits. |
-| `PlanningHead` | Discrete plan tokens. |
-| `ToolHead` | Discrete tool tokens. |
-| `MemoryHead` | Memory query embeddings. |
+| `projection.Language` | Vocabulary logits. |
+| `projection.Planning` | Discrete plan tokens. |
+| `projection.Tool` | Discrete tool tokens. |
+| `projection.Memory` | Memory query embeddings. |
 
 Plus the auxiliary heads:
 
-- **`InputReconstructionHead`** — LeWM-style capacity bottleneck.
+- **`projection.Reconstruction`** — LeWM-style capacity bottleneck.
   Predicts the input-token embeddings from the working memory;
   the prediction is bounded by `reconstruction_dim` so the model
   cannot trivially copy.
-- **`OriginationHead`** — generates the next iteration's input
+- **`projection.Origination`** — generates the next iteration's input
   from the `intent` bank and the working memory. Held out of
   `forward`; the reasoning loop calls it directly.
 - **`IntentUpdate`** — refreshes the `intent` bank per iteration
   so it is not the same constant before every action.
 
-Implementation: `ucsa/models/projection_heads.py`.
+Implementation: `ucsa/models/projection.py`.
 
 ## Training losses
 
@@ -211,7 +211,7 @@ L = L_AR + 0.1 * L_JEPA + 0.01 * L_MEMORY + 0.01 * L_ROUTER
       + 0.1 * L_RECONSTRUCTION + 0.01 * L_ORIGINATION
 ```
 
-Every weight is configurable via `LossWeights` in
+Every weight is configurable via `losses.Weights` in
 `ucsa/models/losses.py`. Each ablation flag on
 `scripts/train.py` is a one-line override that zeroes the
 relevant weight.
