@@ -1,14 +1,18 @@
 """Tests for the standard-LM eval harness.
 
-Kept small and offline-friendly: only smoke tests the loader
-definitions, registry, and dataclass shape. The full task data
-needs network access; that's exercised by ``scripts/eval.py``.
+Offline: the task loaders are replaced by fixtures and the model is a tiny
+real one. The full task data needs network access and is exercised by
+``scripts/eval.py``.
 """
 
 from __future__ import annotations
 
-import pytest
+import math
 
+import pytest
+import torch
+
+from tests.helpers import Tokenizer, tiny_model
 from ucsa.training import eval_harness
 from ucsa.training.eval_harness import (
     TASK_REGISTRY,
@@ -16,40 +20,6 @@ from ucsa.training.eval_harness import (
     evaluate_all,
     evaluate_task,
 )
-
-
-class DummyModel:
-    """Minimal model stand-in: returns constant logits favoring choice 0."""
-
-    def eval(self):
-        pass
-
-    def train(self):
-        pass
-
-
-class DummyTokenizer:
-    """Maps every string to a list of token ids equal to the character codes."""
-
-    def encode(self, text: str) -> list[int]:
-        return [min(255, ord(c)) for c in text][:64]
-
-
-class ConstantLogitsModel:
-    """Returns logits so that token 0 is always the most likely."""
-
-    def __init__(self, vocab_size: int = 256):
-        self.vocab_size = vocab_size
-
-    def eval(self):
-        pass
-
-    def train(self):
-        pass
-
-    def __call__(self, ids):
-        # Not used by rank-by-loglik; kept only for shape parity.
-        raise NotImplementedError
 
 
 def test_eval_result_dataclass():
@@ -62,83 +32,73 @@ def test_eval_result_dataclass():
 
 def test_task_registry_has_five_tasks():
     expected = {"hellaswag", "arc_easy", "arc_challenge", "piqa", "winogrande"}
-    assert expected.issubset(set(TASK_REGISTRY.keys()))
-    for spec in TASK_REGISTRY.values():
-        assert spec.name in TASK_REGISTRY
-        assert spec.max_examples is None or spec.max_examples > 0
+    assert set(TASK_REGISTRY) == expected
+    for name, spec in TASK_REGISTRY.items():
+        assert spec.name == name
+        assert spec.max_examples is None
 
 
-def test_evaluate_all_smoke_with_fake_examples(monkeypatch):
-    """Make each loader return 2 trivial examples; rank-by-loglik
-    should produce a finite accuracy number without touching network."""
-    import torch
+def two_examples(seed: int = 0):
+    yield {"context": "ab", "choices": ["cd", "ef"], "label": 0}
+    yield {"context": "gh", "choices": ["ij", "kl"], "label": 1}
 
-    from ucsa.training import eval_harness
 
-    def fake_loader(seed: int = 0):
-        yield {"context": "x", "choices": ["a", "b"], "label": 0}
-        yield {"context": "x", "choices": ["a", "b"], "label": 0}
-
-    class FakeModel:
-        """Constant-logits model: returns a (1, S, V) tensor with
-        uniform logits so all choices score equally."""
-
-        def eval(self):
-            pass
-
-        def train(self):
-            pass
-
-        def __call__(self, ids):
-            # (B, S, V) zeros — all choices equally likely
-            return torch.zeros(
-                ids.shape[0],
-                ids.shape[1],
-                256,
-                dtype=torch.float32,
-            )
-
-    # Replace each loader with our trivial one.
-    saved = {n: s.loader for n, s in eval_harness.TASK_REGISTRY.items()}
-    for n in eval_harness.TASK_REGISTRY:
-        eval_harness.TASK_REGISTRY[n] = eval_harness.TaskSpec(
-            name=n, loader=fake_loader, max_examples=2
+@pytest.fixture
+def offline_tasks(monkeypatch):
+    for name in TASK_REGISTRY:
+        monkeypatch.setitem(
+            TASK_REGISTRY,
+            name,
+            eval_harness.TaskSpec(name=name, loader=two_examples),
         )
-    try:
-        results = evaluate_all(
-            None,
-            model=FakeModel(),
-            tokenizer=DummyTokenizer(),
-            device=None,
+
+
+def test_every_task_runs_end_to_end_on_a_real_model(offline_tasks):
+    results = evaluate_all(None, tiny_model(), Tokenizer(), torch.device("cpu"))
+    assert len(results) == 5
+    for r in results:
+        assert r.n == 2
+        assert 0.0 <= r.accuracy <= 1.0
+        assert math.isfinite(r.log_likelihood_mean)
+        assert r.log_likelihood_mean < 0.0
+        assert r.extras["seed"] == eval_harness.DEFAULT_EVAL_SEED
+        assert 0.0 <= r.extras["stderr"] <= 0.5
+
+
+def test_a_cap_limits_examples_without_touching_the_registry(offline_tasks):
+    results = evaluate_all(
+        ["piqa"], tiny_model(), Tokenizer(), torch.device("cpu"), max_examples=1
+    )
+    assert results[0].n == 1
+    assert results[0].extras["max_examples"] == 1
+    assert TASK_REGISTRY["piqa"].max_examples is None
+
+
+def test_evaluation_leaves_the_model_in_training_mode(offline_tasks):
+    model = tiny_model().eval()
+    evaluate_all(["piqa"], model, Tokenizer(), torch.device("cpu"))
+    assert model.training
+
+
+def test_a_task_with_no_examples_reports_zero_not_a_crash():
+    spec = eval_harness.TaskSpec(
+        name="hellaswag", loader=lambda seed=0: iter([])
+    )
+    r = evaluate_task(spec, tiny_model(), Tokenizer(), torch.device("cpu"))
+    assert (r.n, r.accuracy, r.log_likelihood_mean) == (0, 0.0, 0.0)
+
+
+def test_the_headline_metric_follows_the_task(offline_tasks):
+    results = {
+        r.name: r
+        for r in evaluate_all(
+            None, tiny_model(), Tokenizer(), torch.device("cpu")
         )
-        assert len(results) == 5
-        for r in results:
-            assert r.n == 2
-            assert 0.0 <= r.accuracy <= 1.0
-            # Log-likelihood is finite (uniform = -log(V) per token).
-            assert -100.0 < r.log_likelihood_mean < 0.0
-            # Seed is recorded for downstream paper-writing tools.
-            assert r.extras["seed"] == eval_harness.DEFAULT_EVAL_SEED
-    finally:
-        for n, s in saved.items():
-            eval_harness.TASK_REGISTRY[n] = eval_harness.TaskSpec(
-                name=n,
-                loader=s,
-                max_examples=eval_harness.TASK_REGISTRY[n].max_examples,
-            )
-
-
-def test_evaluate_task_returns_finite_accuracy_when_loader_is_empty():
-    spec = TASK_REGISTRY["hellaswag"]
-    saved_loader = spec.loader
-    spec.loader = lambda seed=0: iter([])
-    try:
-        r = evaluate_task(spec, ConstantLogitsModel(), DummyTokenizer(), None)
-        assert r.n == 0
-        assert r.accuracy == 0.0
-        assert r.log_likelihood_mean == 0.0
-    finally:
-        spec.loader = saved_loader
+    }
+    assert (
+        results["hellaswag"].accuracy == results["hellaswag"].extras["acc_norm"]
+    )
+    assert results["piqa"].accuracy == results["piqa"].extras["acc"]
 
 
 class TestWinograndeLoader:
