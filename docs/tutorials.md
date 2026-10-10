@@ -120,7 +120,6 @@ def main() -> None:
             learning_rate=3e-4,
             max_steps=200,
             warmup_steps=20,
-            amp_dtype=torch.float32,
         ),
         curriculum=Curriculum(
             curriculum.Schedule(
