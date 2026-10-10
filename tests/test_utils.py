@@ -10,8 +10,8 @@ import pytest
 import torch
 from torch import nn
 
+from ucsa.utils import checkpoint
 from ucsa.utils.checkpoint import (
-    CheckpointMetadata,
     adapt_legacy_state_dict,
     load_checkpoint,
     load_state_dict_compat,
@@ -105,7 +105,7 @@ class TestCheckpoint:
         """Metadata round-trips through the sidecar JSON."""
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "ckpt.safetensors")
-            meta = CheckpointMetadata(
+            meta = checkpoint.Metadata(
                 step=100,
                 epoch=2,
                 config={"hidden_size": 8},
@@ -138,7 +138,7 @@ class TestCheckpoint:
     def test_no_metadata_file_returns_default(
         self, tiny_model: nn.Module
     ) -> None:
-        """Missing metadata file returns an empty :class:`CheckpointMetadata`."""
+        """Missing metadata file returns an empty :class:`checkpoint.Metadata`."""
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "ckpt.safetensors")
             save_checkpoint(tiny_model, path)
@@ -151,7 +151,7 @@ class TestCheckpoint:
         """The save call writes a ``.meta.json`` file when metadata exists."""
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "ckpt.safetensors")
-            save_checkpoint(tiny_model, path, CheckpointMetadata(step=1))
+            save_checkpoint(tiny_model, path, checkpoint.Metadata(step=1))
             meta_path = path + ".meta.json"
             assert os.path.exists(meta_path)
             with open(meta_path, encoding="utf-8") as fp:
@@ -165,14 +165,11 @@ class TestLegacyStateDictAdapter:
     @pytest.fixture
     def operator(self):
         """Provide an operator whose bank-id embedding covers every bank."""
-        from ucsa.models.transformer_operator import (
-            TransformerOperator,
-            TransformerOperatorConfig,
-        )
+        from ucsa.models import transformer
 
         torch.manual_seed(0)
-        return TransformerOperator(
-            TransformerOperatorConfig(
+        return transformer.Operator(
+            transformer.Config(
                 hidden_size=32,
                 num_layers=2,
                 num_q_heads=4,
@@ -233,10 +230,13 @@ class TestLegacyStateDictAdapter:
 
     def test_legacy_checkpoint_loads_into_new_bank_layout(self) -> None:
         """A UCSA saved before the intent bank still loads."""
-        from ucsa.models.ucsa import UCSA, UCSAConfig
+        from ucsa.models import architecture
+        from ucsa.models.architecture import UCSA
 
         torch.manual_seed(0)
-        model = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
+        model = UCSA(
+            architecture.Config(hidden_size=32, vocab_size=100, num_layers=2)
+        )
         full = model.state_dict()
         legacy = {
             name: tensor.clone()
@@ -246,7 +246,9 @@ class TestLegacyStateDictAdapter:
         for name in list(legacy):
             if name.endswith("bank_id_embedding.weight"):
                 legacy[name] = legacy[name][:-1].clone()
-        fresh = UCSA(UCSAConfig(hidden_size=32, vocab_size=100, num_layers=2))
+        fresh = UCSA(
+            architecture.Config(hidden_size=32, vocab_size=100, num_layers=2)
+        )
         intent_before = fresh.pcs.get_bank("intent").detach().clone()
         notes = load_state_dict_compat(fresh, legacy, strict=False)
         assert notes
