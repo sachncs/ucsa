@@ -60,7 +60,12 @@ class RecurrentConfig:
         backpropagation through time). 0 backpropagates through the whole
         sequence.
       use_state: False resets the state every chunk (the chunk-local control).
-      jepa_weight: Weight of the causal JEPA loss. 0 disables it.
+      slot_dropout: Probability, per training step, of reading only a random
+      prefix of the state slots (elastic state). Slots are then ordered by
+      importance, so memory can be shrunk at inference with graceful
+      degradation. 0 disables it.
+    min_slots: Smallest prefix sampled by `slot_dropout`.
+    jepa_weight: Weight of the causal JEPA loss. 0 disables it.
       ema_momentum: Momentum of the JEPA target encoder.
       loss_chunk: Tokens per slice of the checkpointed LM-head loss, so the
         full `(tokens, vocab)` logits are never held in memory. 0 computes the
@@ -90,6 +95,8 @@ class RecurrentConfig:
     write_top_k: int = 0
     bptt_chunks: int = 0
     use_state: bool = True
+    slot_dropout: float = 0.0
+    min_slots: int = 4
     jepa_weight: float = 0.1
     ema_momentum: float = 0.996
     loss_chunk: int = 1024
@@ -130,6 +137,11 @@ class RecurrentConfig:
                 f"write_top_k must be in [0, {self.num_slots}]",
             ),
             (self.bptt_chunks >= 0, "bptt_chunks must be >= 0"),
+            (0.0 <= self.slot_dropout <= 1.0, "slot_dropout must be in [0, 1]"),
+            (
+                1 <= self.min_slots <= self.num_slots,
+                f"min_slots must be in [1, {self.num_slots}]",
+            ),
             (self.jepa_weight >= 0.0, "jepa_weight must be >= 0"),
             (0.0 < self.ema_momentum < 1.0, "ema_momentum must be in (0, 1)"),
             (self.loss_chunk >= 0, "loss_chunk must be >= 0"),
@@ -514,13 +526,19 @@ class RecurrentUCSA(nn.Module):
         return torch.stack(reads, 1), state, torch.stack(writes, 1)
 
     def hidden_states(
-        self, ids: torch.Tensor, state: torch.Tensor | None = None
+        self,
+        ids: torch.Tensor,
+        state: torch.Tensor | None = None,
+        active_slots: int | None = None,
     ) -> dict[str, Any]:
         """Computes final hidden states for every position.
 
         Args:
           ids: Token ids of shape `(batch, seq)`.
           state: Optional starting state of shape `(batch, slots, dim)`.
+          active_slots: Read only the first `active_slots` state slots. None
+            reads all of them (or a random prefix while training with
+            `slot_dropout`).
 
         Returns:
           A dict with `hidden` `(batch, seq, dim)`, the final `state`, the JEPA
@@ -544,6 +562,7 @@ class RecurrentUCSA(nn.Module):
             summaries = self.__encode(x).view(batch, chunks, size, -1)
             reads, final, writes = self.__scan(start, summaries)
             read = reads.reshape(batch * chunks, *reads.shape[2:])
+            read = read[:, : self.__slots_to_read(active_slots)]
             if config.jepa_weight > 0 and chunks > 1:
                 preds = self.predictor(reads.mean(2))
                 with torch.no_grad():
@@ -563,19 +582,33 @@ class RecurrentUCSA(nn.Module):
             "write": writes,
         }
 
+    def __slots_to_read(self, active_slots: int | None) -> int:
+        """Returns how many leading state slots the decoder reads."""
+        total = self.config.num_slots
+        if active_slots is not None:
+            return max(1, min(active_slots, total))
+        config = self.config
+        if self.training and torch.rand(()).item() < config.slot_dropout:
+            return int(torch.randint(config.min_slots, total + 1, ()).item())
+        return total
+
     def forward(
-        self, ids: torch.Tensor, state: torch.Tensor | None = None
+        self,
+        ids: torch.Tensor,
+        state: torch.Tensor | None = None,
+        active_slots: int | None = None,
     ) -> dict[str, Any]:
         """Computes logits for every position.
 
         Args:
           ids: Token ids of shape `(batch, seq)`.
           state: Optional starting state.
+          active_slots: Read only this many leading state slots.
 
         Returns:
           The `hidden_states` dict plus `logits` of shape `(batch, seq, vocab)`.
         """
-        out = self.hidden_states(ids, state)
+        out = self.hidden_states(ids, state, active_slots)
         out["logits"] = out["hidden"] @ self.embed.weight.T
         return out
 
