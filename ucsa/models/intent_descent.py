@@ -369,7 +369,7 @@ def critic_objective(
     return logit
 
 
-def _resolved_objective(model: UCSA, requested: str) -> str:
+def resolved_objective(model: UCSA, requested: str) -> str:
     """Pick the actual objective to descend on.
 
     Args:
@@ -453,7 +453,7 @@ def optimize_intent(
         raise ValueError(
             f"objective must be 'auto', 'jepa' or 'critic', got {objective!r}."
         )
-    objective_mode = _resolved_objective(model, objective)
+    objective_mode = resolved_objective(model, objective)
     bank = model.pcs.get_bank(INTENT_BANK)
     original = bank.detach().clone()
     frozen = [
