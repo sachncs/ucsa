@@ -18,7 +18,7 @@ const TERMINAL_LINES: Line[] = [
   { tone: 'cmd', text: '.venv/bin/python scripts/train.py \\' },
   { tone: 'accent', text: '    --max-steps 5 \\' },
   { tone: 'accent', text: '    --ckpt-every 0 --eval-every 0 \\' },
-  { tone: 'accent', text: '    --skip-baselines --seed 42' },
+  { tone: 'accent', text: '    --seed 42' },
   { tone: 'blank', text: '' },
   { tone: 'output', text: '  UCSA-small params: 63,000,000' },
   { tone: 'output', text: '  Device: mps' },
