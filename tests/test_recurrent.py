@@ -134,3 +134,45 @@ def test_config_for_params_hits_target():
     cfg = config_for_params(63_000_000)
     n = count_parameters(RecurrentUCSA(cfg))
     assert abs(n - 63_000_000) / 63_000_000 < 0.15
+
+
+def test_active_slots_changes_reads_and_full_slots_matches_default():
+    m = make()
+    x = torch.randint(0, 64, (1, 24))
+    full = m(x)["logits"]
+    assert torch.allclose(m(x, active_slots=6)["logits"], full, atol=1e-6)
+    assert not torch.allclose(m(x, active_slots=2)["logits"], full, atol=1e-6)
+
+
+def test_slot_dropout_reads_random_prefixes_only_while_training():
+    m = make(slot_dropout=1.0, min_slots=2).train()
+    seen = []
+    hook = m.blocks[0].read.register_forward_hook(
+        lambda mod, args, out: seen.append(args[1].shape[1])
+    )
+    x = torch.randint(0, 64, (1, 24))
+    for _ in range(40):
+        m.hidden_states(x)
+    assert set(seen) <= set(range(2, 7))
+    assert len(set(seen)) > 1  # genuinely random, not a constant
+    seen.clear()
+    m.eval()
+    m.hidden_states(x)
+    assert set(seen) == {6}  # all slots at evaluation time
+    hook.remove()
+
+
+def test_truncated_reads_stay_causal():
+    m = make().eval()
+    x = torch.randint(0, 64, (1, 24))
+    y = x.clone()
+    y[0, 20] = (y[0, 20] + 1) % 64
+    diff = m(y, active_slots=3)["logits"] - m(x, active_slots=3)["logits"]
+    assert diff.abs().amax(-1)[0, :20].max().item() < 1e-5
+
+
+def test_slot_dropout_config_is_validated():
+    with pytest.raises(ValueError):
+        tiny(slot_dropout=1.5)
+    with pytest.raises(ValueError):
+        tiny(min_slots=99)
